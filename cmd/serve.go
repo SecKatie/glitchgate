@@ -101,7 +101,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// Web UI.
 	sessions := auth.NewSessionStore(24 * time.Hour)
 	tmpl := web.ParseTemplates()
-	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, tmpl)
+	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl)
 	costHandlers := web.NewCostHandlers(st, tmpl)
 
 	// Serve embedded static assets (no session required).

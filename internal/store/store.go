@@ -22,6 +22,10 @@ type Store interface {
 	GetCostSummary(ctx context.Context, params CostParams) (*CostSummary, error)
 	GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error)
 	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
+	// CountLogsSince returns the number of request log entries created after the
+	// entry with the given ID that also match the active filter in params.
+	// Returns 0 if sinceID is empty or not found.
+	CountLogsSince(ctx context.Context, sinceID string, params ListLogsParams) (int64, error)
 	Migrate(ctx context.Context) error
 	Close() error
 }

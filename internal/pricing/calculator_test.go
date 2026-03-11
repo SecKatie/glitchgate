@@ -1,6 +1,7 @@
 package pricing_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -60,7 +61,13 @@ func TestCalculate(t *testing.T) {
 }
 
 func TestDefaultPricingHasCacheRates(t *testing.T) {
+	// Only Anthropic models support explicit per-token cache pricing.
+	// OpenAI and Google models have automatic/storage-based caching where
+	// CacheWritePerMillion is intentionally 0.
 	for model, entry := range pricing.DefaultPricing {
+		if !strings.HasPrefix(model, "claude-") {
+			continue
+		}
 		t.Run(model, func(t *testing.T) {
 			require.Greater(t, entry.CacheWritePerMillion, 0.0, "CacheWritePerMillion should be non-zero")
 			require.Greater(t, entry.CacheReadPerMillion, 0.0, "CacheReadPerMillion should be non-zero")

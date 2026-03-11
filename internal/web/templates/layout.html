@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="auto">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{block "title" .}}llm-proxy{{end}}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+    <script src="/ui/static/htmx.min.js"></script>
     <style>
         :root {
             --pico-font-size: 15px;
@@ -77,6 +77,155 @@
             background: var(--pico-primary-background);
             color: var(--pico-primary-inverse);
         }
+        /* Active navigation */
+        .nav-active {
+            font-weight: 700;
+            text-decoration: underline;
+        }
+        /* Auto-refresh status indicator */
+        .refresh-status {
+            color: var(--pico-muted-color);
+            font-size: 0.8em;
+        }
+        .refresh-stale {
+            color: var(--pico-form-element-warning-border-color, #f59e0b);
+        }
+        /* New-entries banner */
+        .new-entries-banner {
+            background: var(--pico-primary-background);
+            color: var(--pico-primary-inverse);
+            padding: 0.5rem 1rem;
+            border-radius: var(--pico-border-radius);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        /* Conversation viewer */
+        .conv-turn {
+            padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+            margin-bottom: 0.5rem;
+            border-left: 3px solid var(--pico-muted-border-color);
+        }
+        .conv-turn[data-role="user"]      { border-left-color: var(--pico-primary); }
+        .conv-turn[data-role="assistant"] { border-left-color: var(--pico-color); }
+        .conv-role {
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--pico-muted-color);
+            margin-bottom: 0.25rem;
+        }
+        .conv-block {
+            margin-bottom: 0.5rem;
+        }
+        .conv-block p {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .text-expand-link {
+            display: block;
+            font-size: 0.78em;
+            margin-top: 0.2rem;
+        }
+        .conv-tool {
+            background: var(--pico-card-background-color);
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9em;
+        }
+        .conv-tool pre {
+            max-height: 300px;
+            overflow: auto;
+            font-size: 0.85em;
+            margin: 0.25rem 0 0;
+        }
+        /* Tool argument key/value table */
+        .tool-args {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.4rem 0 0.25rem;
+            font-size: 0.85em;
+        }
+        .tool-args td {
+            padding: 0.2rem 0.4rem;
+            vertical-align: top;
+        }
+        .tool-args td:first-child {
+            width: 1%;
+            white-space: nowrap;
+            color: var(--pico-muted-color);
+            padding-right: 0.75rem;
+        }
+        .tool-args td:last-child {
+            word-break: break-word;
+        }
+        .tool-args tr:nth-child(odd) {
+            background: var(--pico-card-sectioning-background-color);
+        }
+        .trunc-hint {
+            font-size: 0.8em;
+            color: var(--pico-muted-color);
+            font-style: italic;
+        }
+        .tool-full-summary {
+            font-size: 0.8em;
+            color: var(--pico-primary);
+            cursor: pointer;
+        }
+        /* Cost headline */
+        .cost-headline {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .cost-headline-item {
+            text-align: center;
+        }
+        .cost-headline-value {
+            font-size: 1.5em;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+        .cost-headline-label {
+            font-size: 0.75em;
+            color: var(--pico-muted-color);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        /* Token detail table */
+        .token-detail {
+            font-size: 0.9em;
+        }
+        /* Token details summary — makes the disclosure triangle visually obvious */
+        .token-details-summary {
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.25rem 0.6rem;
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+            background: var(--pico-card-sectioning-background-color);
+            font-size: 0.9em;
+            user-select: none;
+            list-style: none;
+        }
+        .token-details-summary:hover {
+            border-color: var(--pico-primary);
+            color: var(--pico-primary);
+        }
+        /* Copy button */
+        .copy-btn {
+            padding: 0.1rem 0.4rem;
+            font-size: 0.85em;
+            margin-left: 0.25rem;
+            vertical-align: middle;
+        }
     </style>
     {{block "head" .}}{{end}}
 </head>
@@ -87,8 +236,8 @@
                 <li><strong>llm-proxy</strong></li>
             </ul>
             <ul>
-                <li><a href="/ui/logs">Logs</a></li>
-                <li><a href="/ui/costs">Costs</a></li>
+                <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page" class="nav-active"{{end}}>Logs</a></li>
+                <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page" class="nav-active"{{end}}>Costs</a></li>
                 <li>
                     <form method="post" action="/ui/api/logout" style="margin:0">
                         <button type="submit" class="outline secondary" style="padding:0.25rem 0.75rem;margin:0">Logout</button>
@@ -99,5 +248,84 @@
 
         {{block "content" .}}{{end}}
     </main>
+
+    <script>
+    // ---------------------------------------------------------------------------
+    // Auto-refresh helpers (used by logs.html HTMX polling)
+    // ---------------------------------------------------------------------------
+    var lastRefresh = null;
+
+    function updateRefreshStatus(evt) {
+        if (evt.detail.successful) {
+            lastRefresh = new Date();
+            var el = document.getElementById('refresh-status');
+            if (el) {
+                el.textContent = 'Updated just now';
+                el.className = 'refresh-status';
+            }
+            var newCount = evt.detail.xhr ? evt.detail.xhr.getResponseHeader('X-New-Count') : null;
+            if (newCount && parseInt(newCount) > 0) {
+                showNewEntriesBanner(parseInt(newCount));
+            }
+        } else {
+            markRefreshFailed();
+        }
+    }
+
+    function markRefreshFailed() {
+        var el = document.getElementById('refresh-status');
+        if (el) {
+            el.textContent = 'Refresh failed';
+            el.className = 'refresh-status refresh-stale';
+        }
+    }
+
+    function showNewEntriesBanner(count) {
+        var banner = document.getElementById('new-entries-banner');
+        var countEl = document.getElementById('new-entries-count');
+        if (banner && countEl) {
+            countEl.textContent = count;
+            banner.style.display = '';
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Expand/collapse truncated conversation text
+    // ---------------------------------------------------------------------------
+    function expandConvText(link) {
+        var block = link.parentElement;
+        var short = block.querySelector('.conv-text-short');
+        var full  = block.querySelector('.conv-text-full');
+        if (!full) return false;
+        var expanding = full.hidden;
+        full.hidden   = !expanding;
+        if (short) short.hidden = expanding;
+        link.textContent = expanding ? 'show less' : 'show full text';
+        return false;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Clipboard copy helper (used by log_detail.html copy buttons)
+    // ---------------------------------------------------------------------------
+    function copyText(btn, text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(function() {
+                btn.textContent = '✓';
+                setTimeout(function() { btn.textContent = '⎘'; }, 1500);
+            });
+        } else {
+            var el = document.createElement('textarea');
+            el.value = text;
+            el.style.position = 'fixed';
+            el.style.opacity = '0';
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy'); // eslint-disable-line
+            document.body.removeChild(el);
+            btn.textContent = '✓';
+            setTimeout(function() { btn.textContent = '⎘'; }, 1500);
+        }
+    }
+    </script>
 </body>
 </html>

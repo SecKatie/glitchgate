@@ -368,6 +368,53 @@ func (s *SQLiteStore) GetRequestLog(ctx context.Context, id string) (*RequestLog
 	return &d, nil
 }
 
+// CountLogsSince returns the number of request log entries created after the
+// entry with the given ID that also match the active filter in params.
+// Returns 0 if sinceID is empty or not found.
+func (s *SQLiteStore) CountLogsSince(ctx context.Context, sinceID string, params ListLogsParams) (int64, error) {
+	if sinceID == "" {
+		return 0, nil
+	}
+
+	var where []string
+	var args []any
+
+	// The timestamp of the anchor entry (subquery).
+	where = append(where, "rl.timestamp > (SELECT timestamp FROM request_logs WHERE id = ?)")
+	args = append(args, sinceID)
+
+	if params.Model != "" {
+		where = append(where, "rl.model_requested = ?")
+		args = append(args, params.Model)
+	}
+	if params.Status != 0 {
+		where = append(where, "rl.status = ?")
+		args = append(args, params.Status)
+	}
+	if params.KeyPrefix != "" {
+		where = append(where, "pk.key_prefix = ?")
+		args = append(args, params.KeyPrefix)
+	}
+	if params.From != "" {
+		where = append(where, "rl.timestamp >= ?")
+		args = append(args, params.From)
+	}
+	if params.To != "" {
+		where = append(where, "rl.timestamp <= ?")
+		args = append(args, params.To)
+	}
+
+	whereClause := "WHERE " + strings.Join(where, " AND ")
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM request_logs rl JOIN proxy_keys pk ON pk.id = rl.proxy_key_id %s`, whereClause) // #nosec G201 -- whereClause built from constant strings only; values bound via args
+
+	var count int64
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count logs since: %w", err)
+	}
+
+	return count, nil
+}
+
 // --------------------------------------------------------------------------
 // Cost operations
 // --------------------------------------------------------------------------

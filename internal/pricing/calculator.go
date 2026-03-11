@@ -22,6 +22,13 @@ func NewCalculator(entries map[string]Entry) *Calculator {
 	return &Calculator{entries: entries}
 }
 
+// Lookup returns the pricing Entry for the given upstream model name.
+// The second return value is false when the model is not in the pricing table.
+func (c *Calculator) Lookup(upstreamModel string) (Entry, bool) {
+	entry, ok := c.entries[upstreamModel]
+	return entry, ok
+}
+
 // Calculate returns the estimated cost for a request given the upstream
 // model name and token counts.  If the model is not in the pricing table
 // the return value is nil (unknown pricing).

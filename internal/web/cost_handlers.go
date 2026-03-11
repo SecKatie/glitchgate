@@ -332,6 +332,7 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	data := map[string]any{
+		"ActiveTab":        "costs",
 		"Title":            "Cost Dashboard",
 		"Summary":          summary,
 		"Breakdown":        breakdown,

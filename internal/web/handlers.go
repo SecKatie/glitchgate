@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"codeberg.org/kglitchy/llm-proxy/internal/auth"
+	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
 	"codeberg.org/kglitchy/llm-proxy/internal/store"
 )
 
@@ -49,15 +50,17 @@ type Handlers struct {
 	sessions  *auth.SessionStore
 	masterKey string
 	templates *TemplateSet
+	calc      *pricing.Calculator
 }
 
 // NewHandlers creates web UI handlers.
-func NewHandlers(s store.Store, sessions *auth.SessionStore, masterKey string, tmpl *TemplateSet) *Handlers {
+func NewHandlers(s store.Store, sessions *auth.SessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet) *Handlers {
 	return &Handlers{
 		store:     s,
 		sessions:  sessions,
 		masterKey: masterKey,
 		templates: tmpl,
+		calc:      calc,
 	}
 }
 
@@ -91,6 +94,12 @@ func templateFuncs() template.FuncMap {
 				total += v
 			}
 			return total
+		},
+		"wrapTurn": func(t *ConvTurn) []ConvTurn {
+			if t == nil {
+				return nil
+			}
+			return []ConvTurn{*t}
 		},
 		"barPct": func(value, total float64) float64 {
 			if total <= 0 {
@@ -266,12 +275,18 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 		totalPages = 1
 	}
 
+	firstID := ""
+	if len(logs) > 0 {
+		firstID = logs[0].ID
+	}
+
 	data := map[string]any{
 		"ActiveTab":    "logs",
 		"Logs":         logs,
 		"Page":         params.Page,
 		"TotalPages":   totalPages,
 		"Total":        total,
+		"FirstID":      firstID,
 		"Model":        params.Model,
 		"StatusFilter": strconv.Itoa(params.Status),
 		"KeyPrefix":    params.KeyPrefix,
@@ -305,6 +320,17 @@ func (h *Handlers) LogsAPIHandler(w http.ResponseWriter, r *http.Request) {
 		totalPages := int(total / totalInt)
 		if total%totalInt > 0 {
 			totalPages++
+		}
+
+		// If since_id is provided and we're on page > 1, count new entries.
+		sinceID := r.URL.Query().Get("since_id")
+		if sinceID != "" && params.Page > 1 {
+			count, err := h.store.CountLogsSince(r.Context(), sinceID, params)
+			if err != nil {
+				log.Printf("WARNING: count logs since <id>: %v", err) //nolint:gosec // G706: sinceID not included in log output
+			} else {
+				w.Header().Set("X-New-Count", strconv.FormatInt(count, 10))
+			}
 		}
 
 		data := map[string]any{
@@ -344,9 +370,14 @@ func (h *Handlers) LogDetailPage(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	data := map[string]any{
-		"ActiveTab": "logs",
-		"Log":       logEntry,
+	conv := parseConversation(logEntry.RequestBody, logEntry.ResponseBody)
+	costBreakdown := computeCostBreakdown(logEntry, h.calc)
+
+	data := LogDetailData{
+		ActiveTab:    "logs",
+		Log:          logEntry,
+		Conversation: conv,
+		Cost:         costBreakdown,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

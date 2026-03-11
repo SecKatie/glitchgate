@@ -5,7 +5,7 @@
 {{define "content"}}
 <h3>Request Logs</h3>
 
-<form class="filter-bar" hx-get="/ui/api/logs" hx-target="#log-table-body" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
+<form id="filter-form" class="filter-bar" hx-get="/ui/api/logs" hx-target="#log-table-body" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
     <div>
         <label for="model">Model</label>
         <input type="text" id="model" name="model" placeholder="All models" value="{{.Model}}">
@@ -39,6 +39,21 @@
     </div>
 </form>
 
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+    <small>{{.Total}} entries</small>
+    <span style="display:flex;align-items:center;gap:0.75rem;">
+        <small id="refresh-status" class="refresh-status">Auto-refreshing</small>
+        <button id="refresh-toggle" class="outline secondary" style="padding:0.1rem 0.5rem;font-size:0.8em;margin:0"
+            onclick="toggleRefresh(this)">Pause</button>
+    </span>
+</div>
+
+<div id="new-entries-banner" style="display:none" role="alert" class="new-entries-banner">
+    <span><strong><span id="new-entries-count"></span> new entries</strong> — <a href="/ui/logs">view latest</a></span>
+    <button class="outline secondary" style="padding:0.1rem 0.4rem;font-size:0.8em;margin:0"
+        onclick="document.getElementById('new-entries-banner').style.display='none'">×</button>
+</div>
+
 <figure>
 <table role="grid">
     <thead>
@@ -54,7 +69,14 @@
             <th></th>
         </tr>
     </thead>
-    <tbody id="log-table-body">
+    <tbody id="log-table-body"
+        hx-get="/ui/api/logs"
+        hx-trigger="every 10s"
+        hx-include="#filter-form"
+        hx-swap="innerHTML"
+        hx-vals='{"page": "{{.Page}}"{{if gt .Page 1}}, "since_id": "{{.FirstID}}"{{end}}}'
+        hx-on:htmx:after-request="updateRefreshStatus(event)"
+        hx-on:htmx:response-error="markRefreshFailed()">
         {{template "log_rows" .}}
     </tbody>
 </table>
@@ -69,4 +91,27 @@
     </ul>
 </nav>
 {{end}}
+
+<script>
+var refreshPaused = false;
+function toggleRefresh(btn) {
+    var tbody = document.getElementById('log-table-body');
+    if (!tbody) return;
+    if (refreshPaused) {
+        tbody.setAttribute('hx-trigger', 'every 10s');
+        htmx.process(tbody);
+        btn.textContent = 'Pause';
+        refreshPaused = false;
+        var el = document.getElementById('refresh-status');
+        if (el) { el.textContent = 'Auto-refreshing'; el.className = 'refresh-status'; }
+    } else {
+        tbody.removeAttribute('hx-trigger');
+        htmx.process(tbody);
+        btn.textContent = 'Resume';
+        refreshPaused = true;
+        var el = document.getElementById('refresh-status');
+        if (el) { el.textContent = 'Paused'; el.className = 'refresh-status'; }
+    }
+}
+</script>
 {{end}}
