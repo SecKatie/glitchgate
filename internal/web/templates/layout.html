@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{block "title" .}}llm-proxy{{end}}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --pico-font-size: 15px;
+        }
+        nav {
+            margin-bottom: 1rem;
+        }
+        .status-ok {
+            color: var(--pico-ins-color);
+        }
+        .status-err {
+            color: var(--pico-del-color);
+        }
+        .mono {
+            font-family: var(--pico-font-family-monospace);
+            font-size: 0.85em;
+        }
+        table {
+            font-size: 0.9em;
+        }
+        .cost {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .filter-bar {
+            display: flex;
+            gap: 0.5rem;
+            align-items: end;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .filter-bar label {
+            margin-bottom: 0;
+        }
+        .filter-bar select,
+        .filter-bar input {
+            margin-bottom: 0;
+            padding: 0.25rem 0.5rem;
+            height: 2.5rem;
+        }
+        .pagination {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+        pre.body-preview {
+            max-height: 400px;
+            overflow: auto;
+            font-size: 0.8em;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .htmx-indicator {
+            display: none;
+        }
+        .htmx-request .htmx-indicator {
+            display: inline;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.15em 0.5em;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .badge-stream {
+            background: var(--pico-primary-background);
+            color: var(--pico-primary-inverse);
+        }
+    </style>
+    {{block "head" .}}{{end}}
+</head>
+<body>
+    <main class="container">
+        <nav>
+            <ul>
+                <li><strong>llm-proxy</strong></li>
+            </ul>
+            <ul>
+                <li><a href="/ui/logs">Logs</a></li>
+                <li><a href="/ui/costs">Costs</a></li>
+                <li>
+                    <form method="post" action="/ui/api/logout" style="margin:0">
+                        <button type="submit" class="outline secondary" style="padding:0.25rem 0.75rem;margin:0">Logout</button>
+                    </form>
+                </li>
+            </ul>
+        </nav>
+
+        {{block "content" .}}{{end}}
+    </main>
+</body>
+</html>

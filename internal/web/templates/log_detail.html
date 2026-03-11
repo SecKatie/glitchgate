@@ -1,0 +1,49 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Log Detail - llm-proxy{{end}}
+
+{{define "content"}}
+<hgroup>
+    <h3>Request Log Detail</h3>
+    <p><a href="/ui/logs">&laquo; Back to logs</a></p>
+</hgroup>
+
+<article>
+    <div class="grid">
+        <div>
+            <strong>ID:</strong> <code>{{.Log.ID}}</code><br>
+            <strong>Time:</strong> {{.Log.Timestamp.Format "2006-01-02 15:04:05 UTC"}}<br>
+            <strong>Format:</strong> {{.Log.SourceFormat}}<br>
+            <strong>Provider:</strong> {{.Log.ProviderName}}<br>
+            <strong>Proxy Key:</strong> <code>{{.Log.ProxyKeyPrefix}}</code> ({{.Log.ProxyKeyLabel}})<br>
+        </div>
+        <div>
+            <strong>Model (requested):</strong> {{.Log.ModelRequested}}<br>
+            <strong>Model (upstream):</strong> {{.Log.ModelUpstream}}<br>
+            <strong>Status:</strong> <span class="{{if lt .Log.Status 400}}status-ok{{else}}status-err{{end}}">{{.Log.Status}}</span><br>
+            <strong>Streaming:</strong> {{if .Log.IsStreaming}}Yes{{else}}No{{end}}<br>
+        </div>
+        <div>
+            <strong>Input Tokens:</strong> {{.Log.InputTokens}}<br>
+            <strong>Cache Write Tokens:</strong> {{.Log.CacheCreationInputTokens}}<br>
+            <strong>Cache Read Tokens:</strong> {{.Log.CacheReadInputTokens}}<br>
+            <strong>Total In Tokens:</strong> {{sumTokens .Log.InputTokens .Log.CacheCreationInputTokens .Log.CacheReadInputTokens}}<br>
+            <strong>Output Tokens:</strong> {{.Log.OutputTokens}}<br>
+            <strong>Latency:</strong> {{.Log.LatencyMs}}ms<br>
+            <strong>Cost:</strong> {{if .Log.EstimatedCostUSD}}${{printf "%.6f" (deref .Log.EstimatedCostUSD)}}{{else}}Unknown{{end}}<br>
+        </div>
+    </div>
+
+    {{if .Log.ErrorDetails}}<p style="color:var(--pico-del-color)"><strong>Error:</strong> {{deref .Log.ErrorDetails}}</p>{{end}}
+</article>
+
+<details open>
+    <summary><strong>Request Body</strong></summary>
+    <pre class="body-preview"><code>{{.Log.RequestBody}}</code></pre>
+</details>
+
+<details open>
+    <summary><strong>Response Body</strong></summary>
+    <pre class="body-preview"><code>{{.Log.ResponseBody}}</code></pre>
+</details>
+{{end}}

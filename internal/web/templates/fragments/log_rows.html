@@ -1,0 +1,17 @@
+{{define "log_rows"}}
+{{range .Logs}}
+<tr>
+    <td class="mono" style="font-size:0.8rem">{{.Timestamp.Format "Jan 02 15:04:05"}}</td>
+    <td>{{.ModelRequested}}{{if .IsStreaming}} <span class="badge badge-stream">SSE</span>{{end}}</td>
+    <td class="mono" style="font-size:0.8rem" title="{{.ProxyKeyLabel}}">{{.ProxyKeyPrefix}}</td>
+    <td><span class="{{if lt .Status 400}}status-ok{{else}}status-err{{end}}">{{.Status}}</span></td>
+    <td>{{sumTokens .InputTokens .CacheCreationInputTokens .CacheReadInputTokens}}</td>
+    <td>{{.OutputTokens}}</td>
+    <td>{{.LatencyMs}}ms</td>
+    <td class="cost">{{if .EstimatedCostUSD}}${{printf "%.4f" (deref .EstimatedCostUSD)}}{{else}}-{{end}}</td>
+    <td><a href="/ui/logs/{{.ID}}">View</a></td>
+</tr>
+{{else}}
+<tr><td colspan="9" style="text-align:center">No log entries found.</td></tr>
+{{end}}
+{{end}}

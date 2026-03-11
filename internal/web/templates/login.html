@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login - llm-proxy</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .login-card {
+            max-width: 400px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <main class="container login-card">
+        <article>
+            <header>
+                <h2>llm-proxy</h2>
+                <p>Sign in with your master key</p>
+            </header>
+            {{if .Error}}
+            <p role="alert" style="color: var(--pico-del-color);">{{.Error}}</p>
+            {{end}}
+            <form method="post" action="/ui/api/login">
+                <label for="master_key">Master Key</label>
+                <input type="password" id="master_key" name="master_key" placeholder="Enter master key" required autofocus>
+                <button type="submit">Login</button>
+            </form>
+        </article>
+    </main>
+</body>
+</html>

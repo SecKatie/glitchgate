@@ -1,0 +1,124 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Costs - llm-proxy{{end}}
+
+{{define "head"}}
+<style>
+    .summary-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .summary-card {
+        text-align: center;
+        padding: 1rem;
+    }
+    .summary-card .value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--pico-primary);
+        font-variant-numeric: tabular-nums;
+    }
+    .summary-card .label {
+        font-size: 0.8rem;
+        color: var(--pico-muted-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .bar-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 160px;
+        padding: 0 0 0.25rem 0;
+        border-bottom: 1px solid var(--pico-muted-border-color);
+        margin-bottom: 0.25rem;
+    }
+    .bar-chart .bar-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        height: 100%;
+        justify-content: flex-end;
+        min-width: 0;
+    }
+    .bar-chart .bar {
+        width: 80%;
+        max-width: 36px;
+        background: var(--pico-primary);
+        border-radius: 2px 2px 0 0;
+        min-height: 2px;
+        transition: opacity 0.15s;
+    }
+    .bar-chart .bar:hover {
+        opacity: 0.75;
+    }
+    .bar-chart .bar-val {
+        font-size: 0.55rem;
+        color: var(--pico-muted-color);
+        margin-bottom: 2px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+    .bar-labels {
+        display: flex;
+        gap: 2px;
+    }
+    .bar-labels .bar-date {
+        flex: 1;
+        text-align: center;
+        font-size: 0.55rem;
+        color: var(--pico-muted-color);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+    }
+    .breakdown-bar-cell {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .breakdown-bar {
+        height: 8px;
+        background: var(--pico-primary);
+        border-radius: 4px;
+        display: inline-block;
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<h2>Cost Dashboard</h2>
+
+<form class="filter-bar" hx-get="/ui/api/costs/fragment" hx-target="#cost-content" hx-swap="innerHTML">
+    <div>
+        <label for="from">From</label>
+        <input type="date" id="from" name="from" value="{{.From}}">
+    </div>
+    <div>
+        <label for="to">To</label>
+        <input type="date" id="to" name="to" value="{{.To}}">
+    </div>
+    <div>
+        <label for="group_by">Group By</label>
+        <select id="group_by" name="group_by">
+            <option value="model" {{if eq .GroupBy "model"}}selected{{end}}>Model</option>
+            <option value="key" {{if eq .GroupBy "key"}}selected{{end}}>API Key</option>
+        </select>
+    </div>
+    <div>
+        <label for="key">Key</label>
+        <input type="text" id="key" name="key" placeholder="Filter by prefix" value="{{.KeyFilter}}">
+    </div>
+    <div>
+        <button type="submit" style="margin-bottom:0">Update</button>
+    </div>
+</form>
+
+<div id="cost-content">
+{{template "cost_summary" .}}
+</div>
+{{end}}

@@ -1,0 +1,91 @@
+{{define "cost_summary"}}
+<!-- Summary cards -->
+<div class="summary-cards">
+    <article class="summary-card">
+        <div class="label">Total Cost</div>
+        <div class="value">${{printf "%.2f" .Summary.TotalCostUSD}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Total Requests</div>
+        <div class="value">{{.Summary.TotalRequests}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Input Tokens</div>
+        <div class="value">{{.Summary.TotalInputTokens}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Output Tokens</div>
+        <div class="value">{{.Summary.TotalOutputTokens}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Cache Write Tokens</div>
+        <div class="value">{{.Summary.TotalCacheCreationTokens}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Cache Read Tokens</div>
+        <div class="value">{{.Summary.TotalCacheReadTokens}}</div>
+    </article>
+</div>
+
+<!-- Daily cost chart -->
+{{if .Timeseries}}
+<h3>Daily Cost Trend</h3>
+<figure>
+    <div class="bar-chart">
+        {{range .Timeseries}}
+        <div class="bar-col" title="{{.Date}}: ${{printf "%.4f" .CostUSD}} ({{.Requests}} req)">
+            <div class="bar-val">${{printf "%.2f" .CostUSD}}</div>
+            <div class="bar" style="height: {{if gt $.MaxCost 0.0}}{{barPct .CostUSD $.MaxCost}}%{{else}}2px{{end}};"></div>
+        </div>
+        {{end}}
+    </div>
+    <div class="bar-labels">
+        {{range .Timeseries}}
+        <div class="bar-date">{{shortDate .Date}}</div>
+        {{end}}
+    </div>
+</figure>
+{{end}}
+
+<!-- Breakdown table -->
+{{if .Breakdown}}
+<h3>Breakdown by {{if eq .GroupBy "key"}}API Key{{else}}Model{{end}}</h3>
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>{{if eq .GroupBy "key"}}API Key{{else}}Model{{end}}</th>
+            <th>Cost</th>
+            <th>Cost (USD)</th>
+            <th>Input Tokens</th>
+            <th>Cache Write</th>
+            <th>Cache Read</th>
+            <th>Output Tokens</th>
+            <th>Requests</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Breakdown}}
+        <tr>
+            <td class="mono">{{.Group}}</td>
+            <td>
+                <div class="breakdown-bar-cell">
+                    <span class="breakdown-bar" style="width: {{if gt $.MaxBreakdownCost 0.0}}{{barPct .CostUSD $.MaxBreakdownCost}}{{else}}0{{end}}px; min-width: 2px; max-width: 100px;"></span>
+                </div>
+            </td>
+            <td class="cost">${{printf "%.4f" .CostUSD}}</td>
+            <td>{{.InputTokens}}</td>
+            <td>{{.CacheCreationTokens}}</td>
+            <td>{{.CacheReadTokens}}</td>
+            <td>{{.OutputTokens}}</td>
+            <td>{{.Requests}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+</figure>
+{{else}}
+<p>No cost data found for this date range.</p>
+{{end}}
+{{end}}
+
