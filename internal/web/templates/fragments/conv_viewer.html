@@ -28,16 +28,26 @@
             {{if .ResultContent}}
             <details>
                 <summary>Tool result</summary>
+                {{if .ResultTrunc}}
+                <p class="result-short">{{.ResultContent}}</p>
+                <p class="result-full" hidden>{{.FullText}}</p>
+                <details ontoggle="toggleFullResult(this)"><summary>Full result</summary></details>
+                {{else}}
                 <p>{{.ResultContent}}</p>
-                {{if .ResultTrunc}}<details><summary>Full result</summary><p>{{.FullText}}</p></details>{{end}}
+                {{end}}
             </details>
             {{end}}
         </div>
         {{else if eq .Type "tool_result"}}
         <div class="conv-tool">
-            <strong>Tool result</strong>
+            <strong>Tool result{{if .ToolName}} for <code>{{.ToolName}}</code>{{end}}</strong>
+            {{if .ResultTrunc}}
+            <p class="result-short">{{.ResultContent}}</p>
+            <p class="result-full" hidden>{{.FullText}}</p>
+            <details ontoggle="toggleFullResult(this)"><summary>Full result</summary></details>
+            {{else}}
             <p>{{.ResultContent}}</p>
-            {{if .ResultTrunc}}<details><summary>Full result</summary><p>{{.FullText}}</p></details>{{end}}
+            {{end}}
         </div>
         {{else if or (eq .Type "image") (eq .Type "document")}}
         <p><em>{{.MediaLabel}}</em></p>

@@ -12,6 +12,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+
 	"codeberg.org/kglitchy/llm-proxy/internal/auth"
 	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
 	"codeberg.org/kglitchy/llm-proxy/internal/store"
@@ -105,13 +109,28 @@ func templateFuncs() template.FuncMap {
 			if total <= 0 {
 				return 0
 			}
-			return (value / total) * 100
+			pct := (value / total) * 100
+			if pct > 0 && pct < 1 {
+				return 1
+			}
+			return pct
 		},
 		"shortDate": func(dateStr string) string {
 			if len(dateStr) >= 10 {
 				return dateStr[5:10] // "MM-DD"
 			}
 			return dateStr
+		},
+		"fmtTokens": func(n int64) string {
+			switch {
+			case n >= 1_000_000_000:
+				return fmt.Sprintf("%.1fB", float64(n)/1_000_000_000)
+			case n >= 1_000_000:
+				return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+			default:
+				p := message.NewPrinter(language.English)
+				return p.Sprintf("%d", n)
+			}
 		},
 	}
 }
@@ -262,6 +281,12 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	models, err := h.store.ListDistinctModels(r.Context())
+	if err != nil {
+		log.Printf("WARNING: list distinct models: %v", err)
+		models = []string{}
+	}
+
 	perPage := params.PerPage
 	if perPage <= 0 {
 		perPage = 50
@@ -288,6 +313,7 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 		"Total":        total,
 		"FirstID":      firstID,
 		"Model":        params.Model,
+		"Models":       models,
 		"StatusFilter": strconv.Itoa(params.Status),
 		"KeyPrefix":    params.KeyPrefix,
 		"From":         params.From,
@@ -401,6 +427,190 @@ func (h *Handlers) LogDetailAPIHandler(w http.ResponseWriter, r *http.Request, i
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(logEntry); err != nil {
 		log.Printf("ERROR: write log detail response: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// validateLabel checks that a key label is non-empty and within the max length.
+func validateLabel(label string) error {
+	if label == "" {
+		return fmt.Errorf("label is required")
+	}
+	if len(label) > 64 {
+		return fmt.Errorf("label must be 64 characters or fewer")
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Keys
+// ---------------------------------------------------------------------------
+
+// KeysPage renders the key management page.
+func (h *Handlers) KeysPage(w http.ResponseWriter, r *http.Request) {
+	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]any{
+		"ActiveTab": "keys",
+		"Keys":      keys,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.templates.ExecuteTemplate(w, "keys.html", data); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+	}
+}
+
+// KeysAPIHandler returns key list as HTMX fragment or JSON.
+func (h *Handlers) KeysAPIHandler(w http.ResponseWriter, r *http.Request) {
+	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if r.Header.Get("HX-Request") == "true" {
+		data := map[string]any{"Keys": keys}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := h.templates.ExecuteNamed(w, "key_rows", data); err != nil {
+			log.Printf("ERROR: render key_rows fragment: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"keys": keys}); err != nil {
+		log.Printf("ERROR: write keys JSON response: %v", err)
+	}
+}
+
+// CreateKeyHandler creates a new proxy key.
+func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	label := r.FormValue("label")
+	if err := validateLabel(label); err != nil {
+		keys, _ := h.store.ListActiveProxyKeys(r.Context())
+		data := map[string]any{
+			"ActiveTab":  "keys",
+			"Keys":       keys,
+			"LabelError": err.Error(),
+			"LabelValue": label,
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		if err := h.templates.ExecuteTemplate(w, "keys.html", data); err != nil {
+			log.Printf("ERROR: render keys page with error: %v", err)
+		}
+		return
+	}
+
+	plaintext, hash, prefix, err := auth.GenerateKey()
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	id := uuid.New().String()
+	if err := h.store.CreateProxyKey(r.Context(), id, hash, prefix, label); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.store.RecordAuditEvent(r.Context(), "key_created", prefix, label); err != nil {
+		log.Printf("WARNING: record audit event: %v", err)
+	}
+
+	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]any{
+		"ActiveTab":     "keys",
+		"Keys":          keys,
+		"CreatedKey":    plaintext,
+		"CreatedPrefix": prefix,
+		"CreatedLabel":  label,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.templates.ExecuteTemplate(w, "keys.html", data); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+	}
+}
+
+// UpdateKeyLabelHandler updates a key's label.
+func (h *Handlers) UpdateKeyLabelHandler(w http.ResponseWriter, r *http.Request, prefix string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	label := r.FormValue("label")
+	if err := validateLabel(label); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.UpdateKeyLabel(r.Context(), prefix, label); err != nil {
+		http.Error(w, "Key not found", http.StatusNotFound)
+		return
+	}
+
+	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if r.Header.Get("HX-Request") == "true" {
+		data := map[string]any{"Keys": keys}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := h.templates.ExecuteNamed(w, "key_rows", data); err != nil {
+			log.Printf("ERROR: render key_rows fragment: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
+		log.Printf("ERROR: write update key response: %v", err)
+	}
+}
+
+// RevokeKeyHandler revokes a proxy key.
+func (h *Handlers) RevokeKeyHandler(w http.ResponseWriter, r *http.Request, prefix string) {
+	if err := h.store.RevokeProxyKey(r.Context(), prefix); err != nil {
+		http.Error(w, "Key not found", http.StatusNotFound)
+		return
+	}
+
+	if err := h.store.RecordAuditEvent(r.Context(), "key_revoked", prefix, ""); err != nil {
+		log.Printf("WARNING: record audit event: %v", err)
+	}
+
+	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if r.Header.Get("HX-Request") == "true" {
+		data := map[string]any{"Keys": keys}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := h.templates.ExecuteNamed(w, "key_rows", data); err != nil {
+			log.Printf("ERROR: render key_rows fragment: %v", err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
+		log.Printf("ERROR: write revoke key response: %v", err)
 	}
 }
 

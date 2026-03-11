@@ -5,6 +5,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -31,14 +32,24 @@ var keysListCmd = &cobra.Command{
 	RunE:  runKeysList,
 }
 
-var keysRevokeCmd = &cobra.Command{
-	Use:   "revoke <prefix>",
-	Short: "Revoke a proxy API key by prefix",
+var keysDeleteCmd = &cobra.Command{
+	Use:   "delete <prefix>",
+	Short: "Delete a proxy API key by prefix",
 	Args:  cobra.ExactArgs(1),
-	RunE:  runKeysRevoke,
+	RunE:  runKeysDelete,
 }
 
-var keyLabel string
+var keysUpdateCmd = &cobra.Command{
+	Use:   "update <prefix>",
+	Short: "Update a proxy API key's label",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runKeysUpdate,
+}
+
+var (
+	keyLabel    string
+	keyNewLabel string
+)
 
 func init() {
 	keysCreateCmd.Flags().StringVar(&keyLabel, "label", "", "human-readable label for the key (required)")
@@ -46,9 +57,15 @@ func init() {
 		panic(fmt.Sprintf("mark label flag required: %v", err))
 	}
 
+	keysUpdateCmd.Flags().StringVar(&keyNewLabel, "label", "", "new label for the key (required)")
+	if err := keysUpdateCmd.MarkFlagRequired("label"); err != nil {
+		panic(fmt.Sprintf("mark label flag required: %v", err))
+	}
+
 	keysCmd.AddCommand(keysCreateCmd)
 	keysCmd.AddCommand(keysListCmd)
-	keysCmd.AddCommand(keysRevokeCmd)
+	keysCmd.AddCommand(keysDeleteCmd)
+	keysCmd.AddCommand(keysUpdateCmd)
 	rootCmd.AddCommand(keysCmd)
 }
 
@@ -85,6 +102,10 @@ func runKeysCreate(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("storing key: %w", err)
 	}
 
+	if err := st.RecordAuditEvent(context.Background(), "key_created", prefix, keyLabel); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
+	}
+
 	fmt.Printf("Created API key: %s\n", plaintext)
 	fmt.Printf("Label: %s\n", keyLabel)
 	fmt.Printf("Prefix: %s\n", prefix)
@@ -116,7 +137,7 @@ func runKeysList(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runKeysRevoke(_ *cobra.Command, args []string) error {
+func runKeysDelete(_ *cobra.Command, args []string) error {
 	st, err := openStore()
 	if err != nil {
 		return err
@@ -128,6 +149,33 @@ func runKeysRevoke(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("revoking key: %w", err)
 	}
 
-	fmt.Printf("Revoked key with prefix: %s\n", prefix)
+	if err := st.RecordAuditEvent(context.Background(), "key_revoked", prefix, ""); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
+	}
+
+	fmt.Printf("Deleted key with prefix: %s\n", prefix)
+	return nil
+}
+
+func runKeysUpdate(_ *cobra.Command, args []string) error {
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+
+	prefix := args[0]
+	if keyNewLabel == "" {
+		return fmt.Errorf("label is required")
+	}
+	if len(keyNewLabel) > 64 {
+		return fmt.Errorf("label must be 64 characters or fewer")
+	}
+
+	if err := st.UpdateKeyLabel(context.Background(), prefix, keyNewLabel); err != nil {
+		return fmt.Errorf("updating key label: %w", err)
+	}
+
+	fmt.Printf("Updated label for key %s: %s\n", prefix, keyNewLabel)
 	return nil
 }

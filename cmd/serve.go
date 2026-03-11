@@ -136,6 +136,22 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Get("/api/costs", costHandlers.CostSummaryHandler)
 		r.Get("/api/costs/timeseries", costHandlers.CostTimeseriesHandler)
 		r.Get("/api/costs/fragment", costHandlers.CostSummaryFragmentHandler)
+
+		// Keys.
+		r.Get("/keys", webHandlers.KeysPage)
+		r.Get("/api/keys", webHandlers.KeysAPIHandler)
+		r.Post("/api/keys", webHandlers.CreateKeyHandler)
+		r.Post("/api/keys/{prefix}/update", func(w http.ResponseWriter, r *http.Request) {
+			webHandlers.UpdateKeyLabelHandler(w, r, chi.URLParam(r, "prefix"))
+		})
+		r.Post("/api/keys/{prefix}/revoke", func(w http.ResponseWriter, r *http.Request) {
+			webHandlers.RevokeKeyHandler(w, r, chi.URLParam(r, "prefix"))
+		})
+	})
+
+	// Root redirect to UI.
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/logs", http.StatusSeeOther)
 	})
 
 	// Health check.

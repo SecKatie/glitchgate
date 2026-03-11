@@ -14,8 +14,9 @@ import (
 // ConversationData holds the parsed view of a request body's conversation.
 // Passed to log_detail.html as .Conversation.
 type ConversationData struct {
-	SystemPrompt string // normalised from MessagesRequest.System; empty if absent
-	HasSystem    bool   // true if a system prompt is present
+	SystemPrompt    string // normalised from MessagesRequest.System; empty if absent
+	SystemPromptLen int    // length in runes; 0 if no system prompt
+	HasSystem       bool   // true if a system prompt is present
 
 	LatestPrompt *ConvTurn  // the last user-role message; nil if messages is empty
 	Response     *ConvTurn  // parsed from ResponseBody; nil if parse failed
@@ -105,6 +106,19 @@ func parseConversation(requestBody, responseBody string) *ConversationData {
 	// Normalise system prompt.
 	cd.SystemPrompt = normaliseSystem(req.System)
 	cd.HasSystem = cd.SystemPrompt != ""
+	cd.SystemPromptLen = len([]rune(cd.SystemPrompt))
+
+	// Build a map of tool_use_id → tool_name for resolving tool_result blocks.
+	toolNameMap := make(map[string]string)
+	for _, msg := range req.Messages {
+		if msg.Role == "assistant" {
+			for _, b := range extractContentBlocks(msg.Content) {
+				if b.Type == "tool_use" && b.ID != "" && b.Name != "" {
+					toolNameMap[b.ID] = b.Name
+				}
+			}
+		}
+	}
 
 	// Walk messages: build History and identify LatestPrompt.
 	lastUserIdx := -1
@@ -115,7 +129,7 @@ func parseConversation(requestBody, responseBody string) *ConversationData {
 	}
 
 	for i, msg := range req.Messages {
-		turn := messageToTurn(msg)
+		turn := messageToTurn(msg, toolNameMap)
 		if i == lastUserIdx {
 			cd.LatestPrompt = &turn
 		} else {
@@ -132,7 +146,7 @@ func parseConversation(requestBody, responseBody string) *ConversationData {
 		respContent = sse
 	}
 	if len(respContent) > 0 {
-		turn := contentBlocksToTurn("assistant", respContent)
+		turn := contentBlocksToTurn("assistant", respContent, toolNameMap)
 		cd.Response = &turn
 	}
 
@@ -171,18 +185,18 @@ func normaliseSystem(sys interface{}) string {
 }
 
 // messageToTurn converts an anthropic.Message to a ConvTurn.
-func messageToTurn(msg anthropic.Message) ConvTurn {
+func messageToTurn(msg anthropic.Message, toolNameMap map[string]string) ConvTurn {
 	blocks := extractContentBlocks(msg.Content)
-	return contentBlocksToTurn(msg.Role, blocks)
+	return contentBlocksToTurn(msg.Role, blocks, toolNameMap)
 }
 
 // contentBlocksToTurn renders a slice of ContentBlocks into a ConvTurn.
 // Consecutive text blocks are merged into one to avoid a separate expand
 // button for every injected context block (e.g. <system-reminder> entries).
-func contentBlocksToTurn(role string, blocks []anthropic.ContentBlock) ConvTurn {
+func contentBlocksToTurn(role string, blocks []anthropic.ContentBlock, toolNameMap map[string]string) ConvTurn {
 	turn := ConvTurn{Role: role}
 	for _, b := range blocks {
-		cb := contentBlockToConvBlock(b)
+		cb := contentBlockToConvBlock(b, toolNameMap)
 		// Merge into the previous block if both are plain text.
 		if cb.Type == "text" && len(turn.Blocks) > 0 && turn.Blocks[len(turn.Blocks)-1].Type == "text" {
 			last := &turn.Blocks[len(turn.Blocks)-1]
@@ -266,7 +280,7 @@ func stringField(m map[string]interface{}, key string) string {
 }
 
 // contentBlockToConvBlock converts a single ContentBlock to a ConvBlock.
-func contentBlockToConvBlock(b anthropic.ContentBlock) ConvBlock {
+func contentBlockToConvBlock(b anthropic.ContentBlock, toolNameMap map[string]string) ConvBlock {
 	switch b.Type {
 	case "text":
 		short, full, trunc := truncateRunes(b.Text)
@@ -292,6 +306,7 @@ func contentBlockToConvBlock(b anthropic.ContentBlock) ConvBlock {
 		return ConvBlock{
 			Type:          "tool_result",
 			ToolUseID:     b.ID,
+			ToolName:      toolNameMap[b.ID],
 			ResultContent: short,
 			ResultTrunc:   trunc,
 			FullText:      full,

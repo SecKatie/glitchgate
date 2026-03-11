@@ -162,6 +162,39 @@ func (s *SQLiteStore) RevokeProxyKey(ctx context.Context, prefix string) error {
 	return nil
 }
 
+// UpdateKeyLabel updates the label of an active proxy key identified by prefix.
+func (s *SQLiteStore) UpdateKeyLabel(ctx context.Context, prefix, label string) error {
+	const query = `UPDATE proxy_keys SET label = ? WHERE key_prefix = ? AND revoked_at IS NULL`
+
+	res, err := s.db.ExecContext(ctx, query, label, prefix)
+	if err != nil {
+		return fmt.Errorf("update key label: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return fmt.Errorf("no active proxy key found with prefix %q", prefix)
+	}
+
+	return nil
+}
+
+// RecordAuditEvent inserts a new audit trail entry.
+func (s *SQLiteStore) RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error {
+	const query = `INSERT INTO audit_events (action, key_prefix, detail, created_at) VALUES (?, ?, ?, ?)`
+
+	_, err := s.db.ExecContext(ctx, query, action, keyPrefix, detail, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("record audit event: %w", err)
+	}
+
+	return nil
+}
+
 // --------------------------------------------------------------------------
 // Request log operations
 // --------------------------------------------------------------------------
@@ -413,6 +446,34 @@ func (s *SQLiteStore) CountLogsSince(ctx context.Context, sinceID string, params
 	}
 
 	return count, nil
+}
+
+// ListDistinctModels returns all distinct model_requested values from request_logs.
+func (s *SQLiteStore) ListDistinctModels(ctx context.Context) ([]string, error) {
+	const query = `SELECT DISTINCT model_requested FROM request_logs ORDER BY model_requested`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list distinct models: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var models []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, fmt.Errorf("scan distinct model: %w", err)
+		}
+		models = append(models, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate distinct models: %w", err)
+	}
+	if models == nil {
+		models = []string{}
+	}
+
+	return models, nil
 }
 
 // --------------------------------------------------------------------------

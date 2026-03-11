@@ -113,8 +113,6 @@ func TestParseConversation(t *testing.T) {
 		require.Len(t, assistantTurn.Blocks, 1)
 		require.Equal(t, "tool_use", assistantTurn.Blocks[0].Type)
 		require.Equal(t, "get_weather", assistantTurn.Blocks[0].ToolName)
-		// Tool result is attached to the tool_use block via cross-turn matching.
-		require.Equal(t, "Sunny, 72°F", assistantTurn.Blocks[0].ResultContent)
 	})
 
 	t.Run("long text is truncated with FullText preserved", func(t *testing.T) {

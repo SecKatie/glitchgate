@@ -1,0 +1,104 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Keys - llm-proxy{{end}}
+
+{{define "head"}}
+<style>
+    .key-alert {
+        background: var(--pico-primary-background);
+        color: var(--pico-primary-inverse);
+        padding: 1rem;
+        border-radius: var(--pico-border-radius);
+        margin-bottom: 1rem;
+    }
+    .key-alert code {
+        display: block;
+        background: rgba(0,0,0,0.2);
+        padding: 0.5rem;
+        border-radius: 4px;
+        margin: 0.5rem 0;
+        word-break: break-all;
+        font-size: 0.9em;
+    }
+    .key-alert .warning {
+        font-size: 0.85em;
+        font-weight: 600;
+        margin-top: 0.5rem;
+    }
+    .key-create-form {
+        display: flex;
+        gap: 0.5rem;
+        align-items: end;
+        margin-bottom: 1rem;
+    }
+    .key-create-form input {
+        margin-bottom: 0;
+    }
+    .key-create-form button {
+        margin-bottom: 0;
+        white-space: nowrap;
+        width: auto;
+        flex: none;
+    }
+    .label-edit {
+        background: transparent;
+        border: 1px solid transparent;
+        padding: 0.1rem 0.25rem;
+        font: inherit;
+        width: 100%;
+        cursor: text;
+    }
+    .label-edit:hover {
+        border-color: var(--pico-muted-border-color);
+    }
+    .label-edit:focus {
+        border-color: var(--pico-primary);
+        outline: none;
+        background: var(--pico-form-element-background-color);
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<h3>API Keys</h3>
+
+{{if .CreatedKey}}
+<div class="key-alert" id="created-key-alert">
+    <strong>Key created successfully!</strong>
+    <code id="created-key-value">{{.CreatedKey}}</code>
+    <div style="display:flex;gap:0.5rem;align-items:center">
+        <button class="outline contrast copy-btn" style="padding:0.25rem 0.75rem;margin:0" onclick="copyText(this, document.getElementById('created-key-value').textContent.trim())">Copy</button>
+        <span>Prefix: <strong class="mono">{{.CreatedPrefix}}</strong></span>
+        <span>Label: <strong>{{.CreatedLabel}}</strong></span>
+    </div>
+    <div class="warning">Save this key now — it will not be shown again.</div>
+</div>
+{{end}}
+
+<form class="key-create-form" method="post" action="/ui/api/keys">
+    <div style="flex:1">
+        <label for="label">New Key Label</label>
+        <input type="text" id="label" name="label" placeholder="e.g. Production API Key" required maxlength="64"{{if .LabelError}} aria-invalid="true"{{end}} value="{{.LabelValue}}">
+        {{if .LabelError}}<small style="color:var(--pico-del-color)">{{.LabelError}}</small>{{end}}
+    </div>
+    <button type="submit">Create Key</button>
+</form>
+
+{{if .Keys}}
+<table>
+    <thead>
+        <tr>
+            <th>Prefix</th>
+            <th>Label</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody id="key-table-body">
+        {{template "key_rows" .}}
+    </tbody>
+</table>
+{{else}}
+<p style="color:var(--pico-muted-color);text-align:center;padding:2rem 0">No API keys yet. Create one above.</p>
+{{end}}
+{{end}}

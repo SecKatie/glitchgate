@@ -331,18 +331,28 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		groupBy = "model"
 	}
 
+	// Check for incomplete data (rows with 0 tokens but requests).
+	hasIncompleteData := false
+	for _, e := range breakdown {
+		if e.InputTokens == 0 && e.OutputTokens == 0 && e.Requests > 0 {
+			hasIncompleteData = true
+			break
+		}
+	}
+
 	data := map[string]any{
-		"ActiveTab":        "costs",
-		"Title":            "Cost Dashboard",
-		"Summary":          summary,
-		"Breakdown":        breakdown,
-		"Timeseries":       timeseries,
-		"MaxCost":          maxCost,
-		"MaxBreakdownCost": maxBreakdownCost,
-		"From":             fromDate,
-		"To":               toDate,
-		"GroupBy":          groupBy,
-		"KeyFilter":        r.URL.Query().Get("key"),
+		"ActiveTab":         "costs",
+		"Title":             "Cost Dashboard",
+		"Summary":           summary,
+		"Breakdown":         breakdown,
+		"Timeseries":        timeseries,
+		"MaxCost":           maxCost,
+		"MaxBreakdownCost":  maxBreakdownCost,
+		"HasIncompleteData": hasIncompleteData,
+		"From":              fromDate,
+		"To":                toDate,
+		"GroupBy":           groupBy,
+		"KeyFilter":         r.URL.Query().Get("key"),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -397,13 +407,22 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 		groupBy = "model"
 	}
 
+	hasIncompleteData := false
+	for _, e := range breakdown {
+		if e.InputTokens == 0 && e.OutputTokens == 0 && e.Requests > 0 {
+			hasIncompleteData = true
+			break
+		}
+	}
+
 	data := map[string]any{
-		"Summary":          summary,
-		"Breakdown":        breakdown,
-		"Timeseries":       timeseries,
-		"MaxCost":          maxCost,
-		"MaxBreakdownCost": maxBreakdownCost,
-		"GroupBy":          groupBy,
+		"Summary":           summary,
+		"Breakdown":         breakdown,
+		"Timeseries":        timeseries,
+		"MaxCost":           maxCost,
+		"MaxBreakdownCost":  maxBreakdownCost,
+		"HasIncompleteData": hasIncompleteData,
+		"GroupBy":           groupBy,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

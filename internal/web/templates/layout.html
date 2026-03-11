@@ -197,27 +197,27 @@
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
+        .cost-unknown {
+            color: var(--pico-muted-color);
+            font-style: italic;
+            font-size: 0.85em;
+        }
         /* Token detail table */
         .token-detail {
             font-size: 0.9em;
         }
-        /* Token details summary — makes the disclosure triangle visually obvious */
+        /* Clickable table rows */
+        tr[data-href] {
+            cursor: pointer;
+        }
+        tr[data-href]:hover {
+            background: var(--pico-card-sectioning-background-color);
+        }
+        /* Token details summary */
         .token-details-summary {
             cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.25rem 0.6rem;
-            border: 1px solid var(--pico-muted-border-color);
-            border-radius: var(--pico-border-radius);
-            background: var(--pico-card-sectioning-background-color);
             font-size: 0.9em;
             user-select: none;
-            list-style: none;
-        }
-        .token-details-summary:hover {
-            border-color: var(--pico-primary);
-            color: var(--pico-primary);
         }
         /* Copy button */
         .copy-btn {
@@ -238,6 +238,7 @@
             <ul>
                 <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page" class="nav-active"{{end}}>Logs</a></li>
                 <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page" class="nav-active"{{end}}>Costs</a></li>
+                <li><a href="/ui/keys"{{if eq .ActiveTab "keys"}} aria-current="page" class="nav-active"{{end}}>Keys</a></li>
                 <li>
                     <form method="post" action="/ui/api/logout" style="margin:0">
                         <button type="submit" class="outline secondary" style="padding:0.25rem 0.75rem;margin:0">Logout</button>
@@ -305,6 +306,23 @@
     }
 
     // ---------------------------------------------------------------------------
+    // Toggle full/truncated tool result via <details ontoggle>
+    // ---------------------------------------------------------------------------
+    function toggleFullResult(det) {
+        var parent = det.parentElement;
+        var short = parent.querySelector('.result-short');
+        var full  = parent.querySelector('.result-full');
+        if (!short || !full) return;
+        if (det.open) {
+            short.hidden = true;
+            full.hidden  = false;
+        } else {
+            short.hidden = false;
+            full.hidden  = true;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // Clipboard copy helper (used by log_detail.html copy buttons)
     // ---------------------------------------------------------------------------
     function copyText(btn, text) {
@@ -326,6 +344,26 @@
             setTimeout(function() { btn.textContent = '⎘'; }, 1500);
         }
     }
+    // ---------------------------------------------------------------------------
+    // Clickable table rows (Issue #8)
+    // ---------------------------------------------------------------------------
+    document.addEventListener('click', function(e) {
+        var tr = e.target.closest('tr[data-href]');
+        if (tr && !e.target.closest('a')) window.location = tr.dataset.href;
+    });
+
+    // ---------------------------------------------------------------------------
+    // Refresh countdown (Issue #12)
+    // ---------------------------------------------------------------------------
+    setInterval(function() {
+        if (!lastRefresh) return;
+        var sec = Math.floor((Date.now() - lastRefresh.getTime()) / 1000);
+        var el = document.getElementById('refresh-status');
+        if (!el || el.classList.contains('refresh-stale')) return;
+        if (sec < 5) el.textContent = 'Updated just now';
+        else if (sec < 60) el.textContent = 'Updated ' + sec + 's ago';
+        else el.textContent = 'Updated ' + Math.floor(sec / 60) + 'm ago';
+    }, 5000);
     </script>
 </body>
 </html>

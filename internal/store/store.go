@@ -16,12 +16,17 @@ type Store interface {
 	GetActiveProxyKeyByPrefix(ctx context.Context, prefix string) (*ProxyKey, error)
 	ListActiveProxyKeys(ctx context.Context) ([]ProxyKeySummary, error)
 	RevokeProxyKey(ctx context.Context, prefix string) error
+	UpdateKeyLabel(ctx context.Context, prefix, label string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
 	InsertRequestLog(ctx context.Context, log *RequestLogEntry) error
 	ListRequestLogs(ctx context.Context, params ListLogsParams) ([]RequestLogSummary, int64, error)
 	GetRequestLog(ctx context.Context, id string) (*RequestLogDetail, error)
 	GetCostSummary(ctx context.Context, params CostParams) (*CostSummary, error)
 	GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error)
 	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
+	// ListDistinctModels returns all distinct model_requested values from
+	// request_logs, ordered alphabetically.
+	ListDistinctModels(ctx context.Context) ([]string, error)
 	// CountLogsSince returns the number of request log entries created after the
 	// entry with the given ID that also match the active filter in params.
 	// Returns 0 if sinceID is empty or not found.
@@ -145,4 +150,13 @@ type CostTimeseriesEntry struct {
 	Date     string
 	CostUSD  float64
 	Requests int64
+}
+
+// AuditEvent records an administrative action for the audit trail.
+type AuditEvent struct {
+	ID        int64
+	Action    string
+	KeyPrefix string
+	Detail    string
+	CreatedAt time.Time
 }
