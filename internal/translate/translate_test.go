@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
 
 func TestOpenAIToAnthropic_BasicMessage(t *testing.T) {

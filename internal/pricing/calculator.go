@@ -16,24 +16,23 @@ type Calculator struct {
 	entries map[string]Entry
 }
 
-// NewCalculator creates a Calculator from a map of upstream model name to
-// Entry.
+// NewCalculator creates a Calculator from a map of "providerName/upstreamModel" to Entry.
 func NewCalculator(entries map[string]Entry) *Calculator {
 	return &Calculator{entries: entries}
 }
 
-// Lookup returns the pricing Entry for the given upstream model name.
-// The second return value is false when the model is not in the pricing table.
-func (c *Calculator) Lookup(upstreamModel string) (Entry, bool) {
-	entry, ok := c.entries[upstreamModel]
+// Lookup returns the pricing Entry for the given provider and upstream model.
+// The second return value is false when the combination is not in the pricing table.
+func (c *Calculator) Lookup(providerName, upstreamModel string) (Entry, bool) {
+	entry, ok := c.entries[providerName+"/"+upstreamModel]
 	return entry, ok
 }
 
-// Calculate returns the estimated cost for a request given the upstream
-// model name and token counts.  If the model is not in the pricing table
-// the return value is nil (unknown pricing).
-func (c *Calculator) Calculate(upstreamModel string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) *float64 {
-	entry, ok := c.entries[upstreamModel]
+// Calculate returns the estimated cost for a request given the provider name,
+// upstream model name, and token counts. If the model is not in the pricing
+// table the return value is nil (unknown pricing).
+func (c *Calculator) Calculate(providerName, upstreamModel string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) *float64 {
+	entry, ok := c.entries[providerName+"/"+upstreamModel]
 	if !ok {
 		return nil
 	}

@@ -1,4 +1,4 @@
-module codeberg.org/kglitchy/llm-proxy
+module codeberg.org/kglitchy/glitchgate
 
 go 1.26.1
 

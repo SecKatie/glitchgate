@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
 
 // AnthropicToOpenAIRequest translates an Anthropic MessagesRequest into an

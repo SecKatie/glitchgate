@@ -3,8 +3,8 @@
 package web
 
 import (
-	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // CostBreakdown holds per-category token counts and costs for a single request.
@@ -40,7 +40,7 @@ func computeCostBreakdown(log *store.RequestLogDetail, calc *pricing.Calculator)
 		OutputTokens:     log.OutputTokens,
 	}
 
-	entry, ok := calc.Lookup(log.ModelUpstream)
+	entry, ok := calc.Lookup(log.ProviderName, log.ModelUpstream)
 	if !ok {
 		return cb
 	}

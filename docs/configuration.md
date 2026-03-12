@@ -1,42 +1,44 @@
 # Configuration Reference
 
-llm-proxy is configured via a YAML file, environment variables, or a combination of both.
+glitchgate is configured via a YAML file, environment variables, or a combination of both.
 
 ## Config File Location
 
 The config file is searched in the following order:
 
-1. Path passed via `--config` flag (e.g. `llm-proxy --config /path/to/config.yaml serve`)
-2. `~/.config/llm-proxy/config.yaml`
+1. Path passed via `--config` flag (e.g. `glitchgate --config /path/to/config.yaml serve`)
+2. `~/.config/glitchgate/config.yaml`
 3. `./config.yaml` (current working directory)
-4. `/etc/llm-proxy/config.yaml`
+4. `/etc/glitchgate/config.yaml`
 
-The first file found wins. If no file is found, llm-proxy falls back to defaults and environment variables.
+The first file found wins. If no file is found, glitchgate falls back to defaults and environment variables.
 
 ## Environment Variables
 
-All config keys can be set via environment variables with the prefix `LLM_PROXY_`. Dots and nested keys use underscores:
+Simple scalar keys can be set via environment variables with the prefix `GLITCHGATE_`. Dots and nested keys use underscores:
 
-| Config Key      | Environment Variable        |
-|-----------------|-----------------------------|
-| `master_key`    | `LLM_PROXY_MASTER_KEY`      |
-| `listen`        | `LLM_PROXY_LISTEN`          |
-| `database_path` | `LLM_PROXY_DATABASE_PATH`   |
+| Config Key      | Environment Variable          |
+|-----------------|-------------------------------|
+| `master_key`    | `GLITCHGATE_MASTER_KEY`       |
+| `listen`        | `GLITCHGATE_LISTEN`           |
+| `database_path` | `GLITCHGATE_DATABASE_PATH`    |
 
 Environment variables override config file values.
+
+Note: `providers`, `model_list`, and `pricing` cannot be set via environment variables — they require a config file.
 
 ## Full Config Reference
 
 ```yaml
-# REQUIRED. Password for the web UI. Set here or via LLM_PROXY_MASTER_KEY.
+# REQUIRED. Password for the web UI. Set here or via GLITCHGATE_MASTER_KEY.
 master_key: "change-me-to-something-secure"
 
 # Address to listen on. Default: ":4000"
 listen: ":4000"
 
-# Path to the SQLite database file. Default: "llm-proxy.db"
+# Path to the SQLite database file. Default: "glitchgate.db"
 # Supports ~ for home directory. Parent directories are created automatically.
-database_path: "~/data/llm-proxy/proxy.db"
+database_path: "~/data/glitchgate/proxy.db"
 
 # IANA timezone name for the web UI. Default: "UTC"
 # Affects how timestamps are displayed in logs/costs and how date ranges default.
@@ -54,13 +56,16 @@ providers:
 
   - name: "copilot"                  # GitHub Copilot provider
     type: "github_copilot"
-    # token_dir: "~/.config/llm-proxy/copilot/"  # Optional; default shown
+    # token_dir: "~/.config/glitchgate/copilot/"  # Optional; default shown
 
 # Maps client-facing model names to upstream provider + model.
+# Use 'fallbacks' to define virtual models with automatic failover.
 model_list:
   - model_name: "claude-sonnet"              # Name clients send in requests
     provider: "anthropic"                    # Must match a provider name above
     upstream_model: "claude-sonnet-4-20250514" # Actual model sent upstream
+  - model_name: "claude-resilient"           # Virtual model with fallback chain
+    fallbacks: ["claude-sonnet"]             # Try these in order on 5xx/429
   - model_name: "gc/*"                       # Wildcard: gc/<model> → copilot
     provider: "copilot"
 
@@ -85,7 +90,7 @@ Each provider entry configures an upstream LLM API endpoint.
 | `auth_mode`       | Depends  | How the proxy authenticates with the upstream (see below). Not used by `github_copilot` (manages its own auth) |
 | `api_key`         | Depends  | API key for `proxy_key` mode. Supports `${ENV_VAR}` expansion |
 | `default_version` | No       | Sets the `anthropic-version` header if the client doesn't send one |
-| `token_dir`       | No       | Token storage directory for `github_copilot`. Default: `~/.config/llm-proxy/copilot/` |
+| `token_dir`       | No       | Token storage directory for `github_copilot`. Default: `~/.config/glitchgate/copilot/` |
 
 ### Auth Modes
 
@@ -121,12 +126,12 @@ The `github_copilot` provider type proxies requests through the GitHub Copilot A
 Run the device flow once to obtain and store OAuth tokens:
 
 ```sh
-llm-proxy auth copilot
+glitchgate auth copilot
 ```
 
-This opens a browser-based GitHub authorization flow. Once approved, tokens are saved to `~/.config/llm-proxy/copilot/` (or the directory specified by `--token-dir`). The proxy refreshes the short-lived Copilot session token automatically.
+This opens a browser-based GitHub authorization flow. Once approved, tokens are saved to `~/.config/glitchgate/copilot/` (or the directory specified by `--token-dir`). The proxy refreshes the short-lived Copilot session token automatically.
 
-You can run `llm-proxy auth copilot` at any time — before configuring the provider, while the proxy is running, or on a different machine. It is fully independent of the proxy server.
+You can run `glitchgate auth copilot` at any time — before configuring the provider, while the proxy is running, or on a different machine. It is fully independent of the proxy server.
 
 **Step 2: Configure the provider**
 
@@ -134,7 +139,7 @@ You can run `llm-proxy auth copilot` at any time — before configuring the prov
 providers:
   - name: "copilot"
     type: "github_copilot"
-    # token_dir: "~/.config/llm-proxy/copilot/"  # default; override if needed
+    # token_dir: "~/.config/glitchgate/copilot/"  # default; override if needed
 ```
 
 No `base_url`, `auth_mode`, or `api_key` are needed — the Copilot provider discovers the API endpoint from the session token and handles authentication internally.
@@ -201,11 +206,11 @@ You can configure more than one `github_copilot` provider — for example, to se
 providers:
   - name: copilot-work
     type: github_copilot
-    token_dir: ~/.config/llm-proxy/copilot/work/
+    token_dir: ~/.config/glitchgate/copilot/work/
 
   - name: copilot-personal
     type: github_copilot
-    token_dir: ~/.config/llm-proxy/copilot/personal/
+    token_dir: ~/.config/glitchgate/copilot/personal/
 
 model_list:
   - model_name: "work/*"
@@ -217,8 +222,8 @@ model_list:
 **Auth (once per account):**
 
 ```bash
-llm-proxy auth copilot --name copilot-work
-llm-proxy auth copilot --name copilot-personal
+glitchgate auth copilot --name copilot-work
+glitchgate auth copilot --name copilot-personal
 ```
 
 `--name` looks up the provider's `token_dir` from your config file automatically. You can also use `--token-dir` directly if you prefer to specify the path explicitly (mutually exclusive with `--name`).
@@ -226,7 +231,7 @@ llm-proxy auth copilot --name copilot-personal
 To replace an existing account's credentials, add `--force`:
 
 ```bash
-llm-proxy auth copilot --name copilot-work --force
+glitchgate auth copilot --name copilot-work --force
 ```
 
 ## Model List
@@ -244,6 +249,71 @@ model_list:
     provider: "anthropic"
     upstream_model: "claude-opus-4-20250514"
 ```
+
+### Virtual Models and Fallback Chains
+
+A model entry with a `fallbacks` list is a **virtual model**. Instead of routing to a single provider, it defines an ordered list of concrete model names to try. The proxy attempts each entry in order, moving to the next when a provider returns a `5xx` error or `429 Too Many Requests`.
+
+```yaml
+model_list:
+  # Virtual model — tries primary first, then falls back to secondary
+  - model_name: "claude-resilient"
+    fallbacks: ["primary-sonnet", "secondary-sonnet"]
+
+  # Concrete entries referenced by the virtual model
+  - model_name: "primary-sonnet"
+    provider: "anthropic"
+    upstream_model: "claude-sonnet-4-20250514"
+  - model_name: "secondary-sonnet"
+    provider: "anthropic-backup"
+    upstream_model: "claude-sonnet-4-20250514"
+```
+
+**Fallback rules:**
+
+| Upstream response | Behavior |
+|-------------------|----------|
+| `5xx` (server error) | Try next entry in the chain |
+| `429 Too Many Requests` | Try next entry in the chain |
+| `4xx` (other client error) | Return the error immediately — no retry |
+| Network error | Try next entry if one remains; otherwise `502 Bad Gateway` |
+| All entries exhausted | Return `503 Service Unavailable` |
+
+**Fields:**
+
+| Field       | Required | Description |
+|-------------|----------|-------------|
+| `model_name`| Yes      | Client-facing name |
+| `fallbacks` | Yes (for virtual) | Ordered list of concrete model names to try |
+| `provider`  | Yes (for concrete) | Provider name — must match a `providers` entry |
+| `upstream_model` | Yes (for concrete) | Model name sent to the upstream provider |
+
+`fallbacks` and `provider`/`upstream_model` are mutually exclusive — a model entry is either virtual (has `fallbacks`) or concrete (has `provider` + `upstream_model`), never both.
+
+**Nested virtual models** are supported and flattened at startup:
+
+```yaml
+model_list:
+  - model_name: "best-available"
+    fallbacks: ["tier-1", "tier-2"]
+  - model_name: "tier-1"
+    fallbacks: ["provider-a-sonnet", "provider-b-sonnet"]
+  - model_name: "tier-2"
+    provider: "anthropic-fallback"
+    upstream_model: "claude-haiku-4-20250514"
+  - model_name: "provider-a-sonnet"
+    provider: "anthropic"
+    upstream_model: "claude-sonnet-4-20250514"
+  - model_name: "provider-b-sonnet"
+    provider: "anthropic-backup"
+    upstream_model: "claude-sonnet-4-20250514"
+```
+
+A request to `best-available` tries: `provider-a-sonnet` → `provider-b-sonnet` → `tier-2` in that order.
+
+**Cycle detection:** glitchgate validates fallback chains at startup. Circular references (e.g. A → B → A) are rejected with a descriptive error message.
+
+**Logging:** Each request log records `fallback_attempts` — the number of chain entries that were attempted. A direct hit records `1`; if the second entry succeeds it records `2`; and so on.
 
 You can map the same upstream model to multiple client-facing names routed through different providers:
 
@@ -355,19 +425,19 @@ model_list:
 ### Environment-only (no config file)
 
 ```bash
-export LLM_PROXY_MASTER_KEY="change-me"
-export LLM_PROXY_LISTEN=":8080"
-export LLM_PROXY_DATABASE_PATH="/var/lib/llm-proxy/data.db"
+export GLITCHGATE_MASTER_KEY="change-me"
+export GLITCHGATE_LISTEN=":8080"
+export GLITCHGATE_DATABASE_PATH="/var/lib/glitchgate/data.db"
 ```
 
-Note: providers and model_list cannot be set via environment variables — they require a config file.
+Note: `providers`, `model_list`, and `pricing` require a config file.
 
 ### Multiple providers with wildcard routing
 
 ```yaml
 master_key: "change-me"
 listen: ":4000"
-database_path: "/var/lib/llm-proxy/proxy.db"
+database_path: "/var/lib/glitchgate/proxy.db"
 
 providers:
   - name: "anthropic"
@@ -427,7 +497,7 @@ With this config, `claude-sonnet` goes directly to Anthropic, while `gc/claude-s
 
 ## OIDC Authentication
 
-llm-proxy supports OpenID Connect (authorization code flow + PKCE) for web UI authentication. When configured, users sign in via your identity provider (Okta, Google Workspace, Azure AD, etc.) instead of a static password.
+glitchgate supports OpenID Connect (authorization code flow + PKCE) for web UI authentication. When configured, users sign in via your identity provider (Okta, Google Workspace, Azure AD, etc.) instead of a static password.
 
 ### Configuration
 

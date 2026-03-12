@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider"
+	"codeberg.org/kglitchy/glitchgate/internal/provider"
 )
 
 // Client implements the provider.Provider interface for the Anthropic Messages API.

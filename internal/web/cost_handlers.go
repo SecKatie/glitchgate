@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // CostHandlers groups the HTTP handlers for cost dashboard endpoints.

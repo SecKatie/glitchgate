@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider"
+	"codeberg.org/kglitchy/glitchgate/internal/provider"
 )
 
 // Client implements the provider.Provider interface for the GitHub Copilot API.
@@ -118,7 +118,7 @@ func (c *Client) getSessionToken(ctx context.Context) (token string, apiBase str
 
 	if c.githubToken == nil {
 		return "", "", fmt.Errorf(
-			"no GitHub Copilot credentials found — run: llm-proxy auth copilot")
+			"no GitHub Copilot credentials found — run: glitchgate auth copilot")
 	}
 
 	// Return cached session token if still valid (with 60s buffer).

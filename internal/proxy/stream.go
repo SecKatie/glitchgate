@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
 
 // StreamResult holds the captured data from a streamed response.

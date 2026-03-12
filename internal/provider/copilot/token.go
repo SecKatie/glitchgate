@@ -22,7 +22,7 @@ func DefaultTokenDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".config", "llm-proxy", "copilot")
+	return filepath.Join(home, ".config", "glitchgate", "copilot")
 }
 
 // EnsureTokenDir creates the token directory with 0700 permissions if it does not exist.

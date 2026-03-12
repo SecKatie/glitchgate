@@ -3,9 +3,11 @@ package proxy_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,14 +15,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/config"
-	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
-	"codeberg.org/kglitchy/llm-proxy/internal/proxy"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
-	"codeberg.org/kglitchy/llm-proxy/internal/translate"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/proxy"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/translate"
 )
 
 // openAITestHarness bundles resources for OpenAI handler tests.
@@ -91,7 +93,7 @@ func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 		"anthropic": anthropic.NewClient("anthropic", upstreamURL, "proxy_key", "test-upstream-key", "2023-06-01"),
 	}
 
-	calc := pricing.NewCalculator(pricing.DefaultPricing)
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 
 	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger)
@@ -365,4 +367,179 @@ func TestOpenAIProxy_UnknownModel(t *testing.T) {
 	err := json.Unmarshal(rec.Body.Bytes(), &errResp)
 	require.NoError(t, err)
 	require.Contains(t, errResp.Error.Message, "Unknown model")
+}
+
+// --- OpenAI fallback tests (T019, T021) ---
+
+// buildOpenAIVirtualFallbackHandler builds an OpenAIHandler with a two-entry virtual model "virtual".
+// Requests to "virtual" go to primary first, then secondary.
+func buildOpenAIVirtualFallbackHandler(t *testing.T, primaryURL, secondaryURL string) (*proxy.OpenAIHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
+	t.Helper()
+	st, _ := setupFallbackStore(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+  - name: primary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1
+    default_version: "2023-06-01"
+  - name: secondary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key2
+    default_version: "2023-06-01"
+model_list:
+  - model_name: virtual
+    fallbacks: [primary-model, secondary-model]
+  - model_name: primary-model
+    provider: primary
+    upstream_model: claude-3
+  - model_name: secondary-model
+    provider: secondary
+    upstream_model: claude-3
+`, primaryURL, secondaryURL)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	providers := map[string]provider.Provider{
+		"primary":   anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01"),
+		"secondary": anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01"),
+	}
+
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger)
+	return handler, st, logger
+}
+
+func TestOpenAIFallback_5xxTriggersRetry(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Return a minimal Anthropic response (OpenAI handler translates Anthropic→OpenAI).
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(anthropicSuccessResponse()))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildOpenAIVirtualFallbackHandler(t, primary.URL, secondary.URL)
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts)
+}
+
+func TestOpenAIFallback_429TriggersRetry(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(anthropicSuccessResponse()))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildOpenAIVirtualFallbackHandler(t, primary.URL, secondary.URL)
+	defer logger.Close()
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestOpenAIFallback_4xxNoRetry(t *testing.T) {
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		primaryHits++
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondaryHits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildOpenAIVirtualFallbackHandler(t, primary.URL, secondary.URL)
+	defer logger.Close()
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, 1, primaryHits)
+	require.Equal(t, 0, secondaryHits)
+}
+
+func TestOpenAIFallback_AllExhausted503(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildOpenAIVirtualFallbackHandler(t, primary.URL, secondary.URL)
+	defer logger.Close()
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+func TestOpenAIFallback_FallbackAttempts_Count(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(anthropicSuccessResponse()))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildOpenAIVirtualFallbackHandler(t, primary.URL, secondary.URL)
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts)
 }

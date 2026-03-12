@@ -16,9 +16,9 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // TemplateSet holds per-page template clones so that each page can define its
@@ -334,6 +334,12 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 		models = []string{}
 	}
 
+	statuses, err := h.store.ListDistinctStatuses(r.Context())
+	if err != nil {
+		log.Printf("WARNING: list distinct statuses: %v", err)
+		statuses = []int{}
+	}
+
 	perPage := params.PerPage
 	if perPage <= 0 {
 		perPage = 50
@@ -361,6 +367,7 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 		"FirstID":      firstID,
 		"Model":        params.Model,
 		"Models":       models,
+		"Statuses":     statuses,
 		"StatusFilter": strconv.Itoa(params.Status),
 		"KeyPrefix":    params.KeyPrefix,
 		"From":         params.From,
@@ -408,13 +415,19 @@ func (h *Handlers) LogsAPIHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		firstID := ""
+		if len(logs) > 0 {
+			firstID = logs[0].ID
+		}
 		data := map[string]any{
 			"Logs":       logs,
 			"Page":       params.Page,
 			"TotalPages": totalPages,
+			"Total":      total,
+			"FirstID":    firstID,
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := h.templates.ExecuteNamed(w, "log_rows", data); err != nil {
+		if err := h.templates.ExecuteNamed(w, "log_fragment", data); err != nil {
 			log.Printf("ERROR: render log_rows fragment: %v", err)
 		}
 		return

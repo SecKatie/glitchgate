@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package cmd implements the llm-proxy CLI commands.
+// Package cmd implements the glitchgate CLI commands.
 package cmd
 
 import (
@@ -13,9 +13,9 @@ import (
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:   "llm-proxy",
-	Short: "LLM API proxy with logging and cost monitoring",
-	Long: `llm-proxy is a transparent proxy for LLM APIs that logs all
+	Use:   "glitchgate",
+	Short: "LLM API gateway with logging and cost monitoring",
+	Long: `glitchgate is a transparent proxy for LLM APIs that logs all
 requests and responses, calculates costs, and provides a web UI
 for viewing usage and spending.`,
 }
@@ -29,5 +29,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/llm-proxy/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/glitchgate/config.yaml)")
 }

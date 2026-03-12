@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // ConversationData holds the parsed view of a request body's conversation.

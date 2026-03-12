@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/oidc"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/oidc"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // AuthHandlers holds OIDC-specific HTTP handlers.

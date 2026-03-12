@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // TeamHandlers handles team management pages and API.

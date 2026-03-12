@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
 
 const defaultMaxTokens = 4096

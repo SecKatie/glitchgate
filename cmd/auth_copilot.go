@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/config"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/copilot"
+	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
 )
 
 var (
@@ -32,7 +32,7 @@ provider is configured or while the proxy is already running.`,
 
 func init() {
 	authCmd.AddCommand(authCopilotCmd)
-	authCopilotCmd.Flags().StringVar(&copilotTokenDir, "token-dir", "", "token storage directory (default: ~/.config/llm-proxy/copilot/)")
+	authCopilotCmd.Flags().StringVar(&copilotTokenDir, "token-dir", "", "token storage directory (default: ~/.config/glitchgate/copilot/)")
 	authCopilotCmd.Flags().StringVarP(&copilotProviderName, "name", "n", "", "provider name from config (looks up its token_dir; mutually exclusive with --token-dir)")
 	authCopilotCmd.Flags().BoolVarP(&copilotForceReauth, "force", "f", false, "re-authenticate even if tokens already exist")
 	authCopilotCmd.MarkFlagsMutuallyExclusive("token-dir", "name")

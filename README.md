@@ -1,4 +1,4 @@
-# llm-proxy
+# glitchgate
 
 A self-hosted reverse proxy for LLM APIs with request logging, cost monitoring, and a lightweight web UI.
 
@@ -8,7 +8,7 @@ Routes requests to upstream providers, logs all traffic to a local SQLite databa
 
 - Proxy requests to Anthropic and GitHub Copilot upstreams
 - Format-aware routing: clients can use OpenAI or Anthropic format regardless of upstream provider
-- GitHub Copilot integration via OAuth device flow (`llm-proxy auth copilot`)
+- GitHub Copilot integration via OAuth device flow (`glitchgate auth copilot`)
 - Multiple proxy API keys with per-key cost attribution
 - Wildcard prefix model routing
 - Cache token logging (Anthropic prompt caching)
@@ -19,7 +19,7 @@ Routes requests to upstream providers, logs all traffic to a local SQLite databa
 
 ```sh
 make build
-./llm-proxy serve
+./glitchgate serve
 ```
 
 See `make help` or the `cmd/` directory for all available commands. See [docs/configuration.md](docs/configuration.md) for full configuration reference including GitHub Copilot setup.

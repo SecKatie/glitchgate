@@ -1,6 +1,6 @@
 {{template "layout.html" .}}
 
-{{define "title"}}Costs - llm-proxy{{end}}
+{{define "title"}}Costs - glitchgate{{end}}
 
 {{define "head"}}
 <style>
@@ -104,7 +104,7 @@
     </div>
     <div>
         <label for="group_by">Group By</label>
-        <select id="group_by" name="group_by">
+        <select id="group_by" name="group_by" style="min-width:9rem;">
             <option value="model" {{if eq .GroupBy "model"}}selected{{end}}>Model</option>
             <option value="key" {{if eq .GroupBy "key"}}selected{{end}}>API Key</option>
         </select>

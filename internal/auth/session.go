@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 const (

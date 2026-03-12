@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,16 +18,16 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/spf13/cobra"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/config"
-	oidcpkg "codeberg.org/kglitchy/llm-proxy/internal/oidc"
-	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/copilot"
-	"codeberg.org/kglitchy/llm-proxy/internal/proxy"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
-	"codeberg.org/kglitchy/llm-proxy/internal/web"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/config"
+	oidcpkg "codeberg.org/kglitchy/glitchgate/internal/oidc"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
+	"codeberg.org/kglitchy/glitchgate/internal/proxy"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/web"
 )
 
 var serveCmd = &cobra.Command{
@@ -73,15 +74,47 @@ func runServe(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Build pricing calculator: merge defaults with user config overrides.
+	// Build pricing calculator.
+	// Pass 1: seed type-based defaults per configured provider.
 	pricingMap := make(map[string]pricing.Entry)
-	for k, v := range pricing.DefaultPricing {
-		pricingMap[k] = v
+	for _, pc := range cfg.Providers {
+		baseURL := pc.BaseURL
+		if pc.Type == "github_copilot" && baseURL == "" {
+			baseURL = copilot.DefaultAPIURL
+		}
+		provKey := pricing.ProviderKey(pc.Type, baseURL)
+		switch pc.Type {
+		case "github_copilot":
+			for model, entry := range pricing.CopilotDefaults {
+				pricingMap[provKey+"/"+model] = entry
+			}
+		case "anthropic":
+			if pricing.IsOfficialAnthropicURL(baseURL) {
+				for model, entry := range pricing.AnthropicDefaults {
+					pricingMap[provKey+"/"+model] = entry
+				}
+			}
+		}
 	}
-	for _, pe := range cfg.Pricing {
-		pricingMap[pe.Model] = pricing.Entry{
-			InputPerMillion:  pe.InputPerMillion,
-			OutputPerMillion: pe.OutputPerMillion,
+	// Pass 2: model_list metadata entries override defaults.
+	for _, mm := range cfg.ModelList {
+		if strings.HasSuffix(mm.ModelName, "/*") || len(mm.Fallbacks) > 0 || mm.Metadata == nil {
+			continue
+		}
+		pc, err := cfg.FindProvider(mm.Provider)
+		if err != nil {
+			continue
+		}
+		baseURL := pc.BaseURL
+		if pc.Type == "github_copilot" && baseURL == "" {
+			baseURL = copilot.DefaultAPIURL
+		}
+		provKey := pricing.ProviderKey(pc.Type, baseURL)
+		pricingMap[provKey+"/"+mm.UpstreamModel] = pricing.Entry{
+			InputPerMillion:      mm.Metadata.InputTokenCost,
+			OutputPerMillion:     mm.Metadata.OutputTokenCost,
+			CacheReadPerMillion:  mm.Metadata.CacheReadCost,
+			CacheWritePerMillion: mm.Metadata.CacheWriteCost,
 		}
 	}
 	calc := pricing.NewCalculator(pricingMap)
@@ -236,7 +269,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// Graceful shutdown.
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("llm-proxy listening on %s", cfg.Listen)
+		log.Printf("glitchgate listening on %s", cfg.Listen)
 		errCh <- srv.ListenAndServe()
 	}()
 

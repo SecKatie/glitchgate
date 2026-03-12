@@ -1,0 +1,35 @@
+{{define "log_fragment"}}
+<small id="log-entry-count" hx-swap-oob="true">{{.Total}} entries</small>
+<nav id="log-pagination" class="pagination" hx-swap-oob="true">{{if gt .TotalPages 1}}<ul>
+    {{if gt .Page 1}}<li><a href="/ui/logs?page={{subtract .Page 1}}" hx-get="/ui/api/logs?page={{subtract .Page 1}}" hx-target="#log-figure" hx-swap="outerHTML">Previous</a></li>{{end}}
+    <li>Page {{.Page}} of {{.TotalPages}}</li>
+    {{if lt .Page .TotalPages}}<li><a href="/ui/logs?page={{add .Page 1}}" hx-get="/ui/api/logs?page={{add .Page 1}}" hx-target="#log-figure" hx-swap="outerHTML">Next</a></li>{{end}}
+</ul>{{end}}</nav>
+<figure id="log-figure"
+    hx-get="/ui/api/logs"
+    hx-trigger="every 10s"
+    hx-include="#filter-form"
+    hx-swap="outerHTML"
+    hx-vals='{"page": "{{.Page}}"{{if gt .Page 1}}, "since_id": "{{.FirstID}}"{{end}}}'
+    hx-on:htmx:after-request="updateRefreshStatus(event)"
+    hx-on:htmx:response-error="markRefreshFailed()">
+<table role="grid">
+    <thead>
+        <tr>
+            <th>Time (ET)</th>
+            <th>Model</th>
+            <th>Key</th>
+            <th>Status</th>
+            <th>In Tokens</th>
+            <th>Out Tokens</th>
+            <th>Latency</th>
+            <th class="cost">Cost</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="log-table-body">
+        {{template "log_rows" .}}
+    </tbody>
+</table>
+</figure>
+{{end}}

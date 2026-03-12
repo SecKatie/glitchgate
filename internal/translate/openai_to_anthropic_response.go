@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
 
 // OpenAIToAnthropicResponse translates an OpenAI ChatCompletionResponse into

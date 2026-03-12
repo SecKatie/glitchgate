@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,13 +15,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/config"
-	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
-	"codeberg.org/kglitchy/llm-proxy/internal/proxy"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/proxy"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // testHarness bundles all the resources needed for a proxy handler test.
@@ -94,7 +95,7 @@ func newTestHarness(t *testing.T, upstreamURL string) *testHarness {
 		"anthropic": anthropic.NewClient("anthropic", upstreamURL, "proxy_key", "test-upstream-key", "2023-06-01"),
 	}
 
-	calc := pricing.NewCalculator(pricing.DefaultPricing)
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 
 	handler := proxy.NewHandler(cfg, providers, calc, logger)
@@ -376,7 +377,8 @@ func TestAnthropicProxy_UpstreamError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	// A 429 from the only chain entry exhausts the chain → 503.
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
 	// Wait for the async logger.
 	h.closeLogger()
@@ -394,6 +396,320 @@ func TestAnthropicProxy_UpstreamError(t *testing.T) {
 // --- helpers ---
 
 func strPtr(s string) *string { return &s }
+
+// buildFallbackRequest creates an authenticated request for fallback tests.
+// Since these use direct Config construction (no Load), we inject the key via context.
+func buildFallbackRequest(t *testing.T, st *store.SQLiteStore, _, body string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// Find the key we just created via prefix scan.
+	keys, err := st.ListActiveProxyKeys(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+	pk, err := st.GetActiveProxyKeyByPrefix(context.Background(), keys[0].KeyPrefix)
+	require.NoError(t, err)
+	ctx := proxy.ContextWithProxyKey(req.Context(), pk)
+	return req.WithContext(ctx)
+}
+
+// TestFallback_5xxTriggersRetry verifies that a 5xx from the primary triggers fallback to secondary.
+func TestFallback_5xxTriggersRetry(t *testing.T) {
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		primaryHits++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	cannedResp := anthropicSuccessResponse()
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(cannedResp))
+	}))
+	defer secondary.Close()
+
+	// Build a config with a virtual model referencing primary then secondary.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+  - name: primary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1
+    default_version: "2023-06-01"
+  - name: secondary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key2
+    default_version: "2023-06-01"
+model_list:
+  - model_name: virtual
+    fallbacks: [primary-model, secondary-model]
+  - model_name: primary-model
+    provider: primary
+    upstream_model: claude-3
+  - model_name: secondary-model
+    provider: secondary
+    upstream_model: claude-3
+`, primary.URL, secondary.URL)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	st, _ := setupFallbackStore(t)
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	// No defer — we close explicitly below to flush before reading logs.
+
+	providers := map[string]provider.Provider{
+		"primary":   anthropic.NewClient("primary", primary.URL, "proxy_key", "key1", "2023-06-01"),
+		"secondary": anthropic.NewClient("secondary", secondary.URL, "proxy_key", "key2", "2023-06-01"),
+	}
+
+	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, primaryHits, "primary should be attempted once")
+
+	// Verify FallbackAttempts = 2 in the log.
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts)
+}
+
+// TestFallback_429TriggersRetry verifies that 429 triggers fallback.
+func TestFallback_429TriggersRetry(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer primary.Close()
+
+	cannedResp := anthropicSuccessResponse()
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(cannedResp))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildVirtualFallbackHandler(t, primary.URL, secondary.URL)
+	defer logger.Close()
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+// TestFallback_4xxNoRetry verifies that non-429 4xx is returned immediately.
+func TestFallback_4xxNoRetry(t *testing.T) {
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		primaryHits++
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondaryHits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildVirtualFallbackHandler(t, primary.URL, secondary.URL)
+	defer logger.Close()
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// 400 is not a fallback status — client gets it immediately without retrying.
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, 1, primaryHits, "primary should be attempted once")
+	require.Equal(t, 0, secondaryHits, "secondary should never be reached")
+}
+
+// TestFallback_AllExhausted503 verifies that exhausting all entries returns 503.
+func TestFallback_AllExhausted503(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildVirtualFallbackHandler(t, primary.URL, secondary.URL)
+	defer logger.Close()
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+// TestFallback_FirstSuccessShortCircuits verifies no unnecessary fallbacks when first entry succeeds.
+func TestFallback_FirstSuccessShortCircuits(t *testing.T) {
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondaryHits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer secondary.Close()
+
+	cannedResp := anthropicSuccessResponse()
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(cannedResp))
+	}))
+	defer primary.Close()
+
+	handler, st, logger := buildVirtualFallbackHandler(t, primary.URL, secondary.URL)
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 0, secondaryHits, "secondary should not be hit on first-entry success")
+
+	// FallbackAttempts should be 1 (no fallback needed).
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(1), logs[0].FallbackAttempts)
+}
+
+// TestFallback_FallbackAttempts_Count verifies attempt counts in log entries (T020).
+func TestFallback_FallbackAttempts_Count(t *testing.T) {
+	// Build primary (fails) + secondary (succeeds).
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	cannedResp := anthropicSuccessResponse()
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(cannedResp))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildVirtualFallbackHandler(t, primary.URL, secondary.URL)
+
+	// Request 1: first-entry success (direct model, not virtual).
+	cannedPrimary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(cannedResp))
+	}))
+	defer cannedPrimary.Close()
+
+	// Use virtual model — primary fails, secondary succeeds → attempts = 2.
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts, "one fallback means attempt count = 2")
+}
+
+// --- fallback test utilities ---
+
+// anthropicSuccessResponse returns a minimal valid Anthropic response.
+func anthropicSuccessResponse() map[string]interface{} {
+	return map[string]interface{}{
+		"id":          "msg_test",
+		"type":        "message",
+		"role":        "assistant",
+		"content":     []map[string]interface{}{{"type": "text", "text": "ok"}},
+		"model":       "claude-3",
+		"stop_reason": "end_turn",
+		"usage":       map[string]interface{}{"input_tokens": 5, "output_tokens": 1},
+	}
+}
+
+// setupFallbackStore creates a minimal store for fallback tests.
+func setupFallbackStore(t *testing.T) (*store.SQLiteStore, string) {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "fbt.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+	require.NoError(t, st.Migrate(context.Background()))
+
+	_, hash, prefix, err := auth.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, st.CreateProxyKey(context.Background(), "fbt-id", hash, prefix, "fbt"))
+	return st, prefix
+}
+
+// buildVirtualFallbackHandler builds a handler with a two-entry virtual model "virtual".
+func buildVirtualFallbackHandler(t *testing.T, primaryURL, secondaryURL string) (*proxy.Handler, *store.SQLiteStore, *proxy.AsyncLogger) {
+	t.Helper()
+	st, _ := setupFallbackStore(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+  - name: primary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1
+    default_version: "2023-06-01"
+  - name: secondary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key2
+    default_version: "2023-06-01"
+model_list:
+  - model_name: virtual
+    fallbacks: [primary-model, secondary-model]
+  - model_name: primary-model
+    provider: primary
+    upstream_model: claude-3
+  - model_name: secondary-model
+    provider: secondary
+    upstream_model: claude-3
+`, primaryURL, secondaryURL)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	providers := map[string]provider.Provider{
+		"primary":   anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01"),
+		"secondary": anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01"),
+	}
+
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	return handler, st, logger
+}
 
 // buildAnthropicSSEStream constructs a valid Anthropic SSE stream payload.
 func buildAnthropicSSEStream(msgID string, inputTokens, outputTokens int64, text string) string {

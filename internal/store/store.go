@@ -1,4 +1,4 @@
-// Package store provides the data-access layer for llm-proxy.
+// Package store provides the data-access layer for glitchgate.
 package store
 
 import (
@@ -32,6 +32,9 @@ type Store interface {
 	// ListDistinctModels returns all distinct model_requested values from
 	// request_logs, ordered alphabetically.
 	ListDistinctModels(ctx context.Context) ([]string, error)
+	// ListDistinctStatuses returns all distinct response_status values from
+	// request_logs, ordered numerically.
+	ListDistinctStatuses(ctx context.Context) ([]int, error)
 	// CountLogsSince returns the number of request log entries created after the
 	// entry with the given ID that also match the active filter in params.
 	// Returns 0 if sinceID is empty or not found.
@@ -117,6 +120,7 @@ type RequestLogEntry struct {
 	EstimatedCostUSD         *float64
 	ErrorDetails             *string
 	IsStreaming              bool
+	FallbackAttempts         int64
 }
 
 // ListLogsParams controls filtering, sorting, and pagination for log listing.
@@ -154,6 +158,7 @@ type RequestLogSummary struct {
 	EstimatedCostUSD         *float64
 	IsStreaming              bool
 	ErrorDetails             *string
+	FallbackAttempts         int64
 }
 
 // RequestLogDetail extends RequestLogSummary with full request/response bodies.

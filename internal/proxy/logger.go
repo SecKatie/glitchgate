@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // AsyncLogger writes request log entries to the store asynchronously

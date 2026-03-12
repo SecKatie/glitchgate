@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // UISessionMiddleware validates the llmp_session cookie against the database,

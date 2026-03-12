@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{block "title" .}}llm-proxy{{end}}</title>
+    <title>{{block "title" .}}glitchgate{{end}}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="/ui/static/htmx.min.js"></script>
     <style>
@@ -45,6 +45,7 @@
             margin-bottom: 0;
             padding: 0.25rem 0.5rem;
             height: 2.5rem;
+            min-width: 7rem;
         }
         .pagination {
             display: flex;
@@ -226,6 +227,40 @@
             margin-left: 0.25rem;
             vertical-align: middle;
         }
+        /* Details/summary as clearly clickable section headers */
+        details > summary {
+            cursor: pointer;
+            user-select: none;
+            padding: 0.4rem 0.75rem;
+            background: color-mix(in srgb, var(--pico-primary) 7%, transparent);
+            transition: background 0.12s, color 0.12s;
+        }
+        details > summary:hover {
+            background: color-mix(in srgb, var(--pico-primary) 16%, transparent);
+            color: var(--pico-primary);
+        }
+        details {
+            margin-bottom: 0;
+        }
+        /* Small inline summaries stay minimal */
+        .tool-full-summary {
+            background: none;
+        }
+        .tool-full-summary:hover {
+            background: none;
+            text-decoration: underline;
+        }
+        /* Inline "show full result" link in tool blocks */
+        .result-expand-link {
+            display: inline-block;
+            font-size: 0.78em;
+            color: var(--pico-primary);
+            margin-top: 0.25rem;
+            cursor: pointer;
+        }
+        .result-expand-link:hover {
+            text-decoration: underline;
+        }
     </style>
     {{block "head" .}}{{end}}
 </head>
@@ -233,7 +268,7 @@
     <main class="container">
         <nav>
             <ul>
-                <li><strong>llm-proxy</strong></li>
+                <li><strong>glitchgate</strong></li>
             </ul>
             <ul>
                 <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page" class="nav-active"{{end}}>Logs</a></li>
@@ -311,20 +346,18 @@
     }
 
     // ---------------------------------------------------------------------------
-    // Toggle full/truncated tool result via <details ontoggle>
+    // Toggle full/truncated tool result via inline link
     // ---------------------------------------------------------------------------
-    function toggleFullResult(det) {
-        var parent = det.parentElement;
-        var short = parent.querySelector('.result-short');
-        var full  = parent.querySelector('.result-full');
-        if (!short || !full) return;
-        if (det.open) {
-            short.hidden = true;
-            full.hidden  = false;
-        } else {
-            short.hidden = false;
-            full.hidden  = true;
-        }
+    function toggleFullResult(link) {
+        var block = link.parentElement;
+        var short = block.querySelector('.result-short');
+        var full  = block.querySelector('.result-full');
+        if (!short || !full) return false;
+        var expanding = full.hidden;
+        full.hidden  = !expanding;
+        short.hidden = expanding;
+        link.textContent = expanding ? 'show less' : 'show full result';
+        return false;
     }
 
     // ---------------------------------------------------------------------------

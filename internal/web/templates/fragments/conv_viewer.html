@@ -27,11 +27,11 @@
             {{end}}
             {{if .ResultContent}}
             <details>
-                <summary>Tool result</summary>
+                <summary class="tool-full-summary">Tool result</summary>
                 {{if .ResultTrunc}}
                 <p class="result-short">{{.ResultContent}}</p>
+                <a href="#" class="result-expand-link" onclick="return toggleFullResult(this)">show full result</a>
                 <p class="result-full" hidden>{{.FullText}}</p>
-                <details ontoggle="toggleFullResult(this)"><summary>Full result</summary></details>
                 {{else}}
                 <p>{{.ResultContent}}</p>
                 {{end}}
@@ -43,8 +43,8 @@
             <strong>Tool result{{if .ToolName}} for <code>{{.ToolName}}</code>{{end}}</strong>
             {{if .ResultTrunc}}
             <p class="result-short">{{.ResultContent}}</p>
+            <a href="#" class="result-expand-link" onclick="return toggleFullResult(this)">show full result</a>
             <p class="result-full" hidden>{{.FullText}}</p>
-            <details ontoggle="toggleFullResult(this)"><summary>Full result</summary></details>
             {{else}}
             <p>{{.ResultContent}}</p>
             {{end}}

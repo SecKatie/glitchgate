@@ -3,8 +3,8 @@
 package web
 
 import (
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // buildScopeParams populates the ScopeType/ScopeUserID/ScopeTeamID fields of

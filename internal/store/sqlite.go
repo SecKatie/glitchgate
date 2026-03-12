@@ -206,12 +206,17 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		model_requested, model_upstream, input_tokens, output_tokens,
 		cache_creation_input_tokens, cache_read_input_tokens,
 		latency_ms, status, request_body, response_body,
-		estimated_cost_usd, error_details, is_streaming
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		estimated_cost_usd, error_details, is_streaming, fallback_attempts
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	isStreaming := 0
 	if entry.IsStreaming {
 		isStreaming = 1
+	}
+
+	fallbackAttempts := entry.FallbackAttempts
+	if fallbackAttempts < 1 {
+		fallbackAttempts = 1
 	}
 
 	_, err := s.db.ExecContext(ctx, query,
@@ -233,6 +238,7 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		entry.EstimatedCostUSD,
 		entry.ErrorDetails,
 		isStreaming,
+		fallbackAttempts,
 	)
 	if err != nil {
 		return fmt.Errorf("insert request log: %w", err)
@@ -334,7 +340,8 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 			rl.input_tokens, rl.output_tokens,
 			rl.cache_creation_input_tokens, rl.cache_read_input_tokens,
 			rl.latency_ms, rl.status,
-			rl.estimated_cost_usd, rl.is_streaming, rl.error_details
+			rl.estimated_cost_usd, rl.is_streaming, rl.error_details,
+			rl.fallback_attempts
 		FROM request_logs rl
 		JOIN proxy_keys pk ON pk.id = rl.proxy_key_id
 		%s
@@ -360,6 +367,7 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 			&l.CacheCreationInputTokens, &l.CacheReadInputTokens,
 			&l.LatencyMs, &l.Status,
 			&l.EstimatedCostUSD, &isStreaming, &l.ErrorDetails,
+			&l.FallbackAttempts,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan request log: %w", err)
 		}
@@ -387,7 +395,8 @@ func (s *SQLiteStore) GetRequestLog(ctx context.Context, id string) (*RequestLog
 			rl.cache_creation_input_tokens, rl.cache_read_input_tokens,
 			rl.latency_ms, rl.status,
 			rl.estimated_cost_usd, rl.is_streaming, rl.error_details,
-			rl.request_body, rl.response_body
+			rl.request_body, rl.response_body,
+			rl.fallback_attempts
 		FROM request_logs rl
 		JOIN proxy_keys pk ON pk.id = rl.proxy_key_id
 		WHERE rl.id = ?`
@@ -405,6 +414,7 @@ func (s *SQLiteStore) GetRequestLog(ctx context.Context, id string) (*RequestLog
 		&d.LatencyMs, &d.Status,
 		&d.EstimatedCostUSD, &isStreaming, &d.ErrorDetails,
 		&d.RequestBody, &d.ResponseBody,
+		&d.FallbackAttempts,
 	); err != nil {
 		return nil, fmt.Errorf("get request log: %w", err)
 	}
@@ -486,6 +496,34 @@ func (s *SQLiteStore) ListDistinctModels(ctx context.Context) ([]string, error) 
 	}
 
 	return models, nil
+}
+
+// ListDistinctStatuses returns all distinct response_status values from request_logs, ordered numerically.
+func (s *SQLiteStore) ListDistinctStatuses(ctx context.Context) ([]int, error) {
+	const query = `SELECT DISTINCT status FROM request_logs ORDER BY status`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list distinct statuses: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var statuses []int
+	for rows.Next() {
+		var st int
+		if err := rows.Scan(&st); err != nil {
+			return nil, fmt.Errorf("scan distinct status: %w", err)
+		}
+		statuses = append(statuses, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate distinct statuses: %w", err)
+	}
+	if statuses == nil {
+		statuses = []int{}
+	}
+
+	return statuses, nil
 }
 
 // --------------------------------------------------------------------------

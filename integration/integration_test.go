@@ -23,13 +23,13 @@ import (
 	openaioption "github.com/openai/openai-go/option"
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/llm-proxy/internal/auth"
-	"codeberg.org/kglitchy/llm-proxy/internal/config"
-	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
-	"codeberg.org/kglitchy/llm-proxy/internal/provider"
-	llmanthropic "codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
-	"codeberg.org/kglitchy/llm-proxy/internal/proxy"
-	"codeberg.org/kglitchy/llm-proxy/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	llmanthropic "codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"codeberg.org/kglitchy/glitchgate/internal/proxy"
+	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // integrationHarness wires up a full proxy server backed by a mock upstream.
@@ -84,7 +84,7 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 		"anthropic": llmanthropic.NewClient("anthropic", upstream.URL, "proxy_key", "fake-upstream-key", "2023-06-01"),
 	}
 
-	calc := pricing.NewCalculator(pricing.DefaultPricing)
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 	t.Cleanup(func() { logger.Close() })
 

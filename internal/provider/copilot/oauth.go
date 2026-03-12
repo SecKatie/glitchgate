@@ -23,6 +23,10 @@ const (
 	copilotTokenURL   = "https://api.github.com/copilot_internal/v2/token" // #nosec G101 -- URL, not a credential
 	defaultCopilotAPI = "https://api.githubcopilot.com"
 
+	// DefaultAPIURL is the canonical GitHub Copilot API base URL.
+	// Exported for use in pricing key derivation.
+	DefaultAPIURL = defaultCopilotAPI
+
 	editorVersion        = "vscode/1.85.1"
 	editorPluginVersion  = "copilot/1.155.0"
 	copilotIntegrationID = "vscode-chat"
@@ -167,7 +171,7 @@ func ExchangeForCopilotToken(ctx context.Context, githubToken string) (*SessionT
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("GitHub token is invalid or revoked — please re-run: llm-proxy auth copilot")
+		return nil, fmt.Errorf("GitHub token is invalid or revoked — please re-run: glitchgate auth copilot")
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

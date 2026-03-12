@@ -1,6 +1,6 @@
 .PHONY: build test lint audit clean generate
 
-BINARY := llm-proxy
+BINARY := glitchgate
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) .

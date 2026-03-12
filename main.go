@@ -4,7 +4,7 @@ package main
 import (
 	_ "time/tzdata" // embed IANA timezone data for portable builds
 
-	"codeberg.org/kglitchy/llm-proxy/cmd"
+	"codeberg.org/kglitchy/glitchgate/cmd"
 )
 
 func main() {
