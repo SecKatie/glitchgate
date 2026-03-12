@@ -1,0 +1,61 @@
+{{define "conv_viewer"}}
+{{range .}}
+<div class="conv-turn" data-role="{{.Role}}">
+    <div class="conv-role">{{if eq .Role "user"}}User{{else if eq .Role "assistant"}}Assistant{{else if eq .Role "system"}}System{{else}}{{.Role}}{{end}}</div>
+    {{range .Blocks}}
+    <div class="conv-block">
+        {{if eq .Type "text"}}
+            {{if .Truncated}}
+            <p class="conv-text-short">{{.Text}}…</p>
+            <p class="conv-text-full" hidden>{{.FullText}}</p>
+            <a href="#" class="text-expand-link" onclick="return expandConvText(this)">show full text</a>
+            {{else}}
+            <p>{{.Text}}</p>
+            {{end}}
+        {{else if eq .Type "tool_use"}}
+        <div class="conv-tool">
+            <strong>Tool call:</strong> <code>{{.ToolName}}</code>
+            {{if .ToolArgs}}
+            <table class="tool-args">
+                <tbody>
+                    {{range .ToolArgs}}<tr><td><code>{{.Key}}</code></td><td>{{.Value}}{{if .Trunc}} <span class="trunc-hint">(truncated)</span>{{end}}</td></tr>{{end}}
+                </tbody>
+            </table>
+            {{end}}
+            {{if .ToolInput}}
+            <details><summary class="tool-full-summary">Full arguments</summary><pre><code>{{.ToolInput}}</code></pre></details>
+            {{end}}
+            {{if .ResultContent}}
+            <details>
+                <summary>Tool result</summary>
+                {{if .ResultTrunc}}
+                <p class="result-short">{{.ResultContent}}</p>
+                <p class="result-full" hidden>{{.FullText}}</p>
+                <details ontoggle="toggleFullResult(this)"><summary>Full result</summary></details>
+                {{else}}
+                <p>{{.ResultContent}}</p>
+                {{end}}
+            </details>
+            {{end}}
+        </div>
+        {{else if eq .Type "tool_result"}}
+        <div class="conv-tool">
+            <strong>Tool result{{if .ToolName}} for <code>{{.ToolName}}</code>{{end}}</strong>
+            {{if .ResultTrunc}}
+            <p class="result-short">{{.ResultContent}}</p>
+            <p class="result-full" hidden>{{.FullText}}</p>
+            <details ontoggle="toggleFullResult(this)"><summary>Full result</summary></details>
+            {{else}}
+            <p>{{.ResultContent}}</p>
+            {{end}}
+        </div>
+        {{else if or (eq .Type "image") (eq .Type "document")}}
+        <p><em>{{.MediaLabel}}</em></p>
+        {{else}}
+        <p><em>{{.Text}}</em></p>
+        {{end}}
+    </div>
+    {{end}}
+</div>
+{{end}}
+{{end}}

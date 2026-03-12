@@ -1,0 +1,159 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Log Detail - llm-proxy{{end}}
+
+{{define "content"}}
+<p><a href="/ui/logs">&laquo; Back to logs</a></p>
+
+{{with .Log}}
+{{/* Cost / token headline */}}
+<article>
+    <div class="cost-headline">
+        <div class="cost-headline-item">
+            <div class="cost-headline-value">
+                {{if $.Cost.PricingKnown}}${{printf "%.6f" (deref $.Cost.TotalCostUSD)}}{{else if .EstimatedCostUSD}}${{printf "%.6f" (deref .EstimatedCostUSD)}}{{else}}Unknown{{end}}
+            </div>
+            <div class="cost-headline-label">Estimated Cost</div>
+        </div>
+        <div class="cost-headline-item">
+            <div class="cost-headline-value">{{.InputTokens}}</div>
+            <div class="cost-headline-label">Input Tokens</div>
+        </div>
+        {{if gt .CacheReadInputTokens 0}}
+        <div class="cost-headline-item">
+            <div class="cost-headline-value">{{.CacheReadInputTokens}}</div>
+            <div class="cost-headline-label">Cache Read Tokens</div>
+        </div>
+        {{end}}
+        {{if gt .CacheCreationInputTokens 0}}
+        <div class="cost-headline-item">
+            <div class="cost-headline-value">{{.CacheCreationInputTokens}}</div>
+            <div class="cost-headline-label">Cache Write Tokens</div>
+        </div>
+        {{end}}
+        <div class="cost-headline-item">
+            <div class="cost-headline-value">{{.OutputTokens}}</div>
+            <div class="cost-headline-label">Output Tokens</div>
+        </div>
+    </div>
+
+    {{/* Token Details collapsible */}}
+    <details>
+        <summary class="token-details-summary"><strong>Token Details</strong></summary>
+        <table class="token-detail">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th style="text-align:right">Tokens</th>
+                    {{if $.Cost.PricingKnown}}<th style="text-align:right">Rate ($/MT)</th><th style="text-align:right">Cost</th>{{end}}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Uncached Input</td>
+                    <td style="text-align:right">{{.InputTokens}}</td>
+                    {{if $.Cost.PricingKnown}}<td style="text-align:right;color:var(--pico-muted-color)">${{printf "%.2f" $.Cost.InputRatePerMillion}}</td><td style="text-align:right">${{printf "%.6f" (deref $.Cost.InputCostUSD)}}</td>{{end}}
+                </tr>
+                <tr>
+                    <td>Cache Write</td>
+                    <td style="text-align:right">{{.CacheCreationInputTokens}}</td>
+                    {{if $.Cost.PricingKnown}}<td style="text-align:right;color:var(--pico-muted-color)">${{printf "%.2f" $.Cost.CacheWriteRatePerMillion}}</td><td style="text-align:right">${{printf "%.6f" (deref $.Cost.CacheWriteCostUSD)}}</td>{{end}}
+                </tr>
+                <tr>
+                    <td>Cache Read</td>
+                    <td style="text-align:right">{{.CacheReadInputTokens}}</td>
+                    {{if $.Cost.PricingKnown}}<td style="text-align:right;color:var(--pico-muted-color)">${{printf "%.2f" $.Cost.CacheReadRatePerMillion}}</td><td style="text-align:right">${{printf "%.6f" (deref $.Cost.CacheReadCostUSD)}}</td>{{end}}
+                </tr>
+                <tr>
+                    <td>Output</td>
+                    <td style="text-align:right">{{.OutputTokens}}</td>
+                    {{if $.Cost.PricingKnown}}<td style="text-align:right;color:var(--pico-muted-color)">${{printf "%.2f" $.Cost.OutputRatePerMillion}}</td><td style="text-align:right">${{printf "%.6f" (deref $.Cost.OutputCostUSD)}}</td>{{end}}
+                </tr>
+            </tbody>
+        </table>
+    </details>
+
+    {{/* Secondary metadata */}}
+    <hr style="margin:1rem 0">
+    <div class="grid" style="font-size:0.9em">
+        <div>
+            <strong>ID:</strong>
+            <code class="mono">{{.ID}}</code>
+            <button class="outline secondary copy-btn" onclick="copyText(this, '{{.ID}}')" title="Copy ID">⎘</button><br>
+            <strong>Time:</strong> {{fmtET .Timestamp "2006-01-02 15:04:05 ET"}}<br>
+            <strong>Status:</strong> <span class="{{if lt .Status 400}}status-ok{{else}}status-err{{end}}">{{.Status}}</span><br>
+            <strong>Format:</strong> {{.SourceFormat}}<br>
+        </div>
+        <div>
+            <strong>Model (requested):</strong> {{.ModelRequested}}<br>
+            <strong>Model (upstream):</strong> {{.ModelUpstream}}<br>
+            <strong>Latency:</strong> {{.LatencyMs}}ms<br>
+            <strong>Streaming:</strong> {{if .IsStreaming}}Yes{{else}}No{{end}}<br>
+        </div>
+        <div>
+            <strong>Provider:</strong> {{.ProviderName}}<br>
+            <strong>Proxy Key:</strong> <code class="mono">{{.ProxyKeyPrefix}}</code> ({{.ProxyKeyLabel}})<br>
+        </div>
+    </div>
+
+    {{if .ErrorDetails}}<p style="color:var(--pico-del-color);margin-top:0.5rem"><strong>Error:</strong> {{deref .ErrorDetails}}</p>{{end}}
+</article>
+{{end}}
+
+{{/* Structured conversation viewer */}}
+{{with .Conversation}}
+
+{{if .ParseFailed}}
+{{/* Fallback: pretty-printed raw JSON */}}
+<p style="color:var(--pico-muted-color);font-size:0.85em"><em>Could not parse conversation structure — showing raw bodies.</em></p>
+{{else}}
+
+{{/* System Prompt */}}
+{{if .HasSystem}}
+<details>
+    <summary><strong>System Prompt</strong> ({{.SystemPromptLen}} chars)</summary>
+    <div class="conv-turn" style="border-color:var(--pico-primary-border)">
+        <div class="conv-block"><p>{{.SystemPrompt}}</p></div>
+    </div>
+</details>
+{{end}}
+
+{{/* Latest Prompt */}}
+{{if .LatestPrompt}}
+<h5 style="margin-top:1rem;margin-bottom:0.5rem">Latest Prompt</h5>
+<article style="margin-bottom:0.5rem">
+    {{template "conv_viewer" (wrapTurn .LatestPrompt)}}
+</article>
+{{end}}
+
+{{/* Response */}}
+{{if .Response}}
+<h5 style="margin-bottom:0.5rem">Response</h5>
+<article style="margin-bottom:0.5rem">
+    {{template "conv_viewer" (wrapTurn .Response)}}
+</article>
+{{end}}
+
+{{/* Conversation History */}}
+{{if .History}}
+<details>
+    <summary><strong>Conversation History</strong> ({{len .History}} turn{{if gt (len .History) 1}}s{{end}})</summary>
+    <div style="margin-top:0.5rem">
+        {{template "conv_viewer" .History}}
+    </div>
+</details>
+{{end}}
+
+{{end}}{{/* end ParseFailed else */}}
+
+{{/* View Raw JSON — always available */}}
+<details style="margin-top:1rem">
+    <summary><strong>View Raw JSON</strong></summary>
+    <h6>Request Body</h6>
+    <pre class="body-preview"><code>{{.RawRequest}}</code></pre>
+    <h6>Response Body</h6>
+    <pre class="body-preview"><code>{{.RawResponse}}</code></pre>
+</details>
+
+{{end}}{{/* end with .Conversation */}}
+{{end}}

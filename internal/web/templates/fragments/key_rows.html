@@ -1,0 +1,24 @@
+{{define "key_rows"}}
+{{range .Keys}}
+<tr>
+    <td class="mono">{{.KeyPrefix}}</td>
+    <td>
+        <input type="text" class="label-edit" value="{{.Label}}" maxlength="64"
+            hx-post="/ui/api/keys/{{.KeyPrefix}}/update"
+            hx-trigger="blur changed, keydown[key=='Enter'] changed"
+            hx-target="#key-table-body"
+            hx-swap="innerHTML"
+            name="label"
+            aria-label="Edit label for {{.KeyPrefix}}">
+    </td>
+    <td>{{fmtET .CreatedAt "2006-01-02 15:04 ET"}}</td>
+    <td>
+        <button class="outline secondary" style="padding:0.15rem 0.5rem;margin:0;font-size:0.85em"
+            hx-post="/ui/api/keys/{{.KeyPrefix}}/revoke"
+            hx-target="#key-table-body"
+            hx-swap="innerHTML"
+            hx-confirm="Delete key {{.KeyPrefix}}? This cannot be undone.">Delete</button>
+    </td>
+</tr>
+{{end}}
+{{end}}

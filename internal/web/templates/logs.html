@@ -1,0 +1,154 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Logs - llm-proxy{{end}}
+
+{{define "content"}}
+<h3>Request Logs</h3>
+
+<form id="filter-form" class="filter-bar" hx-get="/ui/api/logs" hx-target="#log-table-body" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
+    <div>
+        <label for="model">Model</label>
+        <select id="model" name="model">
+            <option value="">All models</option>
+            {{range .Models}}<option value="{{.}}" {{if eq $.Model .}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+    </div>
+    <div>
+        <label for="status">Status</label>
+        <select id="status" name="status">
+            <option value="">All</option>
+            <option value="200" {{if eq .StatusFilter "200"}}selected{{end}}>200</option>
+            <option value="400" {{if eq .StatusFilter "400"}}selected{{end}}>400</option>
+            <option value="401" {{if eq .StatusFilter "401"}}selected{{end}}>401</option>
+            <option value="429" {{if eq .StatusFilter "429"}}selected{{end}}>429</option>
+            <option value="500" {{if eq .StatusFilter "500"}}selected{{end}}>500</option>
+            <option value="502" {{if eq .StatusFilter "502"}}selected{{end}}>502</option>
+        </select>
+    </div>
+    <div>
+        <label for="key_prefix">Key Prefix</label>
+        <input type="text" id="key_prefix" name="key_prefix" placeholder="Filter by prefix" value="{{.KeyPrefix}}">
+    </div>
+    <div>
+        <label for="from">From</label>
+        <input type="date" id="from" name="from" value="{{.From}}">
+    </div>
+    <div>
+        <label for="to">To</label>
+        <input type="date" id="to" name="to" value="{{.To}}">
+    </div>
+    <div>
+        <button type="submit" style="margin-bottom:0">Filter</button>
+    </div>
+    <a href="#" id="clear-filters" style="display:none;font-size:0.85em;align-self:center" onclick="clearFilters(); return false;">Clear</a>
+</form>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+    <small>{{.Total}} entries</small>
+    <span style="display:flex;align-items:center;gap:0.75rem;">
+        <small id="refresh-status" class="refresh-status">Auto-refreshing (10s)</small>
+        <button id="refresh-toggle" class="outline secondary" style="padding:0.1rem 0.5rem;font-size:0.8em;margin:0"
+            onclick="toggleRefresh(this)">Pause</button>
+    </span>
+</div>
+
+<div id="new-entries-banner" style="display:none" role="alert" class="new-entries-banner">
+    <span><strong><span id="new-entries-count"></span> new entries</strong> — <a href="/ui/logs">view latest</a></span>
+    <button class="outline secondary" style="padding:0.1rem 0.4rem;font-size:0.8em;margin:0"
+        onclick="document.getElementById('new-entries-banner').style.display='none'">×</button>
+</div>
+
+<figure>
+<table role="grid">
+    <thead>
+        <tr>
+            <th>Time (ET)</th>
+            <th>Model</th>
+            <th>Key</th>
+            <th>Status</th>
+            <th>In Tokens</th>
+            <th>Out Tokens</th>
+            <th>Latency</th>
+            <th class="cost">Cost</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="log-table-body"
+        hx-get="/ui/api/logs"
+        hx-trigger="every 10s"
+        hx-include="#filter-form"
+        hx-swap="innerHTML"
+        hx-vals='{"page": "{{.Page}}"{{if gt .Page 1}}, "since_id": "{{.FirstID}}"{{end}}}'
+        hx-on:htmx:after-request="updateRefreshStatus(event)"
+        hx-on:htmx:response-error="markRefreshFailed()">
+        {{template "log_rows" .}}
+    </tbody>
+</table>
+</figure>
+
+{{if gt .TotalPages 1}}
+<nav class="pagination">
+    <ul>
+        {{if gt .Page 1}}<li><a href="/ui/logs?page={{subtract .Page 1}}" hx-get="/ui/api/logs?page={{subtract .Page 1}}" hx-target="#log-table-body" hx-swap="innerHTML">Previous</a></li>{{end}}
+        <li>Page {{.Page}} of {{.TotalPages}}</li>
+        {{if lt .Page .TotalPages}}<li><a href="/ui/logs?page={{add .Page 1}}" hx-get="/ui/api/logs?page={{add .Page 1}}" hx-target="#log-table-body" hx-swap="innerHTML">Next</a></li>{{end}}
+    </ul>
+</nav>
+{{end}}
+
+<script>
+var refreshPaused = false;
+function toggleRefresh(btn) {
+    var tbody = document.getElementById('log-table-body');
+    if (!tbody) return;
+    if (refreshPaused) {
+        tbody.setAttribute('hx-trigger', 'every 10s');
+        htmx.process(tbody);
+        btn.textContent = 'Pause';
+        refreshPaused = false;
+        var el = document.getElementById('refresh-status');
+        if (el) { el.textContent = 'Auto-refreshing (10s)'; el.className = 'refresh-status'; }
+    } else {
+        tbody.removeAttribute('hx-trigger');
+        htmx.process(tbody);
+        btn.textContent = 'Resume';
+        refreshPaused = true;
+        var el = document.getElementById('refresh-status');
+        if (el) { el.textContent = 'Paused'; el.className = 'refresh-status'; }
+    }
+}
+
+function clearFilters() {
+    var form = document.getElementById('filter-form');
+    if (!form) return;
+    form.querySelectorAll('input, select').forEach(function(el) {
+        if (el.type === 'submit') return;
+        el.value = '';
+    });
+    document.getElementById('clear-filters').style.display = 'none';
+    htmx.trigger(form, 'submit');
+}
+
+function updateFilterVisibility() {
+    var form = document.getElementById('filter-form');
+    var clearLink = document.getElementById('clear-filters');
+    if (!form || !clearLink) return;
+    var hasFilter = false;
+    form.querySelectorAll('input, select').forEach(function(el) {
+        if (el.type === 'submit') return;
+        if (el.value && el.value !== '') hasFilter = true;
+    });
+    clearLink.style.display = hasFilter ? '' : 'none';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateFilterVisibility();
+    var form = document.getElementById('filter-form');
+    if (form) {
+        form.addEventListener('submit', function() {
+            setTimeout(updateFilterVisibility, 100);
+        });
+    }
+});
+</script>
+{{end}}
