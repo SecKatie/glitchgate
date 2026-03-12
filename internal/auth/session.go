@@ -3,87 +3,76 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"sync"
+	"fmt"
 	"time"
+
+	"github.com/google/uuid"
+
+	"codeberg.org/kglitchy/llm-proxy/internal/store"
 )
 
-const sessionTokenBytes = 32
+const (
+	sessionTokenBytes = 32
+	sessionTTL        = 8 * time.Hour
+)
 
-// Session represents an authenticated UI session.
-type Session struct {
-	Token     string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+// UISessionStore manages UI sessions backed by the database.
+type UISessionStore struct {
+	store store.Store
 }
 
-// SessionStore is an in-memory store for UI sessions with automatic expiry.
-type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
-	ttl      time.Duration
+// NewUISessionStore creates a UISessionStore backed by the given store.
+func NewUISessionStore(s store.Store) *UISessionStore {
+	return &UISessionStore{store: s}
 }
 
-// NewSessionStore creates a SessionStore with the given session lifetime.
-func NewSessionStore(ttl time.Duration) *SessionStore {
-	return &SessionStore{
-		sessions: make(map[string]*Session),
-		ttl:      ttl,
-	}
-}
-
-// Create generates a new session with a cryptographically random token.
-func (s *SessionStore) Create() (*Session, error) {
+// Create generates a new session of the given type and persists it.
+// userID is empty for master_key sessions.
+func (s *UISessionStore) Create(ctx context.Context, sessionType, userID string) (*store.UISession, error) {
 	raw := make([]byte, sessionTokenBytes)
 	if _, err := rand.Read(raw); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generate session token: %w", err)
+	}
+	token := hex.EncodeToString(raw)
+	id := uuid.New().String()
+	expiresAt := time.Now().UTC().Add(sessionTTL)
+
+	if err := s.store.CreateUISession(ctx, id, token, sessionType, userID, expiresAt); err != nil {
+		return nil, fmt.Errorf("persist ui session: %w", err)
 	}
 
-	now := time.Now().UTC()
-	sess := &Session{
-		Token:     hex.EncodeToString(raw),
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.ttl),
+	sess := &store.UISession{
+		ID:          id,
+		Token:       token,
+		SessionType: sessionType,
+		CreatedAt:   time.Now().UTC(),
+		ExpiresAt:   expiresAt,
 	}
-
-	s.mu.Lock()
-	s.sessions[sess.Token] = sess
-	s.mu.Unlock()
-
+	if userID != "" {
+		sess.UserID = &userID
+	}
 	return sess, nil
 }
 
-// Validate checks whether the given token refers to an active (non-expired)
-// session.
-func (s *SessionStore) Validate(token string) bool {
-	s.mu.RLock()
-	sess, ok := s.sessions[token]
-	s.mu.RUnlock()
-
-	if !ok {
-		return false
-	}
-
-	return time.Now().UTC().Before(sess.ExpiresAt)
+// Validate checks the token and returns the session if valid.
+func (s *UISessionStore) Validate(ctx context.Context, token string) (*store.UISession, error) {
+	return s.store.GetUISessionByToken(ctx, token)
 }
 
-// Delete removes a session by token.
-func (s *SessionStore) Delete(token string) {
-	s.mu.Lock()
-	delete(s.sessions, token)
-	s.mu.Unlock()
+// Delete removes a session by token (logout).
+func (s *UISessionStore) Delete(ctx context.Context, token string) error {
+	return s.store.DeleteUISession(ctx, token)
 }
 
-// Cleanup removes all expired sessions.
-func (s *SessionStore) Cleanup() {
-	now := time.Now().UTC()
+// DeleteAllForUser removes all sessions for a given user (deactivation).
+func (s *UISessionStore) DeleteAllForUser(ctx context.Context, userID string) error {
+	return s.store.DeleteUISessionsByUserID(ctx, userID)
+}
 
-	s.mu.Lock()
-	for token, sess := range s.sessions {
-		if now.After(sess.ExpiresAt) {
-			delete(s.sessions, token)
-		}
-	}
-	s.mu.Unlock()
+// Cleanup removes expired sessions.
+func (s *UISessionStore) Cleanup(ctx context.Context) error {
+	return s.store.CleanupExpiredSessions(ctx)
 }

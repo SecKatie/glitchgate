@@ -282,6 +282,18 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 		args = append(args, params.To)
 	}
 
+	// Scope filtering.
+	switch params.ScopeType {
+	case "user":
+		where = append(where, "pk.owner_user_id = ?")
+		args = append(args, params.ScopeUserID)
+	case "team":
+		where = append(where, `pk.owner_user_id IN (
+			SELECT user_id FROM team_memberships WHERE team_id = ?
+		)`)
+		args = append(args, params.ScopeTeamID)
+	}
+
 	whereClause := ""
 	if len(where) > 0 {
 		whereClause = "WHERE " + strings.Join(where, " AND ")
@@ -482,6 +494,8 @@ func (s *SQLiteStore) ListDistinctModels(ctx context.Context) ([]string, error) 
 
 // GetCostSummary returns aggregated cost totals for the given date range.
 func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*CostSummary, error) {
+	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
+
 	baseQuery := `SELECT
 		COALESCE(SUM(estimated_cost_usd), 0),
 		COALESCE(SUM(input_tokens), 0),
@@ -490,6 +504,10 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 		COALESCE(SUM(cache_read_input_tokens), 0),
 		COUNT(*)
 	FROM request_logs rl`
+
+	if needsKeyJoin {
+		baseQuery += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+	}
 
 	var conditions []string
 	var args []any
@@ -503,9 +521,17 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 		args = append(args, params.To)
 	}
 	if params.KeyPrefix != "" {
-		baseQuery += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
 		conditions = append(conditions, "pk.key_prefix = ?")
 		args = append(args, params.KeyPrefix)
+	}
+	switch params.ScopeType {
+	case "user":
+		conditions = append(conditions, "pk.owner_user_id = ?")
+		args = append(args, params.ScopeUserID)
+	case "team":
+		baseQuery += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
+		conditions = append(conditions, "tm.team_id = ?")
+		args = append(args, params.ScopeTeamID)
 	}
 
 	if len(conditions) > 0 {
@@ -525,6 +551,9 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 
 // GetCostBreakdown returns cost aggregated by model or key.
 func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error) {
+	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
+	teamJoin := params.ScopeType == "team"
+
 	var query string
 	var args []any
 
@@ -541,6 +570,10 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 		FROM request_logs rl
 		JOIN proxy_keys pk ON pk.id = rl.proxy_key_id`
 
+		if teamJoin {
+			query += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
+		}
+
 		var conditions []string
 		if params.From != "" {
 			conditions = append(conditions, "rl.timestamp >= ?")
@@ -553,6 +586,14 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 		if params.KeyPrefix != "" {
 			conditions = append(conditions, "pk.key_prefix = ?")
 			args = append(args, params.KeyPrefix)
+		}
+		switch params.ScopeType {
+		case "user":
+			conditions = append(conditions, "pk.owner_user_id = ?")
+			args = append(args, params.ScopeUserID)
+		case "team":
+			conditions = append(conditions, "tm.team_id = ?")
+			args = append(args, params.ScopeTeamID)
 		}
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
@@ -570,6 +611,13 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 			COUNT(*)
 		FROM request_logs rl`
 
+		if needsKeyJoin {
+			query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+		}
+		if teamJoin {
+			query += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
+		}
+
 		var conditions []string
 		if params.From != "" {
 			conditions = append(conditions, "rl.timestamp >= ?")
@@ -580,9 +628,16 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 			args = append(args, params.To)
 		}
 		if params.KeyPrefix != "" {
-			query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
 			conditions = append(conditions, "pk.key_prefix = ?")
 			args = append(args, params.KeyPrefix)
+		}
+		switch params.ScopeType {
+		case "user":
+			conditions = append(conditions, "pk.owner_user_id = ?")
+			args = append(args, params.ScopeUserID)
+		case "team":
+			conditions = append(conditions, "tm.team_id = ?")
+			args = append(args, params.ScopeTeamID)
 		}
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
@@ -616,11 +671,21 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 
 // GetCostTimeseries returns daily cost data for charting.
 func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error) {
+	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
+	teamJoin := params.ScopeType == "team"
+
 	query := `SELECT
 		SUBSTR(CAST(rl.timestamp AS TEXT), 1, 10) AS date,
 		COALESCE(SUM(rl.estimated_cost_usd), 0),
 		COUNT(*)
 	FROM request_logs rl`
+
+	if needsKeyJoin {
+		query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+	}
+	if teamJoin {
+		query += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
+	}
 
 	var conditions []string
 	var args []any
@@ -634,9 +699,16 @@ func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) 
 		args = append(args, params.To)
 	}
 	if params.KeyPrefix != "" {
-		query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
 		conditions = append(conditions, "pk.key_prefix = ?")
 		args = append(args, params.KeyPrefix)
+	}
+	switch params.ScopeType {
+	case "user":
+		conditions = append(conditions, "pk.owner_user_id = ?")
+		args = append(args, params.ScopeUserID)
+	case "team":
+		conditions = append(conditions, "tm.team_id = ?")
+		args = append(args, params.ScopeTeamID)
 	}
 
 	if len(conditions) > 0 {

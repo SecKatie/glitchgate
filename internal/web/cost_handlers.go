@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"codeberg.org/kglitchy/llm-proxy/internal/auth"
 	"codeberg.org/kglitchy/llm-proxy/internal/store"
 )
 
@@ -17,14 +18,19 @@ import (
 type CostHandlers struct {
 	store     store.Store
 	templates *TemplateSet
+	tz        *time.Location
 }
 
-// NewCostHandlers creates a new CostHandlers with the given store and
-// pre-parsed template set.
-func NewCostHandlers(s store.Store, tmpl *TemplateSet) *CostHandlers {
+// NewCostHandlers creates a new CostHandlers with the given store, template set,
+// and display timezone (pass nil or time.UTC for UTC).
+func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location) *CostHandlers {
+	if tz == nil {
+		tz = time.UTC
+	}
 	return &CostHandlers{
 		store:     s,
 		templates: tmpl,
+		tz:        tz,
 	}
 }
 
@@ -71,7 +77,7 @@ type costTimeseriesEntryJSON struct {
 // Helper: parse cost query parameters
 // --------------------------------------------------------------------------
 
-func parseCostParams(r *http.Request) store.CostParams {
+func (h *CostHandlers) parseCostParams(r *http.Request) store.CostParams {
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	groupBy := r.URL.Query().Get("group_by")
@@ -79,10 +85,10 @@ func parseCostParams(r *http.Request) store.CostParams {
 
 	// Default: last 30 days.
 	if from == "" {
-		from = time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+		from = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
 	}
 	if to == "" {
-		to = time.Now().UTC().Format("2006-01-02")
+		to = time.Now().In(h.tz).Format("2006-01-02")
 	}
 	if groupBy == "" {
 		groupBy = "model"
@@ -103,7 +109,8 @@ func parseCostParams(r *http.Request) store.CostParams {
 // CostSummaryHandler returns aggregated cost data with a breakdown grouped
 // by model or key. Query parameters: from, to, group_by (model|key), key.
 func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request) {
-	params := parseCostParams(r)
+	params := h.parseCostParams(r)
+	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	summary, err := h.store.GetCostSummary(r.Context(), params)
 	if err != nil {
@@ -133,11 +140,11 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 	// Strip time portion from params for the response.
 	fromDate := r.URL.Query().Get("from")
 	if fromDate == "" {
-		fromDate = time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+		fromDate = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
 	}
 	toDate := r.URL.Query().Get("to")
 	if toDate == "" {
-		toDate = time.Now().UTC().Format("2006-01-02")
+		toDate = time.Now().In(h.tz).Format("2006-01-02")
 	}
 
 	resp := costSummaryResponse{
@@ -165,7 +172,8 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 // CostTimeseriesHandler returns cost data bucketed over time.
 // Query parameters: from, to, interval (day|week|month), key.
 func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Request) {
-	params := parseCostParams(r)
+	params := h.parseCostParams(r)
+	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	interval := r.URL.Query().Get("interval")
 	if interval == "" {
@@ -192,11 +200,11 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 
 	fromDate := r.URL.Query().Get("from")
 	if fromDate == "" {
-		fromDate = time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+		fromDate = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
 	}
 	toDate := r.URL.Query().Get("to")
 	if toDate == "" {
-		toDate = time.Now().UTC().Format("2006-01-02")
+		toDate = time.Now().In(h.tz).Format("2006-01-02")
 	}
 
 	resp := costTimeseriesResponse{
@@ -281,7 +289,8 @@ func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) [
 
 // CostsPageHandler renders the full cost dashboard HTML page.
 func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) {
-	params := parseCostParams(r)
+	params := h.parseCostParams(r)
+	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	summary, err := h.store.GetCostSummary(r.Context(), params)
 	if err != nil {
@@ -319,11 +328,11 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 
 	fromDate := r.URL.Query().Get("from")
 	if fromDate == "" {
-		fromDate = time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+		fromDate = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
 	}
 	toDate := r.URL.Query().Get("to")
 	if toDate == "" {
-		toDate = time.Now().UTC().Format("2006-01-02")
+		toDate = time.Now().In(h.tz).Format("2006-01-02")
 	}
 
 	groupBy := r.URL.Query().Get("group_by")
@@ -368,7 +377,8 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 // CostSummaryFragmentHandler renders only the cost breakdown table as an
 // HTMX partial, used when filters change without a full page reload.
 func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http.Request) {
-	params := parseCostParams(r)
+	params := h.parseCostParams(r)
+	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	summary, err := h.store.GetCostSummary(r.Context(), params)
 	if err != nil {

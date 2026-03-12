@@ -19,9 +19,11 @@ import (
 
 	"codeberg.org/kglitchy/llm-proxy/internal/auth"
 	"codeberg.org/kglitchy/llm-proxy/internal/config"
+	oidcpkg "codeberg.org/kglitchy/llm-proxy/internal/oidc"
 	"codeberg.org/kglitchy/llm-proxy/internal/pricing"
 	"codeberg.org/kglitchy/llm-proxy/internal/provider"
 	"codeberg.org/kglitchy/llm-proxy/internal/provider/anthropic"
+	"codeberg.org/kglitchy/llm-proxy/internal/provider/copilot"
 	"codeberg.org/kglitchy/llm-proxy/internal/proxy"
 	"codeberg.org/kglitchy/llm-proxy/internal/store"
 	"codeberg.org/kglitchy/llm-proxy/internal/web"
@@ -60,6 +62,12 @@ func runServe(_ *cobra.Command, _ []string) error {
 		switch pc.Type {
 		case "anthropic":
 			providers[pc.Name] = anthropic.NewClient(pc.Name, pc.BaseURL, pc.AuthMode, pc.APIKey, pc.DefaultVersion)
+		case "github_copilot":
+			tokenDir := pc.TokenDir
+			if tokenDir == "" {
+				tokenDir = copilot.DefaultTokenDir()
+			}
+			providers[pc.Name] = copilot.NewClient(pc.Name, tokenDir)
 		default:
 			return fmt.Errorf("unsupported provider type %q for provider %q", pc.Type, pc.Name)
 		}
@@ -82,6 +90,13 @@ func runServe(_ *cobra.Command, _ []string) error {
 	asyncLogger := proxy.NewAsyncLogger(st, 1000)
 	defer asyncLogger.Close()
 
+	// Load display timezone (default UTC).
+	tz, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		log.Printf("WARNING: unknown timezone %q, falling back to UTC: %v", cfg.Timezone, err)
+		tz = time.UTC
+	}
+
 	// Build the proxy handlers.
 	proxyHandler := proxy.NewHandler(cfg, providers, calc, asyncLogger)
 	openaiHandler := proxy.NewOpenAIHandler(cfg, providers, calc, asyncLogger)
@@ -99,10 +114,39 @@ func runServe(_ *cobra.Command, _ []string) error {
 	})
 
 	// Web UI.
-	sessions := auth.NewSessionStore(24 * time.Hour)
-	tmpl := web.ParseTemplates()
-	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl)
-	costHandlers := web.NewCostHandlers(st, tmpl)
+	sessions := auth.NewUISessionStore(st)
+	tmpl := web.ParseTemplates(tz)
+
+	// Build OIDC provider (nil when not configured).
+	var oidcProvider *oidcpkg.Provider
+	if cfg.OIDCEnabled() {
+		var oidcErr error
+		oidcProvider, oidcErr = oidcpkg.NewProvider(context.Background(), cfg.OIDC)
+		if oidcErr != nil {
+			return fmt.Errorf("initialising OIDC provider: %w", oidcErr)
+		}
+		log.Printf("OIDC provider configured: %s", cfg.OIDC.IssuerURL)
+	}
+
+	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl, oidcProvider)
+	authHandlers := web.NewAuthHandlers(st, sessions, oidcProvider)
+	costHandlers := web.NewCostHandlers(st, tmpl, tz)
+	userHandlers := web.NewUserHandlers(st, sessions, tmpl)
+	teamHandlers := web.NewTeamHandlers(st, sessions, tmpl)
+
+	// Start background cleanup goroutine for expired sessions and OIDC state.
+	go func() {
+		for {
+			time.Sleep(time.Hour)
+			ctx := context.Background()
+			if err := st.CleanupExpiredSessions(ctx); err != nil {
+				log.Printf("WARNING: cleanup sessions: %v", err)
+			}
+			if err := st.CleanupExpiredOIDCState(ctx); err != nil {
+				log.Printf("WARNING: cleanup oidc state: %v", err)
+			}
+		}
+	}()
 
 	// Serve embedded static assets (no session required).
 	staticFS, _ := fs.Sub(web.Static, "static")
@@ -112,9 +156,13 @@ func runServe(_ *cobra.Command, _ []string) error {
 	r.Get("/ui/login", webHandlers.LoginPage)
 	r.Post("/ui/api/login", webHandlers.LoginHandler)
 
+	// OIDC auth routes (public — no session required).
+	r.Get("/ui/auth/oidc", authHandlers.OIDCStartHandler)
+	r.Get("/ui/auth/callback", authHandlers.OIDCCallbackHandler)
+
 	// Protected web routes.
 	r.Route("/ui", func(r chi.Router) {
-		r.Use(web.SessionMiddleware(sessions))
+		r.Use(web.UISessionMiddleware(sessions, st))
 		r.Post("/api/logout", webHandlers.LogoutHandler)
 
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +195,23 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Post("/api/keys/{prefix}/revoke", func(w http.ResponseWriter, r *http.Request) {
 			webHandlers.RevokeKeyHandler(w, r, chi.URLParam(r, "prefix"))
 		})
+
+		// Users (GA-only except deactivate which allows TA for own team).
+		r.Route("/", func(r chi.Router) {
+			r.Use(web.RequireGlobalAdmin)
+			r.Get("/users", userHandlers.UsersPage)
+			r.Get("/api/users", userHandlers.UsersAPIHandler)
+			r.Post("/api/users/{id}/role", userHandlers.ChangeRoleHandler)
+			r.Post("/api/users/{id}/reactivate", userHandlers.ReactivateUserHandler)
+		})
+		r.With(web.RequireAdminOrTeamAdmin).Post("/api/users/{id}/deactivate", userHandlers.DeactivateUserHandler)
+
+		// Teams (TA/GA can view; only GA can create).
+		r.With(web.RequireAdminOrTeamAdmin).Get("/teams", teamHandlers.TeamsPage)
+		r.With(web.RequireAdminOrTeamAdmin).Get("/api/teams", teamHandlers.TeamsAPIHandler)
+		r.With(web.RequireGlobalAdmin).Post("/api/teams", teamHandlers.CreateTeamHandler)
+		r.With(web.RequireAdminOrTeamAdmin).Post("/api/teams/{id}/members", teamHandlers.AddTeamMemberHandler)
+		r.With(web.RequireAdminOrTeamAdmin).Delete("/api/teams/{id}/members/{userID}", teamHandlers.RemoveTeamMemberHandler)
 	})
 
 	// Root redirect to UI.

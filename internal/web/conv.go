@@ -68,6 +68,7 @@ type ToolArg struct {
 // LogDetailData is the top-level struct passed to log_detail.html.
 type LogDetailData struct {
 	ActiveTab    string
+	CurrentUser  string
 	Log          *store.RequestLogDetail
 	Conversation *ConversationData
 	Cost         *CostBreakdown

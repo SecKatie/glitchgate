@@ -80,7 +80,7 @@
             <strong>ID:</strong>
             <code class="mono">{{.ID}}</code>
             <button class="outline secondary copy-btn" onclick="copyText(this, '{{.ID}}')" title="Copy ID">⎘</button><br>
-            <strong>Time:</strong> {{.Timestamp.Format "2006-01-02 15:04:05 UTC"}}<br>
+            <strong>Time:</strong> {{fmtET .Timestamp "2006-01-02 15:04:05 ET"}}<br>
             <strong>Status:</strong> <span class="{{if lt .Status 400}}status-ok{{else}}status-err{{end}}">{{.Status}}</span><br>
             <strong>Format:</strong> {{.SourceFormat}}<br>
         </div>

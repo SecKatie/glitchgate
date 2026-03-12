@@ -239,6 +239,11 @@
                 <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page" class="nav-active"{{end}}>Logs</a></li>
                 <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page" class="nav-active"{{end}}>Costs</a></li>
                 <li><a href="/ui/keys"{{if eq .ActiveTab "keys"}} aria-current="page" class="nav-active"{{end}}>Keys</a></li>
+                <li><a href="/ui/users"{{if eq .ActiveTab "users"}} aria-current="page" class="nav-active"{{end}}>Users</a></li>
+                <li><a href="/ui/teams"{{if eq .ActiveTab "teams"}} aria-current="page" class="nav-active"{{end}}>Teams</a></li>
+                {{if .CurrentUser}}
+                <li><small style="color:var(--pico-muted-color)">{{.CurrentUser}}</small></li>
+                {{end}}
                 <li>
                     <form method="post" action="/ui/api/logout" style="margin:0">
                         <button type="submit" class="outline secondary" style="padding:0.25rem 0.75rem;margin:0">Logout</button>

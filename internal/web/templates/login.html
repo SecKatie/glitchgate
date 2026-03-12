@@ -23,16 +23,31 @@
         <article>
             <header>
                 <h2>llm-proxy</h2>
+                {{if .OIDCEnabled}}
+                <p>Sign in with your organization account</p>
+                {{else}}
                 <p>Sign in with your master key</p>
+                {{end}}
             </header>
             {{if .Error}}
             <p role="alert" style="color: var(--pico-del-color);">{{.Error}}</p>
             {{end}}
+            {{if .OIDCEnabled}}
+            <a href="/ui/auth/oidc" role="button">Sign In with SSO</a>
+            {{end}}
+            {{if .ShowMasterKeyForm}}
+            {{if .OIDCEnabled}}<hr>{{end}}
             <form method="post" action="/ui/api/login">
                 <label for="master_key">Master Key</label>
-                <input type="password" id="master_key" name="master_key" placeholder="Enter master key" required autofocus>
-                <button type="submit">Login</button>
+                <input type="password" id="master_key" name="master_key" placeholder="Enter master key" required {{if not .OIDCEnabled}}autofocus{{end}}>
+                <button type="submit" class="{{if .OIDCEnabled}}outline{{end}}">Login with Master Key</button>
             </form>
+            {{end}}
+            {{if and .OIDCEnabled (not .ShowMasterKeyForm)}}
+            <p style="text-align:center;font-size:0.8em;margin-top:1rem;">
+                <a href="/ui/login?master=1">Admin access</a>
+            </p>
+            {{end}}
         </article>
     </main>
 </body>

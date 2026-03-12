@@ -1,0 +1,175 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Teams - llm-proxy{{end}}
+
+{{define "head"}}
+<style>
+    .team-card {
+        border: 1px solid var(--pico-muted-border-color);
+        border-radius: var(--pico-border-radius);
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .team-card h4 {
+        margin: 0 0 0.25rem;
+    }
+    .team-card .team-meta {
+        font-size: 0.85em;
+        color: var(--pico-muted-color);
+        margin-bottom: 0.75rem;
+    }
+    .member-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.25rem 0;
+        border-bottom: 1px solid var(--pico-muted-border-color);
+        font-size: 0.9em;
+    }
+    .member-row:last-child {
+        border-bottom: none;
+    }
+    .member-email {
+        flex: 1;
+        font-family: var(--pico-font-family-monospace);
+        font-size: 0.85em;
+    }
+    .add-member-form {
+        display: flex;
+        gap: 0.5rem;
+        align-items: end;
+        margin-top: 0.75rem;
+    }
+    .add-member-form select,
+    .add-member-form button {
+        margin-bottom: 0;
+        width: auto;
+    }
+    .add-member-form select {
+        flex: 1;
+    }
+    .create-team-form {
+        display: flex;
+        gap: 0.5rem;
+        align-items: end;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+    .create-team-form input {
+        margin-bottom: 0;
+        flex: 1;
+        min-width: 150px;
+    }
+    .create-team-form button {
+        margin-bottom: 0;
+        white-space: nowrap;
+        width: auto;
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<h3>Teams</h3>
+
+<div id="team-message"></div>
+
+{{if .IsGA}}
+<form class="create-team-form" onsubmit="createTeam(event)">
+    <div style="flex:2;min-width:150px">
+        <label for="team-name">Team Name</label>
+        <input type="text" id="team-name" placeholder="e.g. Engineering" required maxlength="64">
+    </div>
+    <div style="flex:3;min-width:150px">
+        <label for="team-desc">Description (optional)</label>
+        <input type="text" id="team-desc" placeholder="Short description" maxlength="255">
+    </div>
+    <button type="submit">Create Team</button>
+</form>
+{{end}}
+
+{{if .Teams}}
+{{range .Teams}}
+<div class="team-card" id="team-card-{{.ID}}">
+    <h4>{{.Name}} <small style="font-weight:400;color:var(--pico-muted-color)">({{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}})</small></h4>
+    {{if .Description}}<div class="team-meta">{{.Description}}</div>{{end}}
+
+    <div id="members-{{.ID}}">
+        <!-- Members loaded inline from server render -->
+    </div>
+
+    {{if $.IsGA}}
+    <div class="add-member-form">
+        <select id="user-select-{{.ID}}" aria-label="Select user to add">
+            <option value="">— select user —</option>
+            {{range $.AllUsers}}
+            <option value="{{.ID}}">{{.Email}}{{if .DisplayName}} ({{.DisplayName}}){{end}}</option>
+            {{end}}
+        </select>
+        <button class="outline" onclick="addMember('{{.ID}}')">Add Member</button>
+    </div>
+    {{end}}
+</div>
+{{end}}
+{{else}}
+<p style="color:var(--pico-muted-color);text-align:center;padding:2rem 0">No teams yet.{{if .IsGA}} Create one above.{{end}}</p>
+{{end}}
+
+<script>
+function showMsg(msg, isError) {
+    var el = document.getElementById('team-message');
+    el.innerHTML = '<div style="padding:0.5rem 1rem;border-radius:var(--pico-border-radius);margin-bottom:1rem;background:'
+        + (isError ? 'var(--pico-del-color)' : 'var(--pico-ins-color)')
+        + ';color:#fff">' + msg + '</div>';
+    setTimeout(function() { el.innerHTML = ''; }, 4000);
+}
+
+function createTeam(e) {
+    e.preventDefault();
+    var name = document.getElementById('team-name').value;
+    var desc = document.getElementById('team-desc').value;
+    fetch('/ui/api/teams', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'name=' + encodeURIComponent(name) + '&description=' + encodeURIComponent(desc)
+    }).then(function(r) {
+        if (r.ok) {
+            showMsg('Team created.', false);
+            location.reload();
+        } else {
+            r.text().then(function(t) { showMsg('Error: ' + t, true); });
+        }
+    });
+}
+
+function addMember(teamID) {
+    var sel = document.getElementById('user-select-' + teamID);
+    var userID = sel.value;
+    if (!userID) { showMsg('Select a user first.', true); return; }
+    fetch('/ui/api/teams/' + teamID + '/members', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'user_id=' + encodeURIComponent(userID)
+    }).then(function(r) {
+        if (r.ok) {
+            showMsg('Member added.', false);
+            location.reload();
+        } else {
+            r.text().then(function(t) { showMsg('Error: ' + t, true); });
+        }
+    });
+}
+
+function removeMember(teamID, userID, email) {
+    if (!confirm('Remove ' + email + ' from this team?')) return;
+    fetch('/ui/api/teams/' + teamID + '/members/' + userID, {method: 'DELETE'})
+        .then(function(r) {
+            if (r.ok) {
+                showMsg('Member removed.', false);
+                location.reload();
+            } else {
+                r.text().then(function(t) { showMsg('Error: ' + t, true); });
+            }
+        });
+}
+</script>
+{{end}}

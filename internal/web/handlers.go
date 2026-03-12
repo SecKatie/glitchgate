@@ -51,26 +51,41 @@ func (ts *TemplateSet) ExecuteNamed(w http.ResponseWriter, name string, data any
 // Handlers groups the HTTP handlers for the web UI.
 type Handlers struct {
 	store     store.Store
-	sessions  *auth.SessionStore
+	sessions  *auth.UISessionStore
 	masterKey string
 	templates *TemplateSet
 	calc      *pricing.Calculator
+	oidc      OIDCProvider // nil when OIDC not configured
+}
+
+// OIDCProvider is the minimal interface Handlers needs from the OIDC package.
+// Using an interface here avoids a circular import and allows easy test fakes.
+type OIDCProvider interface {
+	Enabled() bool
 }
 
 // NewHandlers creates web UI handlers.
-func NewHandlers(s store.Store, sessions *auth.SessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet) *Handlers {
+func NewHandlers(s store.Store, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider) *Handlers {
 	return &Handlers{
 		store:     s,
 		sessions:  sessions,
 		masterKey: masterKey,
 		templates: tmpl,
 		calc:      calc,
+		oidc:      oidcProvider,
 	}
 }
 
-// templateFuncs returns the shared template function map.
-func templateFuncs() template.FuncMap {
+// templateFuncs returns the shared template function map for the given timezone.
+func templateFuncs(tz *time.Location) template.FuncMap {
+	if tz == nil {
+		tz = time.UTC
+	}
 	return template.FuncMap{
+		"fmtET": func(t time.Time, layout string) string {
+			return t.In(tz).Format(layout)
+		},
+		"not": func(b bool) bool { return !b },
 		"deref": func(p any) any {
 			switch v := p.(type) {
 			case *float64:
@@ -138,8 +153,9 @@ func templateFuncs() template.FuncMap {
 // ParseTemplates parses per-page template sets from the embedded filesystem.
 // Each page template is cloned from a base that includes layout and fragments,
 // ensuring that block definitions (title, content, head) don't collide.
-func ParseTemplates() *TemplateSet {
-	funcs := templateFuncs()
+// tz is used by the fmtET template function; pass nil to use UTC.
+func ParseTemplates(tz *time.Location) *TemplateSet {
+	funcs := templateFuncs(tz)
 
 	// Parse the shared templates (layout + fragments) into a base.
 	base := template.Must(
@@ -181,9 +197,24 @@ func ParseTemplates() *TemplateSet {
 // ---------------------------------------------------------------------------
 
 // LoginPage renders the login form.
-func (h *Handlers) LoginPage(w http.ResponseWriter, _ *http.Request) {
+func (h *Handlers) LoginPage(w http.ResponseWriter, r *http.Request) {
+	// Redirect authenticated users directly to the main page.
+	if c, err := r.Cookie("llmp_session"); err == nil && c.Value != "" {
+		if sess, _ := h.sessions.Validate(r.Context(), c.Value); sess != nil {
+			http.Redirect(w, r, "/ui/", http.StatusSeeOther)
+			return
+		}
+	}
+
+	oidcEnabled := h.oidc != nil && h.oidc.Enabled()
+	showMasterKeyForm := !oidcEnabled || r.URL.Query().Get("master") == "1"
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.templates.ExecuteTemplate(w, "login.html", map[string]any{"Error": ""}); err != nil {
+	if err := h.templates.ExecuteTemplate(w, "login.html", map[string]any{
+		"Error":             "",
+		"OIDCEnabled":       oidcEnabled,
+		"ShowMasterKeyForm": showMasterKeyForm,
+	}); err != nil {
 		log.Printf("ERROR: render login page: %v", err)
 	}
 }
@@ -206,6 +237,9 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if masterKey != h.masterKey {
+		if err := h.store.RecordAuditEvent(r.Context(), "master_key.login_failed", "", ""); err != nil {
+			log.Printf("WARNING: record audit event: %v", err)
+		}
 		contentType := r.Header.Get("Content-Type")
 		if contentType == "application/json" {
 			w.Header().Set("Content-Type", "application/json")
@@ -222,20 +256,25 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.sessions.Create()
+	sess, err := h.sessions.Create(r.Context(), "master_key", "")
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
+		Name:     "llmp_session",
 		Value:    sess.Token,
-		Path:     "/",
+		Path:     "/ui",
 		HttpOnly: true,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
-		Expires:  sess.ExpiresAt,
+		MaxAge:   28800,
 	})
+
+	if err := h.store.RecordAuditEvent(r.Context(), "master_key.login", "", ""); err != nil {
+		log.Printf("WARNING: record audit event: %v", err)
+	}
 
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "application/json" {
@@ -254,16 +293,23 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 // LogoutHandler invalidates the session and redirects to login.
 func (h *Handlers) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie("session"); err == nil {
-		h.sessions.Delete(c.Value)
+	if c, err := r.Cookie("llmp_session"); err == nil {
+		if delErr := h.sessions.Delete(r.Context(), c.Value); delErr != nil {
+			log.Printf("WARNING: delete session: %v", delErr)
+		}
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		MaxAge:   -1,
-	})
+	if err := h.store.RecordAuditEvent(r.Context(), "session.logout", "", ""); err != nil {
+		log.Printf("WARNING: record audit event: %v", err)
+	}
+	for _, name := range []string{"llmp_session", "session"} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/ui",
+			HttpOnly: true,
+			MaxAge:   -1,
+		})
+	}
 	http.Redirect(w, r, "/ui/login", http.StatusSeeOther)
 }
 
@@ -274,6 +320,7 @@ func (h *Handlers) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 // LogsPage renders the log list page.
 func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 	params := parseLogParams(r)
+	applyScopeToParams(auth.SessionFromContext(r.Context()), &params)
 
 	logs, total, err := h.store.ListRequestLogs(r.Context(), params)
 	if err != nil {
@@ -321,6 +368,7 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	if err := h.templates.ExecuteTemplate(w, "logs.html", data); err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
 	}
@@ -329,6 +377,7 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 // LogsAPIHandler returns log data as JSON or an HTMX HTML fragment.
 func (h *Handlers) LogsAPIHandler(w http.ResponseWriter, r *http.Request) {
 	params := parseLogParams(r)
+	applyScopeToParams(auth.SessionFromContext(r.Context()), &params)
 
 	logs, total, err := h.store.ListRequestLogs(r.Context(), params)
 	if err != nil {
@@ -396,6 +445,30 @@ func (h *Handlers) LogDetailPage(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
+	// Enforce scope for non-GA sessions.
+	sc := auth.SessionFromContext(r.Context())
+	if sc != nil && !sc.IsMasterKey && sc.Role != "global_admin" {
+		scopeType, _, _ := buildScopeParams(sc)
+		if scopeType != "all" {
+			visibleKeys, kerr := h.listKeysForSession(r)
+			if kerr != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			allowed := false
+			for _, k := range visibleKeys {
+				if k.KeyPrefix == logEntry.ProxyKeyPrefix {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
+	}
+
 	conv := parseConversation(logEntry.RequestBody, logEntry.ResponseBody)
 	costBreakdown := computeCostBreakdown(logEntry, h.calc)
 
@@ -422,6 +495,33 @@ func (h *Handlers) LogDetailAPIHandler(w http.ResponseWriter, r *http.Request, i
 			log.Printf("ERROR: write log-not-found response: %v", err)
 		}
 		return
+	}
+
+	// Enforce scope: non-GA sessions can only view logs for keys they own.
+	sc := auth.SessionFromContext(r.Context())
+	if sc != nil && !sc.IsMasterKey && sc.Role != "global_admin" {
+		scopeType, scopeUserID, scopeTeamID := buildScopeParams(sc)
+		if scopeType != "all" {
+			// Verify the log's key is within the session's scope.
+			visibleKeys, kerr := h.listKeysForSession(r)
+			if kerr != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			_ = scopeUserID
+			_ = scopeTeamID
+			allowed := false
+			for _, k := range visibleKeys {
+				if k.KeyPrefix == logEntry.ProxyKeyPrefix {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -451,7 +551,7 @@ func validateLabel(label string) error {
 
 // KeysPage renders the key management page.
 func (h *Handlers) KeysPage(w http.ResponseWriter, r *http.Request) {
-	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	keys, err := h.listKeysForSession(r)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -470,7 +570,7 @@ func (h *Handlers) KeysPage(w http.ResponseWriter, r *http.Request) {
 
 // KeysAPIHandler returns key list as HTMX fragment or JSON.
 func (h *Handlers) KeysAPIHandler(w http.ResponseWriter, r *http.Request) {
-	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	keys, err := h.listKeysForSession(r)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -488,6 +588,25 @@ func (h *Handlers) KeysAPIHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"keys": keys}); err != nil {
 		log.Printf("ERROR: write keys JSON response: %v", err)
+	}
+}
+
+// listKeysForSession returns the keys visible to the current session.
+func (h *Handlers) listKeysForSession(r *http.Request) ([]store.ProxyKeySummary, error) {
+	sc := auth.SessionFromContext(r.Context())
+	if sc == nil || sc.IsMasterKey {
+		return h.store.ListActiveProxyKeys(r.Context())
+	}
+	switch sc.Role {
+	case "global_admin":
+		return h.store.ListActiveProxyKeys(r.Context())
+	case "team_admin":
+		if sc.TeamID != nil {
+			return h.store.ListProxyKeysByTeam(r.Context(), *sc.TeamID)
+		}
+		return h.store.ListProxyKeysByOwner(r.Context(), sc.SessionID)
+	default: // member
+		return h.store.ListProxyKeysByOwner(r.Context(), sc.User.ID)
 	}
 }
 
@@ -518,16 +637,29 @@ func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := uuid.New().String()
-	if err := h.store.CreateProxyKey(r.Context(), id, hash, prefix, label); err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	sc := auth.SessionFromContext(r.Context())
+	if sc != nil && !sc.IsMasterKey && sc.User != nil {
+		if err := h.store.CreateProxyKeyForUser(r.Context(), id, hash, prefix, label, sc.User.ID); err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := h.store.CreateProxyKey(r.Context(), id, hash, prefix, label); err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "key_created", prefix, label); err != nil {
+	sc2 := auth.SessionFromContext(r.Context())
+	auditAction := "key_created"
+	if sc2 != nil && !sc2.IsMasterKey && sc2.User != nil {
+		auditAction = "key.created_for_user"
+	}
+	if err := h.store.RecordAuditEvent(r.Context(), auditAction, prefix, label); err != nil {
 		log.Printf("WARNING: record audit event: %v", err)
 	}
 
-	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	keys, err := h.listKeysForSession(r)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -561,7 +693,7 @@ func (h *Handlers) UpdateKeyLabelHandler(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	keys, err := h.listKeysForSession(r)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -584,16 +716,37 @@ func (h *Handlers) UpdateKeyLabelHandler(w http.ResponseWriter, r *http.Request,
 
 // RevokeKeyHandler revokes a proxy key.
 func (h *Handlers) RevokeKeyHandler(w http.ResponseWriter, r *http.Request, prefix string) {
+	// Scope enforcement: non-GA sessions can only revoke keys they can see.
+	sc := auth.SessionFromContext(r.Context())
+	if sc != nil && !sc.IsMasterKey && sc.Role != "global_admin" {
+		visible, err := h.listKeysForSession(r)
+		if err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		allowed := false
+		for _, k := range visible {
+			if k.KeyPrefix == prefix {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
 	if err := h.store.RevokeProxyKey(r.Context(), prefix); err != nil {
 		http.Error(w, "Key not found", http.StatusNotFound)
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "key_revoked", prefix, ""); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "key.revoked", prefix, ""); err != nil {
 		log.Printf("WARNING: record audit event: %v", err)
 	}
 
-	keys, err := h.store.ListActiveProxyKeys(r.Context())
+	keys, err := h.listKeysForSession(r)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -644,5 +797,6 @@ func parseLogParams(r *http.Request) store.ListLogsParams {
 		To:        r.URL.Query().Get("to"),
 		Sort:      r.URL.Query().Get("sort"),
 		Order:     r.URL.Query().Get("order"),
+		ScopeType: "all",
 	}
 }

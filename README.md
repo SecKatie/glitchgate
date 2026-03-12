@@ -2,15 +2,17 @@
 
 A self-hosted reverse proxy for LLM APIs with request logging, cost monitoring, and a lightweight web UI.
 
-Routes requests to upstream providers, logs all traffic to a local SQLite database, and calculates per-request costs. Currently targets the Anthropic API; OpenAI endpoint support is planned.
+Routes requests to upstream providers, logs all traffic to a local SQLite database, and calculates per-request costs. Supports Anthropic and GitHub Copilot upstreams with automatic format translation between API formats.
 
 ## Features
 
-- Proxy requests to Anthropic upstreams
+- Proxy requests to Anthropic and GitHub Copilot upstreams
+- Format-aware routing: clients can use OpenAI or Anthropic format regardless of upstream provider
+- GitHub Copilot integration via OAuth device flow (`llm-proxy auth copilot`)
 - Multiple proxy API keys with per-key cost attribution
 - Wildcard prefix model routing
 - Cache token logging (Anthropic prompt caching)
-- Cost calculation for a wide range of models (Anthropic, OpenAI, Gemini)
+- Cost calculation for a wide range of models (Anthropic, OpenAI, Gemini, Copilot)
 - Embedded web UI for browsing logs and usage (protected by a master key)
 
 ## Usage
@@ -20,7 +22,7 @@ make build
 ./llm-proxy serve
 ```
 
-See `make help` or the `cmd/` directory for all available commands.
+See `make help` or the `cmd/` directory for all available commands. See [docs/configuration.md](docs/configuration.md) for full configuration reference including GitHub Copilot setup.
 
 ## Development
 

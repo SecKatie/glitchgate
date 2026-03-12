@@ -81,6 +81,19 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get the authenticated proxy key for logging.
+	pk := KeyFromContext(r.Context())
+	proxyKeyID := ""
+	if pk != nil {
+		proxyKeyID = pk.ID
+	}
+
+	// Format-aware routing: OpenAI-native providers (e.g. Copilot) skip translation.
+	if prov.APIFormat() == "openai" {
+		h.serveOpenAINative(w, r, &oaiReq, body, modelMapping, prov, proxyKeyID, start)
+		return
+	}
+
 	// Translate OpenAI request to Anthropic format.
 	oaiReq.Model = modelMapping.UpstreamModel
 	anthReq, err := translate.OpenAIToAnthropic(&oaiReq)
@@ -102,13 +115,6 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Headers:     r.Header.Clone(),
 		Model:       modelMapping.UpstreamModel,
 		IsStreaming: oaiReq.Stream,
-	}
-
-	// Get the authenticated proxy key for logging.
-	pk := KeyFromContext(r.Context())
-	proxyKeyID := ""
-	if pk != nil {
-		proxyKeyID = pk.ID
 	}
 
 	// Send the request upstream.
@@ -215,6 +221,111 @@ func (h *OpenAIHandler) handleOpenAIStreaming(w http.ResponseWriter, resp *provi
 	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
 		result.InputTokens, result.OutputTokens,
 		result.CacheCreationInputTokens, result.CacheReadInputTokens,
+		latency, status,
+		reqBody, result.Body, cost, errDetails, true)
+}
+
+// serveOpenAINative handles requests to OpenAI-native providers (e.g. Copilot)
+// without translating through Anthropic format.
+func (h *OpenAIHandler) serveOpenAINative(w http.ResponseWriter, r *http.Request,
+	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
+	mapping *config.ModelMapping, prov provider.Provider, proxyKeyID string, start time.Time,
+) {
+	// Replace model name in the raw JSON body to preserve all original fields.
+	var bodyMap map[string]any
+	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "Invalid JSON in request body")
+		return
+	}
+	bodyMap["model"] = mapping.UpstreamModel
+	nativeBody, err := json.Marshal(bodyMap)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
+		return
+	}
+
+	provReq := &provider.Request{
+		Body:        nativeBody,
+		Headers:     r.Header.Clone(),
+		Model:       mapping.UpstreamModel,
+		IsStreaming: oaiReq.Stream,
+	}
+
+	provResp, err := prov.SendRequest(r.Context(), provReq)
+	if err != nil {
+		latency := time.Since(start).Milliseconds()
+		errMsg := err.Error()
+		h.logOpenAIRequest(proxyKeyID, prov.Name(), mapping.ModelName, mapping.UpstreamModel,
+			0, 0, 0, 0, latency, http.StatusBadGateway, rawBody, []byte(errMsg), nil, &errMsg, oaiReq.Stream)
+		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
+		return
+	}
+
+	if oaiReq.Stream {
+		h.handleOpenAINativeStreaming(w, provResp, proxyKeyID, prov.Name(), mapping.ModelName, mapping.UpstreamModel, rawBody, start)
+	} else {
+		h.handleOpenAINativeNonStreaming(w, provResp, proxyKeyID, prov.Name(), mapping.ModelName, mapping.UpstreamModel, rawBody, start)
+	}
+}
+
+func (h *OpenAIHandler) handleOpenAINativeNonStreaming(w http.ResponseWriter, resp *provider.Response,
+	proxyKeyID, providerName, modelRequested, modelUpstream string, reqBody []byte, start time.Time,
+) {
+	latency := time.Since(start).Milliseconds()
+
+	var errDetails *string
+	if resp.StatusCode >= 400 {
+		s := string(resp.Body)
+		errDetails = &s
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		if _, err := w.Write(resp.Body); err != nil {
+			log.Printf("WARNING: write OpenAI native error response: %v", err)
+		}
+
+		h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
+			resp.InputTokens, resp.OutputTokens, 0, 0, latency, resp.StatusCode,
+			reqBody, resp.Body, nil, errDetails, false)
+		return
+	}
+
+	// Forward response as-is — token usage already extracted by the provider client.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(resp.Body); err != nil {
+		log.Printf("WARNING: write OpenAI native response: %v", err)
+	}
+
+	cost := h.calculator.Calculate(modelUpstream, resp.InputTokens, resp.OutputTokens, 0, 0)
+
+	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
+		resp.InputTokens, resp.OutputTokens, 0, 0,
+		latency, http.StatusOK,
+		reqBody, resp.Body, cost, nil, false)
+}
+
+func (h *OpenAIHandler) handleOpenAINativeStreaming(w http.ResponseWriter, resp *provider.Response,
+	proxyKeyID, providerName, modelRequested, modelUpstream string, reqBody []byte, start time.Time,
+) {
+	result, err := RelayOpenAISSEStream(w, resp.Stream)
+	latency := time.Since(start).Milliseconds()
+
+	var errDetails *string
+	if err != nil {
+		s := fmt.Sprintf("stream relay error: %v", err)
+		errDetails = &s
+		log.Printf("WARNING: %s", s)
+	}
+
+	cost := h.calculator.Calculate(modelUpstream, result.InputTokens, result.OutputTokens, 0, 0)
+
+	status := resp.StatusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+
+	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
+		result.InputTokens, result.OutputTokens, 0, 0,
 		latency, status,
 		reqBody, result.Body, cost, errDetails, true)
 }

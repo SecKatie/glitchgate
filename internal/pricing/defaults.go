@@ -205,4 +205,18 @@ var DefaultPricing = map[string]Entry{
 		CacheWritePerMillion: 0,
 		CacheReadPerMillion:  0.05,
 	},
+
+	// -------------------------------------------------------------------------
+	// GitHub Copilot — subscription-based, no per-token cost.
+	// Entries use $0 pricing so requests are tracked without inflating costs.
+	// Operators can override with custom pricing in config if desired.
+	// -------------------------------------------------------------------------
+	"copilot/claude-opus-4.6":   {InputPerMillion: 0, OutputPerMillion: 0},
+	"copilot/claude-sonnet-4.6": {InputPerMillion: 0, OutputPerMillion: 0},
+	"copilot/gpt-5.2":           {InputPerMillion: 0, OutputPerMillion: 0},
+	"copilot/gpt-5.4":           {InputPerMillion: 0, OutputPerMillion: 0},
+	"copilot/gpt-5.4-pro":       {InputPerMillion: 0, OutputPerMillion: 0},
+	"copilot/o4-mini":           {InputPerMillion: 0, OutputPerMillion: 0},
+	"copilot/o3":                {InputPerMillion: 0, OutputPerMillion: 0},
+	"copilot/gemini-3-flash":    {InputPerMillion: 0, OutputPerMillion: 0},
 }

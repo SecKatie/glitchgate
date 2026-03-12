@@ -42,6 +42,9 @@ func (c *Client) Name() string { return c.name }
 // AuthMode returns "proxy_key" or "forward" indicating how the proxy authenticates upstream.
 func (c *Client) AuthMode() string { return c.authMode }
 
+// APIFormat returns "anthropic" — this provider speaks the Anthropic Messages API natively.
+func (c *Client) APIFormat() string { return "anthropic" }
+
 // SendRequest dispatches a request to the Anthropic Messages API.
 // For streaming requests, Response.Stream is set and the caller must close it.
 // For non-streaming requests, Response.Body is populated.

@@ -34,6 +34,9 @@ type Provider interface {
 	// AuthMode returns "proxy_key" or "forward" to indicate how the proxy
 	// authenticates with the upstream service.
 	AuthMode() string
+	// APIFormat returns the native API format the provider speaks upstream.
+	// Valid values: "anthropic" (Anthropic Messages API) or "openai" (OpenAI Chat Completions API).
+	APIFormat() string
 	// SendRequest forwards a translated request to the upstream provider.
 	SendRequest(ctx context.Context, req *Request) (*Response, error)
 }

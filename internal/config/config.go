@@ -18,19 +18,36 @@ type Config struct {
 	MasterKey    string           `mapstructure:"master_key"    yaml:"master_key"`
 	Listen       string           `mapstructure:"listen"        yaml:"listen"`
 	DatabasePath string           `mapstructure:"database_path" yaml:"database_path"`
+	Timezone     string           `mapstructure:"timezone"      yaml:"timezone"` // IANA timezone name, e.g. "America/New_York"
 	Providers    []ProviderConfig `mapstructure:"providers"     yaml:"providers"`
 	ModelList    []ModelMapping   `mapstructure:"model_list"    yaml:"model_list"`
 	Pricing      []PricingEntry   `mapstructure:"pricing"       yaml:"pricing"`
+	OIDC         *OIDCConfig      `mapstructure:"oidc"          yaml:"oidc"`
+}
+
+// OIDCConfig holds the OIDC provider configuration.
+type OIDCConfig struct {
+	IssuerURL    string   `mapstructure:"issuer_url"    yaml:"issuer_url"`
+	ClientID     string   `mapstructure:"client_id"     yaml:"client_id"`
+	ClientSecret string   `mapstructure:"client_secret" yaml:"client_secret"`
+	RedirectURL  string   `mapstructure:"redirect_url"  yaml:"redirect_url"`
+	Scopes       []string `mapstructure:"scopes"        yaml:"scopes"`
+}
+
+// OIDCEnabled returns true when a complete OIDC configuration is present.
+func (c *Config) OIDCEnabled() bool {
+	return c.OIDC != nil && c.OIDC.IssuerURL != "" && c.OIDC.ClientID != "" && c.OIDC.ClientSecret != ""
 }
 
 // ProviderConfig describes an upstream LLM provider endpoint.
 type ProviderConfig struct {
 	Name           string `mapstructure:"name"            yaml:"name"`
-	Type           string `mapstructure:"type"            yaml:"type"` // "anthropic" (default)
+	Type           string `mapstructure:"type"            yaml:"type"` // "anthropic" (default), "github_copilot"
 	BaseURL        string `mapstructure:"base_url"        yaml:"base_url"`
 	AuthMode       string `mapstructure:"auth_mode"       yaml:"auth_mode"` // "proxy_key" or "forward"
 	APIKey         string `mapstructure:"api_key"         yaml:"api_key"`
 	DefaultVersion string `mapstructure:"default_version" yaml:"default_version"`
+	TokenDir       string `mapstructure:"token_dir"       yaml:"token_dir"` // github_copilot: OAuth token storage directory
 }
 
 // ModelMapping maps a client-facing model name to an upstream provider and model.
@@ -77,6 +94,8 @@ func Load(configFile string) (*Config, error) {
 	// Defaults.
 	v.SetDefault("listen", ":4000")
 	v.SetDefault("database_path", "llm-proxy.db")
+	v.SetDefault("timezone", "UTC")
+	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
 
 	// Read config file (not an error if none exists).
 	if err := v.ReadInConfig(); err != nil {
@@ -100,13 +119,52 @@ func Load(configFile string) (*Config, error) {
 			cfg.Providers[i].Type = "anthropic"
 		}
 		cfg.Providers[i].APIKey = os.ExpandEnv(cfg.Providers[i].APIKey)
+		// Apply default token directory for github_copilot providers.
+		if cfg.Providers[i].Type == "github_copilot" {
+			cfg.Providers[i].TokenDir = expandTilde(cfg.Providers[i].TokenDir)
+		}
 	}
 
 	if cfg.MasterKey == "" {
 		return nil, errors.New("master_key is required (set in config file or LLM_PROXY_MASTER_KEY env var)")
 	}
 
+	if err := validateCopilotProviders(cfg.Providers); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+// validateCopilotProviders checks that multiple github_copilot providers have
+// distinct, non-empty token_dir values so they don't overwrite each other's tokens.
+func validateCopilotProviders(providers []ProviderConfig) error {
+	var copilots []ProviderConfig
+	for _, p := range providers {
+		if p.Type == "github_copilot" {
+			copilots = append(copilots, p)
+		}
+	}
+	if len(copilots) < 2 {
+		return nil
+	}
+	seen := make(map[string]string) // token_dir → provider name
+	for _, p := range copilots {
+		if p.TokenDir == "" {
+			return fmt.Errorf(
+				"provider %q: token_dir is required when multiple github_copilot providers are configured",
+				p.Name,
+			)
+		}
+		if other, conflict := seen[p.TokenDir]; conflict {
+			return fmt.Errorf(
+				"providers %q and %q share the same token_dir %q; each github_copilot provider must have a unique token_dir",
+				other, p.Name, p.TokenDir,
+			)
+		}
+		seen[p.TokenDir] = p.Name
+	}
+	return nil
 }
 
 // expandTilde replaces a leading "~" or "~/" with the current user's home
