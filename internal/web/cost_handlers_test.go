@@ -410,3 +410,21 @@ func TestCostTimeseriesHandlerIncludesComputedDollars(t *testing.T) {
 	require.Equal(t, int64(3), resp.Data[0].Requests)
 	require.InDelta(t, 0.00255, resp.Data[0].CostUSD, 1e-9)
 }
+
+func TestAggregatePricedTimeseriesAggregatesDailyEntries(t *testing.T) {
+	entries := []pricedTimeseriesEntry{
+		{Date: "2026-03-13", CostUSD: 3.68, Requests: 1},
+		{Date: "2026-03-13", CostUSD: 87.32, Requests: 2},
+		{Date: "2026-03-14", CostUSD: 18.64, Requests: 3},
+	}
+
+	result := aggregatePricedTimeseries(entries, "day")
+
+	require.Len(t, result, 2)
+	require.Equal(t, "2026-03-13", result[0].Date)
+	require.InDelta(t, 91.0, result[0].CostUSD, 1e-9)
+	require.Equal(t, int64(3), result[0].Requests)
+	require.Equal(t, "2026-03-14", result[1].Date)
+	require.InDelta(t, 18.64, result[1].CostUSD, 1e-9)
+	require.Equal(t, int64(3), result[1].Requests)
+}

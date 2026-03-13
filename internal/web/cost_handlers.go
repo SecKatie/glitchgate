@@ -332,7 +332,7 @@ func priceTimeseriesGroups(groups []store.CostTimeseriesPricingGroup, calc *pric
 }
 
 func aggregatePricedTimeseries(entries []pricedTimeseriesEntry, interval string) []pricedTimeseriesEntry {
-	if interval == "day" || len(entries) == 0 {
+	if len(entries) == 0 {
 		return entries
 	}
 
