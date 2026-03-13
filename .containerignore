@@ -1,0 +1,25 @@
+# Version control
+.git/
+.gitignore
+
+# Build artifacts
+glitchgate
+dist/
+
+# Development
+.golangci.yml
+sqlc.yaml
+queries/
+
+# Docs and specs
+docs/
+specs/
+*.md
+
+# Local config/data
+config.yaml
+*.db
+.env
+
+# macOS
+.DS_Store

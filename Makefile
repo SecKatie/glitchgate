@@ -1,4 +1,4 @@
-.PHONY: build test lint audit clean generate
+.PHONY: build test lint audit clean generate image image-push
 
 BINARY := glitchgate
 
@@ -20,3 +20,12 @@ generate:
 
 clean:
 	rm -f $(BINARY)
+
+IMAGE ?= ghcr.io/seckatie/glitchgate
+TAG   ?= latest
+
+image:
+	podman build --platform linux/amd64,linux/arm64 --manifest $(IMAGE):$(TAG) .
+
+image-push:
+	podman manifest push $(IMAGE):$(TAG)

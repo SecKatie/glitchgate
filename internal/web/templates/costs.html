@@ -104,19 +104,42 @@
     </div>
     <div>
         <label for="group_by">Group By</label>
-        <select id="group_by" name="group_by" style="min-width:9rem;">
+        <select id="group_by" name="group_by" style="min-width:9rem;" onchange="updateGroupFilter(this.value)">
             <option value="model" {{if eq .GroupBy "model"}}selected{{end}}>Model</option>
+            <option value="provider" {{if eq .GroupBy "provider"}}selected{{end}}>Provider</option>
             <option value="key" {{if eq .GroupBy "key"}}selected{{end}}>API Key</option>
         </select>
     </div>
-    <div>
-        <label for="key">Key</label>
-        <input type="text" id="key" name="key" placeholder="Filter by prefix" value="{{.KeyFilter}}">
+    <div id="group-filter-wrap">
+        <label id="group-filter-label" for="filter">{{if eq .GroupBy "provider"}}Provider{{else if eq .GroupBy "key"}}API Key{{else}}Model{{end}}</label>
+        <input type="text" id="filter" name="filter"
+               placeholder="{{if eq .GroupBy "provider"}}Filter by provider{{else if eq .GroupBy "key"}}Filter by key prefix{{else}}Filter by model{{end}}"
+               value="{{.GroupFilter}}">
     </div>
     <div>
         <button type="submit" style="margin-bottom:0">Update</button>
     </div>
 </form>
+<script>
+function updateGroupFilter(v) {
+    var lbl = document.getElementById('group-filter-label');
+    var inp = document.getElementById('filter');
+    if (!lbl || !inp) {
+        return;
+    }
+    var name = v === 'provider' ? 'Provider' : (v === 'key' ? 'API Key' : 'Model');
+    var placeholder = v === 'provider' ? 'Filter by provider' : (v === 'key' ? 'Filter by key prefix' : 'Filter by model');
+    lbl.textContent = name;
+    inp.placeholder = placeholder;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var groupBy = document.getElementById('group_by');
+    if (groupBy) {
+        updateGroupFilter(groupBy.value);
+    }
+});
+</script>
 
 <div id="cost-content">
 {{template "cost_summary" .}}

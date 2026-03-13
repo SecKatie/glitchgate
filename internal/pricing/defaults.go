@@ -1,6 +1,9 @@
 package pricing
 
-import "net/url"
+import (
+	"net/url"
+	"strings"
+)
 
 // AnthropicDefaults holds pricing for Claude models billed at official Anthropic API rates.
 // Applied only for providers with type "anthropic" whose base_url matches the official endpoint.
@@ -67,6 +70,82 @@ var CopilotDefaults = map[string]Entry{
 	"o4-mini":           {InputPerMillion: 0, OutputPerMillion: 0},
 	"o3":                {InputPerMillion: 0, OutputPerMillion: 0},
 	"gemini-3-flash":    {InputPerMillion: 0, OutputPerMillion: 0},
+}
+
+// OpenAIDefaults holds pricing for OpenAI models billed at official API-equivalent rates.
+// Applied only for providers with type "openai" or "openai_responses" whose
+// base_url matches the official API endpoint or the ChatGPT Codex backend.
+// Values are USD per million tokens as of 2026-03-13.
+var OpenAIDefaults = map[string]Entry{
+	"gpt-4o": {
+		InputPerMillion:     2.50,
+		OutputPerMillion:    10.00,
+		CacheReadPerMillion: 1.25,
+	},
+	"gpt-4o-mini": {
+		InputPerMillion:     0.15,
+		OutputPerMillion:    0.60,
+		CacheReadPerMillion: 0.075,
+	},
+	"gpt-4.1": {
+		InputPerMillion:     2.00,
+		OutputPerMillion:    8.00,
+		CacheReadPerMillion: 0.50,
+	},
+	"gpt-4.1-mini": {
+		InputPerMillion:     0.40,
+		OutputPerMillion:    1.60,
+		CacheReadPerMillion: 0.10,
+	},
+	"gpt-4.1-nano": {
+		InputPerMillion:     0.10,
+		OutputPerMillion:    0.40,
+		CacheReadPerMillion: 0.025,
+	},
+	"gpt-5.4": {
+		InputPerMillion:     2.50,
+		OutputPerMillion:    15.00,
+		CacheReadPerMillion: 0.25,
+	},
+	"o3": {
+		InputPerMillion:  2.00,
+		OutputPerMillion: 8.00,
+	},
+	"o3-mini": {
+		InputPerMillion:  1.10,
+		OutputPerMillion: 4.40,
+	},
+	"o4-mini": {
+		InputPerMillion:  1.10,
+		OutputPerMillion: 4.40,
+	},
+}
+
+const (
+	officialOpenAIHost      = "api.openai.com"
+	officialChatGPTHost     = "chatgpt.com"
+	officialCodexPathPrefix = "/backend-api/codex"
+)
+
+// IsOfficialOpenAIURL reports whether baseURL targets an official OpenAI-priced endpoint.
+// This includes the public API host and the ChatGPT Codex backend path.
+func IsOfficialOpenAIURL(baseURL string) bool {
+	if baseURL == "" {
+		return false
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+
+	switch parsed.Hostname() {
+	case officialOpenAIHost:
+		return true
+	case officialChatGPTHost:
+		return strings.HasPrefix(strings.TrimRight(parsed.Path, "/"), officialCodexPathPrefix)
+	default:
+		return false
+	}
 }
 
 const officialAnthropicHost = "api.anthropic.com"

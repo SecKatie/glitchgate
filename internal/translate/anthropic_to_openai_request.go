@@ -76,7 +76,40 @@ func AnthropicToOpenAIRequest(req *anthropic.MessagesRequest) (*ChatCompletionRe
 		result.ToolChoice = translateAnthropicToolChoice(req.ToolChoice)
 	}
 
+	// Translate Anthropic thinking config to OpenAI reasoning_effort.
+	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+		effort := budgetTokensToEffort(req.Thinking.BudgetTokens)
+		result.ReasoningEffort = &effort
+	}
+
 	return result, nil
+}
+
+// extractToolResultText extracts a plain text string from a tool_result
+// ContentBlock. The content field may be a string, an array of content blocks,
+// or absent (fall back to Text).
+func extractToolResultText(b anthropic.ContentBlock) string {
+	if b.Content != nil {
+		switch v := b.Content.(type) {
+		case string:
+			return v
+		case []interface{}:
+			// Array of content blocks — collect text parts.
+			var parts []string
+			for _, item := range v {
+				if m, ok := item.(map[string]interface{}); ok {
+					if t, ok := m["type"].(string); ok && t == "text" {
+						if text, ok := m["text"].(string); ok {
+							parts = append(parts, text)
+						}
+					}
+				}
+			}
+			return strings.Join(parts, "")
+		}
+	}
+	// Fallback: some clients put content directly in Text.
+	return b.Text
 }
 
 // extractAnthropicSystem extracts a plain text string from the Anthropic system
@@ -165,8 +198,8 @@ func translateAnthropicUserBlocks(blocks []anthropic.ContentBlock) ([]ChatMessag
 			}
 			messages = append(messages, ChatMessage{
 				Role:       "tool",
-				ToolCallID: b.ID,
-				Content:    b.Text,
+				ToolCallID: b.ToolUseID,
+				Content:    extractToolResultText(b),
 			})
 		}
 	}

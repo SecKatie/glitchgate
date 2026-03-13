@@ -9,9 +9,10 @@ import (
 
 	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"codeberg.org/kglitchy/glitchgate/internal/translate"
 )
 
-// ConversationData holds the parsed view of a request body's conversation.
+// ConversationData holds the parsed view of a logged request/response pair.
 // Passed to log_detail.html as .Conversation.
 type ConversationData struct {
 	SystemPrompt    string // normalised from MessagesRequest.System; empty if absent
@@ -22,7 +23,7 @@ type ConversationData struct {
 	Response     *ConvTurn  // parsed from ResponseBody; nil if parse failed
 	History      []ConvTurn // all turns before LatestPrompt, oldest first
 
-	ParseFailed bool   // true if RequestBody could not be parsed as MessagesRequest
+	ParseFailed bool   // true if RequestBody could not be parsed as a supported request format
 	RawRequest  string // pretty-printed RequestBody (always populated)
 	RawResponse string // pretty-printed ResponseBody (always populated)
 }
@@ -97,13 +98,21 @@ func parseConversation(requestBody, responseBody string) *ConversationData {
 	cd.RawRequest = prettyJSON(requestBody)
 	cd.RawResponse = prettyJSON(responseBody)
 
-	// Attempt to parse the request body as an Anthropic MessagesRequest.
 	var req anthropic.MessagesRequest
-	if err := json.Unmarshal([]byte(requestBody), &req); err != nil || len(req.Messages) == 0 {
-		cd.ParseFailed = true
-		return cd
+	if err := json.Unmarshal([]byte(requestBody), &req); err == nil && len(req.Messages) > 0 {
+		return parseAnthropicConversation(cd, &req, responseBody)
 	}
 
+	var responsesReq translate.ResponsesRequest
+	if err := json.Unmarshal([]byte(requestBody), &responsesReq); err == nil && isResponsesRequest(&responsesReq) {
+		return parseResponsesConversation(cd, &responsesReq, responseBody)
+	}
+
+	cd.ParseFailed = true
+	return cd
+}
+
+func parseAnthropicConversation(cd *ConversationData, req *anthropic.MessagesRequest, responseBody string) *ConversationData {
 	// Normalise system prompt.
 	cd.SystemPrompt = normaliseSystem(req.System)
 	cd.HasSystem = cd.SystemPrompt != ""
@@ -154,6 +163,46 @@ func parseConversation(requestBody, responseBody string) *ConversationData {
 	return cd
 }
 
+func parseResponsesConversation(cd *ConversationData, req *translate.ResponsesRequest, responseBody string) *ConversationData {
+	if req.Instructions != nil {
+		cd.SystemPrompt = *req.Instructions
+	}
+	cd.HasSystem = cd.SystemPrompt != ""
+	cd.SystemPromptLen = len([]rune(cd.SystemPrompt))
+
+	toolNameMap := make(map[string]string)
+	turns := responsesRequestToTurns(req, toolNameMap)
+
+	lastUserIdx := -1
+	for i, turn := range turns {
+		if turn.Role == "user" {
+			lastUserIdx = i
+		}
+	}
+
+	for i, turn := range turns {
+		if i == lastUserIdx {
+			turnCopy := turn
+			cd.LatestPrompt = &turnCopy
+		} else {
+			cd.History = append(cd.History, turn)
+		}
+	}
+
+	if turn := parseResponsesResponse(responseBody, toolNameMap); turn != nil {
+		cd.Response = turn
+	}
+
+	return cd
+}
+
+func isResponsesRequest(req *translate.ResponsesRequest) bool {
+	if req == nil {
+		return false
+	}
+	return len(req.Input) > 0 || (req.Instructions != nil && *req.Instructions != "")
+}
+
 // normaliseSystem converts the interface{} System field to a plain string.
 func normaliseSystem(sys interface{}) string {
 	if sys == nil {
@@ -197,28 +246,31 @@ func messageToTurn(msg anthropic.Message, toolNameMap map[string]string) ConvTur
 func contentBlocksToTurn(role string, blocks []anthropic.ContentBlock, toolNameMap map[string]string) ConvTurn {
 	turn := ConvTurn{Role: role}
 	for _, b := range blocks {
-		cb := contentBlockToConvBlock(b, toolNameMap)
-		// Merge into the previous block if both are plain text.
-		if cb.Type == "text" && len(turn.Blocks) > 0 && turn.Blocks[len(turn.Blocks)-1].Type == "text" {
-			last := &turn.Blocks[len(turn.Blocks)-1]
-			existing := last.FullText
-			if existing == "" {
-				existing = last.Text
-			}
-			incoming := cb.FullText
-			if incoming == "" {
-				incoming = cb.Text
-			}
-			merged := existing + "\n\n" + incoming
-			short, full, trunc := truncateRunes(merged)
-			last.Text = short
-			last.Truncated = trunc
-			last.FullText = full
-			continue
-		}
-		turn.Blocks = append(turn.Blocks, cb)
+		appendConvBlock(&turn, contentBlockToConvBlock(b, toolNameMap))
 	}
 	return turn
+}
+
+func appendConvBlock(turn *ConvTurn, cb ConvBlock) {
+	// Merge into the previous block if both are plain text.
+	if cb.Type == "text" && len(turn.Blocks) > 0 && turn.Blocks[len(turn.Blocks)-1].Type == "text" {
+		last := &turn.Blocks[len(turn.Blocks)-1]
+		existing := last.FullText
+		if existing == "" {
+			existing = last.Text
+		}
+		incoming := cb.FullText
+		if incoming == "" {
+			incoming = cb.Text
+		}
+		merged := existing + "\n\n" + incoming
+		short, full, trunc := truncateRunes(merged)
+		last.Text = short
+		last.Truncated = trunc
+		last.FullText = full
+		return
+	}
+	turn.Blocks = append(turn.Blocks, cb)
 }
 
 // extractContentBlocks normalises the Message.Content interface{} to a
@@ -332,6 +384,394 @@ func contentBlockToConvBlock(b anthropic.ContentBlock, toolNameMap map[string]st
 	default:
 		return ConvBlock{Type: "unknown", Text: "[" + b.Type + " block]"}
 	}
+}
+
+func responsesRequestToTurns(req *translate.ResponsesRequest, toolNameMap map[string]string) []ConvTurn {
+	if req == nil || len(req.Input) == 0 {
+		return nil
+	}
+
+	var textInput string
+	if err := json.Unmarshal(req.Input, &textInput); err == nil {
+		return []ConvTurn{{
+			Role:   "user",
+			Blocks: []ConvBlock{responsesInputTextBlock(textInput)},
+		}}
+	}
+
+	var items []translate.InputItem
+	if err := json.Unmarshal(req.Input, &items); err != nil {
+		return nil
+	}
+
+	var turns []ConvTurn
+	for _, item := range items {
+		if turn := responsesInputItemToTurn(item, toolNameMap); turn != nil {
+			turns = append(turns, *turn)
+		}
+	}
+	return turns
+}
+
+func responsesInputItemToTurn(item translate.InputItem, toolNameMap map[string]string) *ConvTurn {
+	switch item.Type {
+	case "message":
+		return responsesMessageItemToTurn(item)
+	case "input_text":
+		return &ConvTurn{Role: "user", Blocks: []ConvBlock{responsesInputTextBlock(item.Text)}}
+	case "input_image":
+		return &ConvTurn{Role: "user", Blocks: []ConvBlock{responsesInputImageBlock(item)}}
+	case "input_file":
+		return &ConvTurn{Role: "user", Blocks: []ConvBlock{responsesInputFileBlock(item)}}
+	case "input_audio":
+		return &ConvTurn{Role: "user", Blocks: []ConvBlock{responsesUnknownBlock("input_audio item")}}
+	case "function_call":
+		if item.CallID != "" && item.Name != "" {
+			toolNameMap[item.CallID] = item.Name
+		}
+		return &ConvTurn{Role: "assistant", Blocks: []ConvBlock{responsesFunctionCallBlock(item.CallID, item.Name, item.Arguments)}}
+	case "function_call_output":
+		return &ConvTurn{Role: "user", Blocks: []ConvBlock{responsesFunctionCallOutputBlock(item.CallID, item.Output, toolNameMap)}}
+	case "item_reference":
+		return &ConvTurn{Role: "user", Blocks: []ConvBlock{responsesUnknownBlock("item_reference " + item.ID)}}
+	default:
+		if item.Type == "" {
+			return nil
+		}
+		return &ConvTurn{Role: "user", Blocks: []ConvBlock{responsesUnknownBlock(item.Type + " item")}}
+	}
+}
+
+func responsesMessageItemToTurn(item translate.InputItem) *ConvTurn {
+	role := normaliseResponsesRole(item.Role, "user")
+	turn := &ConvTurn{Role: role}
+
+	if len(item.Content) == 0 {
+		return turn
+	}
+
+	var textContent string
+	if err := json.Unmarshal(item.Content, &textContent); err == nil {
+		appendConvBlock(turn, responsesInputTextBlock(textContent))
+		return turn
+	}
+
+	var parts []translate.InputItem
+	if err := json.Unmarshal(item.Content, &parts); err != nil {
+		appendConvBlock(turn, responsesUnknownBlock("unparsed message content"))
+		return turn
+	}
+
+	for _, part := range parts {
+		appendConvBlock(turn, responsesMessageContentBlock(part))
+	}
+
+	return turn
+}
+
+func responsesMessageContentBlock(item translate.InputItem) ConvBlock {
+	switch item.Type {
+	case "input_text":
+		return responsesInputTextBlock(item.Text)
+	case "input_image":
+		return responsesInputImageBlock(item)
+	case "input_file":
+		return responsesInputFileBlock(item)
+	case "input_audio":
+		return responsesUnknownBlock("input_audio item")
+	default:
+		if item.Type == "" && item.Text != "" {
+			return responsesInputTextBlock(item.Text)
+		}
+		return responsesUnknownBlock(item.Type + " item")
+	}
+}
+
+func responsesInputTextBlock(text string) ConvBlock {
+	short, full, trunc := truncateRunes(text)
+	return ConvBlock{
+		Type:      "text",
+		Text:      short,
+		Truncated: trunc,
+		FullText:  full,
+	}
+}
+
+func responsesInputImageBlock(_ translate.InputItem) ConvBlock {
+	return ConvBlock{Type: "image", MediaLabel: "[image]"}
+}
+
+func responsesInputFileBlock(item translate.InputItem) ConvBlock {
+	label := "[file]"
+	switch {
+	case item.Filename != "":
+		label = "[" + item.Filename + "]"
+	case item.FileID != "":
+		label = "[file " + item.FileID + "]"
+	}
+	return ConvBlock{Type: "document", MediaLabel: label}
+}
+
+func responsesFunctionCallBlock(callID, name, arguments string) ConvBlock {
+	toolInput, parsedInput := parseJSONOrRaw(arguments)
+	return ConvBlock{
+		Type:      "tool_use",
+		ToolName:  name,
+		ToolInput: toolInput,
+		ToolID:    callID,
+		ToolArgs:  parseToolArgs(parsedInput),
+	}
+}
+
+func responsesFunctionCallOutputBlock(callID, output string, toolNameMap map[string]string) ConvBlock {
+	short, full, trunc := truncateRunes(output)
+	return ConvBlock{
+		Type:          "tool_result",
+		ToolUseID:     callID,
+		ToolName:      toolNameMap[callID],
+		ResultContent: short,
+		ResultTrunc:   trunc,
+		FullText:      full,
+	}
+}
+
+func responsesUnknownBlock(label string) ConvBlock {
+	if label == "" {
+		label = "unknown item"
+	}
+	return ConvBlock{Type: "unknown", Text: "[" + label + "]"}
+}
+
+func normaliseResponsesRole(role, fallback string) string {
+	switch role {
+	case "developer", "system":
+		return "system"
+	case "assistant", "user":
+		return role
+	case "":
+		return fallback
+	default:
+		return role
+	}
+}
+
+func parseResponsesResponse(responseBody string, toolNameMap map[string]string) *ConvTurn {
+	if responseBody == "" {
+		return nil
+	}
+
+	var resp translate.ResponsesResponse
+	if err := json.Unmarshal([]byte(responseBody), &resp); err == nil && isResponsesResponse(&resp) {
+		return responsesResponseToTurn(&resp, toolNameMap)
+	}
+
+	return parseResponsesSSEResponse(responseBody, toolNameMap)
+}
+
+func isResponsesResponse(resp *translate.ResponsesResponse) bool {
+	if resp == nil {
+		return false
+	}
+	return resp.Object == "response" || resp.Status != "" || len(resp.Output) > 0
+}
+
+func responsesResponseToTurn(resp *translate.ResponsesResponse, toolNameMap map[string]string) *ConvTurn {
+	if resp == nil {
+		return nil
+	}
+
+	role := "assistant"
+	turn := &ConvTurn{Role: role}
+	for _, item := range resp.Output {
+		itemRole := normaliseResponsesRole(item.Role, role)
+		if itemRole != "" {
+			turn.Role = itemRole
+		}
+		for _, block := range responsesOutputItemBlocks(item, toolNameMap) {
+			appendConvBlock(turn, block)
+		}
+	}
+
+	if len(turn.Blocks) == 0 {
+		return nil
+	}
+	return turn
+}
+
+func responsesOutputItemBlocks(item translate.OutputItem, toolNameMap map[string]string) []ConvBlock {
+	switch item.Type {
+	case "message":
+		var blocks []ConvBlock
+		for _, content := range item.Content {
+			switch content.Type {
+			case "output_text":
+				blocks = append(blocks, responsesInputTextBlock(content.Text))
+			case "refusal":
+				blocks = append(blocks, responsesInputTextBlock(content.Refusal))
+			default:
+				blocks = append(blocks, responsesUnknownBlock(content.Type+" content"))
+			}
+		}
+		return blocks
+	case "function_call":
+		if item.CallID != "" && item.Name != "" {
+			toolNameMap[item.CallID] = item.Name
+		}
+		return []ConvBlock{responsesFunctionCallBlock(item.CallID, item.Name, item.Arguments)}
+	default:
+		if item.Type == "" {
+			return nil
+		}
+		return []ConvBlock{responsesUnknownBlock(item.Type + " output")}
+	}
+}
+
+func parseResponsesSSEResponse(body string, toolNameMap map[string]string) *ConvTurn {
+	if !strings.Contains(body, "data:") {
+		return nil
+	}
+
+	outputItems := make(map[int]*translate.OutputItem)
+	var completed *translate.ResponsesResponse
+
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := line[6:]
+		if data == "[DONE]" {
+			continue
+		}
+
+		var envelope struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+			continue
+		}
+
+		switch envelope.Type {
+		case "response.completed":
+			var event struct {
+				Response translate.ResponsesResponse `json:"response"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err == nil && len(event.Response.Output) > 0 {
+				completed = &event.Response
+			}
+		case "response.output_item.added", "response.output_item.done":
+			var event struct {
+				OutputIndex int                  `json:"output_index"`
+				Item        translate.OutputItem `json:"item"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err == nil {
+				item := event.Item
+				if item.Type == "" {
+					item.Type = "message"
+				}
+				outputItems[event.OutputIndex] = &item
+			}
+		case "response.content_part.added", "response.content_part.done":
+			var event struct {
+				OutputIndex  int                     `json:"output_index"`
+				ContentIndex int                     `json:"content_index"`
+				Part         translate.OutputContent `json:"part"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err == nil {
+				item := ensureResponsesOutputItem(outputItems, event.OutputIndex)
+				content := ensureResponsesOutputContent(item, event.ContentIndex)
+				*content = event.Part
+			}
+		case "response.output_text.delta":
+			var event struct {
+				OutputIndex  int    `json:"output_index"`
+				ContentIndex int    `json:"content_index"`
+				Delta        string `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err == nil {
+				item := ensureResponsesOutputItem(outputItems, event.OutputIndex)
+				content := ensureResponsesOutputContent(item, event.ContentIndex)
+				if content.Type == "" {
+					content.Type = "output_text"
+				}
+				content.Text += event.Delta
+			}
+		case "response.output_text.done":
+			var event struct {
+				OutputIndex  int    `json:"output_index"`
+				ContentIndex int    `json:"content_index"`
+				Text         string `json:"text"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err == nil {
+				item := ensureResponsesOutputItem(outputItems, event.OutputIndex)
+				content := ensureResponsesOutputContent(item, event.ContentIndex)
+				content.Type = "output_text"
+				content.Text = event.Text
+			}
+		}
+	}
+
+	if completed != nil {
+		return responsesResponseToTurn(completed, toolNameMap)
+	}
+
+	if len(outputItems) == 0 {
+		return nil
+	}
+
+	keys := make([]int, 0, len(outputItems))
+	for idx := range outputItems {
+		keys = append(keys, idx)
+	}
+	sort.Ints(keys)
+
+	resp := &translate.ResponsesResponse{}
+	for _, idx := range keys {
+		if outputItems[idx] != nil {
+			resp.Output = append(resp.Output, *outputItems[idx])
+		}
+	}
+	return responsesResponseToTurn(resp, toolNameMap)
+}
+
+func ensureResponsesOutputItem(items map[int]*translate.OutputItem, idx int) *translate.OutputItem {
+	if item := items[idx]; item != nil {
+		if item.Type == "" {
+			item.Type = "message"
+		}
+		if item.Role == "" {
+			item.Role = "assistant"
+		}
+		return item
+	}
+
+	item := &translate.OutputItem{
+		Type: "message",
+		Role: "assistant",
+	}
+	items[idx] = item
+	return item
+}
+
+func ensureResponsesOutputContent(item *translate.OutputItem, idx int) *translate.OutputContent {
+	for len(item.Content) <= idx {
+		item.Content = append(item.Content, translate.OutputContent{})
+	}
+	return &item.Content[idx]
+}
+
+func parseJSONOrRaw(raw string) (string, interface{}) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "{}", nil
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+		return prettyJSON(raw), parsed
+	}
+	return raw, nil
 }
 
 func marshalInput(v interface{}) string {

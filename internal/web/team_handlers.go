@@ -4,7 +4,7 @@ package web
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -74,7 +74,7 @@ func (h *TeamHandlers) TeamsAPIHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"teams": teams}); err != nil {
-		log.Printf("ERROR: write teams JSON: %v", err)
+		slog.Error("write teams JSON", "error", err)
 	}
 }
 
@@ -146,12 +146,12 @@ func (h *TeamHandlers) CreateTeamHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.store.RecordAuditEvent(r.Context(), "team.created", "", id+" "+name); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "id": id}); err != nil {
-		log.Printf("ERROR: write create team response: %v", err)
+		slog.Error("write create team response", "error", err)
 	}
 }
 
@@ -182,12 +182,38 @@ func (h *TeamHandlers) AddTeamMemberHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := h.store.RecordAuditEvent(r.Context(), "team.member_added", "", teamID+" "+userID); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
-		log.Printf("ERROR: write add member response: %v", err)
+		slog.Error("write add member response", "error", err)
+	}
+}
+
+// DeleteTeamHandler deletes a team and removes all its member assignments.
+// DELETE /ui/api/teams/{id}
+func (h *TeamHandlers) DeleteTeamHandler(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "id")
+
+	team, err := h.store.GetTeamByID(r.Context(), teamID)
+	if err != nil || team == nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	if err := h.store.DeleteTeam(r.Context(), teamID); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.store.RecordAuditEvent(r.Context(), "team.deleted", "", teamID+" "+team.Name); err != nil {
+		slog.Warn("record audit event", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
+		slog.Error("write delete team response", "error", err)
 	}
 }
 
@@ -219,12 +245,12 @@ func (h *TeamHandlers) RemoveTeamMemberHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.store.RecordAuditEvent(r.Context(), "team.member_removed", "", teamID+" "+userID); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
-		log.Printf("ERROR: write remove member response: %v", err)
+		slog.Error("write remove member response", "error", err)
 	}
 }
 

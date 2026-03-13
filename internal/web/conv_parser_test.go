@@ -151,4 +151,119 @@ func TestParseConversation(t *testing.T) {
 		require.Len(t, cd.Response.Blocks, 1)
 		require.Equal(t, "Hello from stream", cd.Response.Blocks[0].Text)
 	})
+
+	t.Run("responses request string input populates system prompt and latest prompt", func(t *testing.T) {
+		req := `{"model":"gpt-5.4","instructions":"Be brief.","input":"Hello from responses"}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.True(t, cd.HasSystem)
+		require.Equal(t, "Be brief.", cd.SystemPrompt)
+		require.NotNil(t, cd.LatestPrompt)
+		require.Equal(t, "user", cd.LatestPrompt.Role)
+		require.Equal(t, "Hello from responses", cd.LatestPrompt.Blocks[0].Text)
+	})
+
+	t.Run("responses request message items keep developer history and latest user prompt", func(t *testing.T) {
+		req := `{
+			"model":"gpt-5.4",
+			"instructions":"Top level instructions",
+			"input":[
+				{"type":"message","role":"developer","content":[{"type":"input_text","text":"Developer guardrails"}]},
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"Show me the details"}]}
+			]
+		}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.Equal(t, "Top level instructions", cd.SystemPrompt)
+		require.Len(t, cd.History, 1)
+		require.Equal(t, "system", cd.History[0].Role)
+		require.Equal(t, "Developer guardrails", cd.History[0].Blocks[0].Text)
+		require.NotNil(t, cd.LatestPrompt)
+		require.Equal(t, "Show me the details", cd.LatestPrompt.Blocks[0].Text)
+	})
+
+	t.Run("responses function call and output are rendered as tool turns", func(t *testing.T) {
+		req := `{
+			"model":"gpt-5.4",
+			"input":[
+				{"type":"function_call","call_id":"call_123","name":"get_weather","arguments":"{\"location\":\"SF\"}"},
+				{"type":"function_call_output","call_id":"call_123","output":"{\"temp\":70}"}
+			]
+		}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.Len(t, cd.History, 1)
+		require.Equal(t, "assistant", cd.History[0].Role)
+		require.Equal(t, "tool_use", cd.History[0].Blocks[0].Type)
+		require.Equal(t, "get_weather", cd.History[0].Blocks[0].ToolName)
+		require.NotNil(t, cd.LatestPrompt)
+		require.Equal(t, "tool_result", cd.LatestPrompt.Blocks[0].Type)
+		require.Equal(t, "get_weather", cd.LatestPrompt.Blocks[0].ToolName)
+	})
+
+	t.Run("responses response body is parsed into assistant text", func(t *testing.T) {
+		req := `{"model":"gpt-5.4","input":"Hi"}`
+		resp := `{
+			"id":"resp_123",
+			"object":"response",
+			"status":"completed",
+			"output":[
+				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello from Responses"}]}
+			]
+		}`
+		cd := parseConversation(req, resp)
+		require.False(t, cd.ParseFailed)
+		require.NotNil(t, cd.Response)
+		require.Equal(t, "assistant", cd.Response.Role)
+		require.Equal(t, "Hello from Responses", cd.Response.Blocks[0].Text)
+	})
+
+	t.Run("responses response function call is parsed into tool use", func(t *testing.T) {
+		req := `{"model":"gpt-5.4","input":"Hi"}`
+		resp := `{
+			"id":"resp_456",
+			"object":"response",
+			"status":"completed",
+			"output":[
+				{"type":"function_call","call_id":"call_456","name":"lookup_weather","arguments":"{\"city\":\"Boston\"}","status":"completed"}
+			]
+		}`
+		cd := parseConversation(req, resp)
+		require.False(t, cd.ParseFailed)
+		require.NotNil(t, cd.Response)
+		require.Len(t, cd.Response.Blocks, 1)
+		require.Equal(t, "tool_use", cd.Response.Blocks[0].Type)
+		require.Equal(t, "lookup_weather", cd.Response.Blocks[0].ToolName)
+	})
+
+	t.Run("responses SSE delta stream is parsed into assistant text", func(t *testing.T) {
+		req := `{"model":"gpt-5.4","input":"Hi"}`
+		sseBody := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_stream1\",\"model\":\"gpt-5.4\"}}\n\n" +
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from responses stream\"}\n\n" +
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}}\n\n" +
+			"data: [DONE]\n\n"
+		cd := parseConversation(req, sseBody)
+		require.False(t, cd.ParseFailed)
+		require.NotNil(t, cd.Response)
+		require.Equal(t, "assistant", cd.Response.Role)
+		require.Len(t, cd.Response.Blocks, 1)
+		require.Equal(t, "Hello from responses stream", cd.Response.Blocks[0].Text)
+	})
+
+	t.Run("responses unsupported items remain visible", func(t *testing.T) {
+		req := `{
+			"model":"gpt-5.4",
+			"input":[
+				{"type":"item_reference","id":"msg_123"},
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"Real prompt"}]}
+			]
+		}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.Len(t, cd.History, 1)
+		require.Equal(t, "unknown", cd.History[0].Blocks[0].Type)
+		require.Contains(t, cd.History[0].Blocks[0].Text, "item_reference")
+		require.NotNil(t, cd.LatestPrompt)
+		require.Equal(t, "Real prompt", cd.LatestPrompt.Blocks[0].Text)
+	})
 }

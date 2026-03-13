@@ -13,8 +13,9 @@ import (
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:   "glitchgate",
-	Short: "LLM API gateway with logging and cost monitoring",
+	Use:          "glitchgate",
+	SilenceUsage: true,
+	Short:        "LLM API gateway with logging and cost monitoring",
 	Long: `glitchgate is a transparent proxy for LLM APIs that logs all
 requests and responses, calculates costs, and provides a web UI
 for viewing usage and spending.`,

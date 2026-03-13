@@ -474,6 +474,289 @@ func TestAnthropicErrorToOpenAI(t *testing.T) {
 	}
 }
 
+func TestOpenAIToAnthropic_ReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name         string
+		effort       *string
+		maxTokens    *int
+		wantThinking bool
+		wantBudget   int
+	}{
+		{
+			name:         "high effort",
+			effort:       strPtr("high"),
+			maxTokens:    intPtr(16384),
+			wantThinking: true,
+			wantBudget:   10000,
+		},
+		{
+			name:         "medium effort",
+			effort:       strPtr("medium"),
+			maxTokens:    intPtr(16384),
+			wantThinking: true,
+			wantBudget:   5000,
+		},
+		{
+			name:         "low effort",
+			effort:       strPtr("low"),
+			maxTokens:    intPtr(16384),
+			wantThinking: true,
+			wantBudget:   1024,
+		},
+		{
+			name:         "high capped by maxTokens",
+			effort:       strPtr("high"),
+			maxTokens:    intPtr(5000),
+			wantThinking: true,
+			wantBudget:   4999,
+		},
+		{
+			name:         "nil effort",
+			effort:       nil,
+			maxTokens:    intPtr(16384),
+			wantThinking: false,
+		},
+		{
+			name:         "empty effort",
+			effort:       strPtr(""),
+			maxTokens:    intPtr(16384),
+			wantThinking: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &ChatCompletionRequest{
+				Model: "claude-sonnet-4-20250514",
+				Messages: []ChatMessage{
+					{Role: "user", Content: "Think about this."},
+				},
+				MaxTokens:       tc.maxTokens,
+				ReasoningEffort: tc.effort,
+			}
+
+			result, err := OpenAIToAnthropic(req)
+			require.NoError(t, err)
+
+			if tc.wantThinking {
+				require.NotNil(t, result.Thinking)
+				require.Equal(t, "enabled", result.Thinking.Type)
+				require.Equal(t, tc.wantBudget, result.Thinking.BudgetTokens)
+			} else {
+				require.Nil(t, result.Thinking)
+			}
+		})
+	}
+}
+
+func TestAnthropicToOpenAI_ThinkingBlocks(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  []anthropic.ContentBlock
+		wantText string
+	}{
+		{
+			name: "thinking block excluded from text",
+			content: []anthropic.ContentBlock{
+				{Type: "thinking", Thinking: "Let me reason about this carefully step by step..."},
+				{Type: "text", Text: "The answer is 42."},
+			},
+			wantText: "The answer is 42.",
+		},
+		{
+			name: "no thinking blocks",
+			content: []anthropic.ContentBlock{
+				{Type: "text", Text: "Simple answer."},
+			},
+			wantText: "Simple answer.",
+		},
+		{
+			name: "multiple thinking blocks",
+			content: []anthropic.ContentBlock{
+				{Type: "thinking", Thinking: "First I need to consider..."},
+				{Type: "thinking", Thinking: "Then I should also think about..."},
+				{Type: "text", Text: "Here is my response."},
+			},
+			wantText: "Here is my response.",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			anthResp := &anthropic.MessagesResponse{
+				ID:         "msg_thinking_test",
+				Type:       "message",
+				Role:       "assistant",
+				Content:    tc.content,
+				Model:      "claude-sonnet-4-20250514",
+				StopReason: strPtr("end_turn"),
+				Usage: anthropic.Usage{
+					InputTokens:  100,
+					OutputTokens: 50,
+				},
+			}
+
+			result := AnthropicToOpenAI(anthResp, "test-model")
+			require.NotNil(t, result)
+			require.Len(t, result.Choices, 1)
+			require.Equal(t, tc.wantText, result.Choices[0].Message.Content)
+			require.Nil(t, result.Usage.CompletionTokensDetails)
+		})
+	}
+}
+
+func TestAnthropicToOpenAIRequest_ToolResultBlocks(t *testing.T) {
+	tests := []struct {
+		name            string
+		userBlocks      []anthropic.ContentBlock
+		wantToolCallID  string
+		wantToolContent string
+	}{
+		{
+			name: "tool_result with string content",
+			userBlocks: []anthropic.ContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "toolu_abc123",
+					Content:   "72F and sunny",
+				},
+			},
+			wantToolCallID:  "toolu_abc123",
+			wantToolContent: "72F and sunny",
+		},
+		{
+			name: "tool_result with array content blocks",
+			userBlocks: []anthropic.ContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "toolu_def456",
+					Content: []interface{}{
+						map[string]interface{}{"type": "text", "text": "Result: "},
+						map[string]interface{}{"type": "text", "text": "success"},
+					},
+				},
+			},
+			wantToolCallID:  "toolu_def456",
+			wantToolContent: "Result: success",
+		},
+		{
+			name: "tool_result with text fallback",
+			userBlocks: []anthropic.ContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "toolu_ghi789",
+					Text:      "fallback text",
+				},
+			},
+			wantToolCallID:  "toolu_ghi789",
+			wantToolContent: "fallback text",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			contentJSON, _ := json.Marshal(tc.userBlocks)
+			var contentRaw interface{}
+			_ = json.Unmarshal(contentJSON, &contentRaw)
+
+			req := &anthropic.MessagesRequest{
+				Model:     "claude-sonnet-4-20250514",
+				MaxTokens: 1024,
+				Messages: []anthropic.Message{
+					{Role: "user", Content: "What's the weather?"},
+					{
+						Role: "assistant",
+						Content: []anthropic.ContentBlock{
+							{
+								Type:  "tool_use",
+								ID:    tc.userBlocks[0].ToolUseID,
+								Name:  "get_weather",
+								Input: map[string]interface{}{"location": "NYC"},
+							},
+						},
+					},
+					{Role: "user", Content: contentRaw},
+				},
+			}
+
+			result, err := AnthropicToOpenAIRequest(req)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Find the tool message in the output.
+			var toolMsg *ChatMessage
+			for i := range result.Messages {
+				if result.Messages[i].Role == "tool" {
+					toolMsg = &result.Messages[i]
+					break
+				}
+			}
+			require.NotNil(t, toolMsg, "expected a tool message in output")
+			require.Equal(t, tc.wantToolCallID, toolMsg.ToolCallID)
+			require.Equal(t, tc.wantToolContent, toolMsg.Content)
+		})
+	}
+}
+
+func TestAnthropicToOpenAIRequest_AssistantToolUse(t *testing.T) {
+	req := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "What's the weather?"},
+			{
+				Role: "assistant",
+				Content: []anthropic.ContentBlock{
+					{Type: "text", Text: "Let me check."},
+					{
+						Type:  "tool_use",
+						ID:    "toolu_xyz",
+						Name:  "get_weather",
+						Input: map[string]interface{}{"location": "NYC"},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := AnthropicToOpenAIRequest(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Last message should be assistant with tool_calls.
+	var assistantMsg *ChatMessage
+	for i := range result.Messages {
+		if result.Messages[i].Role == "assistant" {
+			assistantMsg = &result.Messages[i]
+		}
+	}
+	require.NotNil(t, assistantMsg)
+	require.Equal(t, "Let me check.", assistantMsg.Content)
+	require.Len(t, assistantMsg.ToolCalls, 1)
+	require.Equal(t, "toolu_xyz", assistantMsg.ToolCalls[0].ID)
+	require.Equal(t, "function", assistantMsg.ToolCalls[0].Type)
+	require.Equal(t, "get_weather", assistantMsg.ToolCalls[0].Function.Name)
+	require.Contains(t, assistantMsg.ToolCalls[0].Function.Arguments, "NYC")
+}
+
+func TestAnthropicToOpenAIRequest_SystemMessage(t *testing.T) {
+	req := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		System:    "You are a helpful assistant.",
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "Hi"},
+		},
+	}
+
+	result, err := AnthropicToOpenAIRequest(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.GreaterOrEqual(t, len(result.Messages), 2)
+	require.Equal(t, "system", result.Messages[0].Role)
+	require.Equal(t, "You are a helpful assistant.", result.Messages[0].Content)
+}
+
 // --- helpers ---
 
 func strPtr(s string) *string { return &s }

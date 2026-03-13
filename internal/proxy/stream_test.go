@@ -49,3 +49,58 @@ func TestExtractTokens_CacheFields(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractResponsesTokens_CacheFields(t *testing.T) {
+	tests := []struct {
+		name          string
+		data          string
+		wantInput     int64
+		wantOutput    int64
+		wantCacheRead int64
+		wantReasoning int64
+	}{
+		{
+			name:          "response completed with cached tokens",
+			data:          `{"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":50,"input_tokens_details":{"cached_tokens":30}}}}`,
+			wantInput:     70,
+			wantOutput:    50,
+			wantCacheRead: 30,
+		},
+		{
+			name:       "response completed without cached tokens",
+			data:       `{"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":50}}}`,
+			wantInput:  100,
+			wantOutput: 50,
+		},
+		{
+			name:          "response completed with reasoning tokens",
+			data:          `{"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":200,"output_tokens_details":{"reasoning_tokens":150}}}}`,
+			wantInput:     100,
+			wantOutput:    200,
+			wantReasoning: 150,
+		},
+		{
+			name:          "response completed with all token details",
+			data:          `{"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":200,"input_tokens_details":{"cached_tokens":40},"output_tokens_details":{"reasoning_tokens":120}}}}`,
+			wantInput:     60,
+			wantOutput:    200,
+			wantCacheRead: 40,
+			wantReasoning: 120,
+		},
+		{
+			name: "unrelated responses event is ignored",
+			data: `{"type":"response.output_text.delta","delta":"hello"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var input, output, cacheRead, reasoning int64
+			extractResponsesTokens(tc.data, &input, &output, &cacheRead, &reasoning)
+			require.Equal(t, tc.wantInput, input, "input tokens")
+			require.Equal(t, tc.wantOutput, output, "output tokens")
+			require.Equal(t, tc.wantCacheRead, cacheRead, "cache read tokens")
+			require.Equal(t, tc.wantReasoning, reasoning, "reasoning tokens")
+		})
+	}
+}

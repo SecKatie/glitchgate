@@ -3,7 +3,7 @@
 package web
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -60,14 +60,14 @@ func UISessionMiddleware(sessions *auth.UISessionStore, st store.Store) func(htt
 			} else if sess.SessionType == "oidc" && sess.UserID != nil {
 				user, err := st.GetOIDCUserByID(r.Context(), *sess.UserID)
 				if err != nil {
-					log.Printf("WARNING: UISessionMiddleware: load user from session: %v", err)
+					slog.Warn("UISessionMiddleware: load user from session", "error", err)
 					redirectOrUnauthorized(w, r)
 					return
 				}
 				if user == nil || !user.Active {
 					// Deactivated user — invalidate the session and redirect.
 					if delErr := sessions.Delete(r.Context(), token); delErr != nil {
-						log.Printf("WARNING: UISessionMiddleware: delete session: %v", delErr)
+						slog.Warn("UISessionMiddleware: delete session", "error", delErr)
 					}
 					http.Redirect(w, r, "/ui/login?error=deactivated", http.StatusSeeOther)
 					return

@@ -5,8 +5,9 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +26,7 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
+	openaiprov "codeberg.org/kglitchy/glitchgate/internal/provider/openai"
 	"codeberg.org/kglitchy/glitchgate/internal/proxy"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 	"codeberg.org/kglitchy/glitchgate/internal/web"
@@ -45,6 +47,15 @@ func runServe(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Set up structured JSON logger writing to the configured log file and stdout.
+	logFile, err := os.OpenFile(cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("opening log file %q: %w", cfg.LogPath, err)
+	}
+	defer func() { _ = logFile.Close() }()
+	logDest := io.MultiWriter(logFile, os.Stdout)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logDest, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	// Open database and run migrations.
 	st, err := store.NewSQLiteStore(cfg.DatabasePath)
@@ -69,6 +80,18 @@ func runServe(_ *cobra.Command, _ []string) error {
 				tokenDir = copilot.DefaultTokenDir()
 			}
 			providers[pc.Name] = copilot.NewClient(pc.Name, tokenDir)
+		case "openai":
+			baseURL := pc.BaseURL
+			if baseURL == "" {
+				baseURL = "https://api.openai.com"
+			}
+			providers[pc.Name] = openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
+		case "openai_responses":
+			baseURL := pc.BaseURL
+			if baseURL == "" {
+				baseURL = "https://api.openai.com"
+			}
+			providers[pc.Name] = openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
 		default:
 			return fmt.Errorf("unsupported provider type %q for provider %q", pc.Type, pc.Name)
 		}
@@ -91,6 +114,12 @@ func runServe(_ *cobra.Command, _ []string) error {
 		case "anthropic":
 			if pricing.IsOfficialAnthropicURL(baseURL) {
 				for model, entry := range pricing.AnthropicDefaults {
+					pricingMap[provKey+"/"+model] = entry
+				}
+			}
+		case "openai", "openai_responses":
+			if pricing.IsOfficialOpenAIURL(baseURL) {
+				for model, entry := range pricing.OpenAIDefaults {
 					pricingMap[provKey+"/"+model] = entry
 				}
 			}
@@ -126,24 +155,27 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// Load display timezone (default UTC).
 	tz, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
-		log.Printf("WARNING: unknown timezone %q, falling back to UTC: %v", cfg.Timezone, err)
+		slog.Warn("unknown timezone, falling back to UTC", "timezone", cfg.Timezone, "error", err)
 		tz = time.UTC
 	}
 
 	// Build the proxy handlers.
 	proxyHandler := proxy.NewHandler(cfg, providers, calc, asyncLogger)
 	openaiHandler := proxy.NewOpenAIHandler(cfg, providers, calc, asyncLogger)
+	responsesHandler := proxy.NewResponsesHandler(cfg, providers, calc, asyncLogger)
 
 	// Build chi router.
 	r := chi.NewRouter()
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Recoverer)
+	r.Use(warnOnNotFound)
 
 	// Proxy routes — authenticated with proxy API key.
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(proxy.AuthMiddleware(st))
 		r.Post("/messages", proxyHandler.ServeHTTP)
 		r.Post("/chat/completions", openaiHandler.ServeHTTP)
+		r.Post("/responses", responsesHandler.ServeHTTP)
 	})
 
 	// Web UI.
@@ -158,12 +190,21 @@ func runServe(_ *cobra.Command, _ []string) error {
 		if oidcErr != nil {
 			return fmt.Errorf("initialising OIDC provider: %w", oidcErr)
 		}
-		log.Printf("OIDC provider configured: %s", cfg.OIDC.IssuerURL)
+		slog.Info("OIDC provider configured", "issuer_url", cfg.OIDC.IssuerURL)
+	}
+
+	providerNames := make(map[string]string, len(cfg.Providers))
+	for _, p := range cfg.Providers {
+		baseURL := p.BaseURL
+		if p.Type == "github_copilot" && baseURL == "" {
+			baseURL = copilot.DefaultAPIURL
+		}
+		providerNames[pricing.ProviderKey(p.Type, baseURL)] = p.Name
 	}
 
 	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl, oidcProvider)
 	authHandlers := web.NewAuthHandlers(st, sessions, oidcProvider)
-	costHandlers := web.NewCostHandlers(st, tmpl, tz)
+	costHandlers := web.NewCostHandlers(st, tmpl, tz, calc, providerNames)
 	userHandlers := web.NewUserHandlers(st, sessions, tmpl)
 	teamHandlers := web.NewTeamHandlers(st, sessions, tmpl)
 
@@ -173,10 +214,10 @@ func runServe(_ *cobra.Command, _ []string) error {
 			time.Sleep(time.Hour)
 			ctx := context.Background()
 			if err := st.CleanupExpiredSessions(ctx); err != nil {
-				log.Printf("WARNING: cleanup sessions: %v", err)
+				slog.Warn("cleanup sessions", "error", err)
 			}
 			if err := st.CleanupExpiredOIDCState(ctx); err != nil {
-				log.Printf("WARNING: cleanup oidc state: %v", err)
+				slog.Warn("cleanup oidc state", "error", err)
 			}
 		}
 	}()
@@ -243,6 +284,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.With(web.RequireAdminOrTeamAdmin).Get("/teams", teamHandlers.TeamsPage)
 		r.With(web.RequireAdminOrTeamAdmin).Get("/api/teams", teamHandlers.TeamsAPIHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/teams", teamHandlers.CreateTeamHandler)
+		r.With(web.RequireGlobalAdmin).Delete("/api/teams/{id}", teamHandlers.DeleteTeamHandler)
 		r.With(web.RequireAdminOrTeamAdmin).Post("/api/teams/{id}/members", teamHandlers.AddTeamMemberHandler)
 		r.With(web.RequireAdminOrTeamAdmin).Delete("/api/teams/{id}/members/{userID}", teamHandlers.RemoveTeamMemberHandler)
 	})
@@ -269,7 +311,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// Graceful shutdown.
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("glitchgate listening on %s", cfg.Listen)
+		slog.Info("glitchgate listening", "addr", cfg.Listen)
 		errCh <- srv.ListenAndServe()
 	}()
 
@@ -278,7 +320,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	select {
 	case sig := <-quit:
-		log.Printf("received signal %s, shutting down...", sig)
+		slog.Info("received signal, shutting down", "signal", sig)
 	case err := <-errCh:
 		if err != nil && err != http.ErrServerClosed {
 			return fmt.Errorf("server error: %w", err)

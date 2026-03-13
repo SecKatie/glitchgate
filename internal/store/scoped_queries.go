@@ -11,8 +11,9 @@ import (
 // ListProxyKeysByOwner returns all active proxy keys owned by the given user.
 func (s *SQLiteStore) ListProxyKeysByOwner(ctx context.Context, ownerUserID string) ([]ProxyKeySummary, error) {
 	const q = `SELECT id, key_prefix, label, created_at
-		FROM proxy_keys
-		WHERE owner_user_id = ? AND revoked_at IS NULL
+		FROM proxy_keys pk
+		JOIN proxy_key_owners pko ON pko.proxy_key_id = pk.id
+		WHERE pko.owner_user_id = ? AND pk.revoked_at IS NULL
 		ORDER BY created_at DESC`
 
 	return s.scanProxyKeySummaries(ctx, q, ownerUserID)
@@ -22,8 +23,8 @@ func (s *SQLiteStore) ListProxyKeysByOwner(ctx context.Context, ownerUserID stri
 func (s *SQLiteStore) ListProxyKeysByTeam(ctx context.Context, teamID string) ([]ProxyKeySummary, error) {
 	const q = `SELECT pk.id, pk.key_prefix, pk.label, pk.created_at
 		FROM proxy_keys pk
-		JOIN oidc_users u ON u.id = pk.owner_user_id
-		JOIN team_memberships tm ON tm.user_id = u.id
+		JOIN proxy_key_owners pko ON pko.proxy_key_id = pk.id
+		JOIN team_memberships tm ON tm.user_id = pko.owner_user_id
 		WHERE tm.team_id = ? AND pk.revoked_at IS NULL
 		ORDER BY pk.created_at DESC`
 
@@ -32,11 +33,31 @@ func (s *SQLiteStore) ListProxyKeysByTeam(ctx context.Context, teamID string) ([
 
 // CreateProxyKeyForUser inserts a new proxy key associated with an OIDC user.
 func (s *SQLiteStore) CreateProxyKeyForUser(ctx context.Context, id, keyHash, keyPrefix, label, ownerUserID string) error {
-	const q = `INSERT INTO proxy_keys (id, key_hash, key_prefix, label, owner_user_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`
-	if _, err := s.db.ExecContext(ctx, q, id, keyHash, keyPrefix, label, ownerUserID, time.Now().UTC()); err != nil {
-		return fmt.Errorf("create proxy key for user: %w", err)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("create proxy key for user: begin tx: %w", err)
 	}
+
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC()
+
+	const insertKey = `INSERT INTO proxy_keys (id, key_hash, key_prefix, label, created_at)
+		VALUES (?, ?, ?, ?, ?)`
+	if _, err := tx.ExecContext(ctx, insertKey, id, keyHash, keyPrefix, label, now); err != nil {
+		return fmt.Errorf("create proxy key for user: insert key: %w", err)
+	}
+
+	const insertOwner = `INSERT INTO proxy_key_owners (proxy_key_id, owner_user_id, assigned_at)
+		VALUES (?, ?, ?)`
+	if _, err := tx.ExecContext(ctx, insertOwner, id, ownerUserID, now); err != nil {
+		return fmt.Errorf("create proxy key for user: insert owner: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("create proxy key for user: commit: %w", err)
+	}
+
 	return nil
 }
 

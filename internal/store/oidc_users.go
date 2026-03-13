@@ -66,15 +66,23 @@ func (s *SQLiteStore) UpsertOIDCUser(ctx context.Context, subject, email, displa
 
 // GetOIDCUserByID returns the OIDC user with the given internal ID.
 func (s *SQLiteStore) GetOIDCUserByID(ctx context.Context, id string) (*OIDCUser, error) {
-	const q = `SELECT id, subject, email, display_name, role, active, last_seen_at, created_at,
-		budget_limit_usd, budget_period FROM oidc_users WHERE id = ?`
+	const q = `SELECT
+		u.id, u.subject, u.email, u.display_name, u.role, u.active, u.last_seen_at, u.created_at,
+		ub.limit_usd, ub.period
+	FROM oidc_users u
+	LEFT JOIN user_budgets ub ON ub.user_id = u.id
+	WHERE u.id = ?`
 	return s.scanOIDCUser(s.db.QueryRowContext(ctx, q, id))
 }
 
 // GetOIDCUserBySubject returns the OIDC user matching the IDP subject claim.
 func (s *SQLiteStore) GetOIDCUserBySubject(ctx context.Context, subject string) (*OIDCUser, error) {
-	const q = `SELECT id, subject, email, display_name, role, active, last_seen_at, created_at,
-		budget_limit_usd, budget_period FROM oidc_users WHERE subject = ?`
+	const q = `SELECT
+		u.id, u.subject, u.email, u.display_name, u.role, u.active, u.last_seen_at, u.created_at,
+		ub.limit_usd, ub.period
+	FROM oidc_users u
+	LEFT JOIN user_budgets ub ON ub.user_id = u.id
+	WHERE u.subject = ?`
 	return s.scanOIDCUser(s.db.QueryRowContext(ctx, q, subject))
 }
 
@@ -94,19 +102,18 @@ func (s *SQLiteStore) scanOIDCUser(row *sql.Row) (*OIDCUser, error) {
 	if lastSeen.Valid {
 		u.LastSeenAt = &lastSeen.Time
 	}
-	if budgetUSD.Valid {
-		u.BudgetLimitUSD = &budgetUSD.Float64
-	}
-	if budgetPeriod.Valid {
-		u.BudgetPeriod = &budgetPeriod.String
-	}
+	u.Budget = scanBudgetPolicy(budgetUSD, budgetPeriod)
 	return &u, nil
 }
 
 // ListOIDCUsers returns all OIDC users ordered by created_at ascending.
 func (s *SQLiteStore) ListOIDCUsers(ctx context.Context) ([]OIDCUser, error) {
-	const q = `SELECT id, subject, email, display_name, role, active, last_seen_at, created_at,
-		budget_limit_usd, budget_period FROM oidc_users ORDER BY created_at ASC`
+	const q = `SELECT
+		u.id, u.subject, u.email, u.display_name, u.role, u.active, u.last_seen_at, u.created_at,
+		ub.limit_usd, ub.period
+	FROM oidc_users u
+	LEFT JOIN user_budgets ub ON ub.user_id = u.id
+	ORDER BY u.created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -130,12 +137,7 @@ func (s *SQLiteStore) ListOIDCUsers(ctx context.Context) ([]OIDCUser, error) {
 		if lastSeen.Valid {
 			u.LastSeenAt = &lastSeen.Time
 		}
-		if budgetUSD.Valid {
-			u.BudgetLimitUSD = &budgetUSD.Float64
-		}
-		if budgetPeriod.Valid {
-			u.BudgetPeriod = &budgetPeriod.String
-		}
+		u.Budget = scanBudgetPolicy(budgetUSD, budgetPeriod)
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {

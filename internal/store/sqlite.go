@@ -205,9 +205,9 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		id, proxy_key_id, timestamp, source_format, provider_name,
 		model_requested, model_upstream, input_tokens, output_tokens,
 		cache_creation_input_tokens, cache_read_input_tokens,
-		latency_ms, status, request_body, response_body,
+		reasoning_tokens, latency_ms, status, request_body, response_body,
 		estimated_cost_usd, error_details, is_streaming, fallback_attempts
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	isStreaming := 0
 	if entry.IsStreaming {
@@ -231,6 +231,7 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		entry.OutputTokens,
 		entry.CacheCreationInputTokens,
 		entry.CacheReadInputTokens,
+		entry.ReasoningTokens,
 		entry.LatencyMs,
 		entry.Status,
 		entry.RequestBody,
@@ -291,12 +292,10 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 	// Scope filtering.
 	switch params.ScopeType {
 	case "user":
-		where = append(where, "pk.owner_user_id = ?")
+		where = append(where, "pko.owner_user_id = ?")
 		args = append(args, params.ScopeUserID)
 	case "team":
-		where = append(where, `pk.owner_user_id IN (
-			SELECT user_id FROM team_memberships WHERE team_id = ?
-		)`)
+		where = append(where, "tm.team_id = ?")
 		args = append(args, params.ScopeTeamID)
 	}
 
@@ -305,8 +304,11 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 		whereClause = "WHERE " + strings.Join(where, " AND ")
 	}
 
+	baseFrom := `FROM request_logs rl JOIN proxy_keys pk ON pk.id = rl.proxy_key_id`
+	baseFrom = addOwnerScopeJoins(baseFrom, params.ScopeType)
+
 	// Count total matching rows.
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM request_logs rl JOIN proxy_keys pk ON pk.id = rl.proxy_key_id %s`, whereClause)
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) %s %s`, baseFrom, whereClause)
 	var total int64
 	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count request logs: %w", err)
@@ -339,14 +341,14 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 			pk.key_prefix, pk.label,
 			rl.input_tokens, rl.output_tokens,
 			rl.cache_creation_input_tokens, rl.cache_read_input_tokens,
+			rl.reasoning_tokens,
 			rl.latency_ms, rl.status,
 			rl.estimated_cost_usd, rl.is_streaming, rl.error_details,
 			rl.fallback_attempts
-		FROM request_logs rl
-		JOIN proxy_keys pk ON pk.id = rl.proxy_key_id
+		%s
 		%s
 		ORDER BY %s %s
-		LIMIT ? OFFSET ?`, whereClause, sortCol, order)
+		LIMIT ? OFFSET ?`, baseFrom, whereClause, sortCol, order)
 
 	listArgs := append(args, perPage, offset)
 	rows, err := s.db.QueryContext(ctx, listQuery, listArgs...)
@@ -365,6 +367,7 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 			&l.ProxyKeyPrefix, &l.ProxyKeyLabel,
 			&l.InputTokens, &l.OutputTokens,
 			&l.CacheCreationInputTokens, &l.CacheReadInputTokens,
+			&l.ReasoningTokens,
 			&l.LatencyMs, &l.Status,
 			&l.EstimatedCostUSD, &isStreaming, &l.ErrorDetails,
 			&l.FallbackAttempts,
@@ -393,6 +396,7 @@ func (s *SQLiteStore) GetRequestLog(ctx context.Context, id string) (*RequestLog
 			pk.key_prefix, pk.label,
 			rl.input_tokens, rl.output_tokens,
 			rl.cache_creation_input_tokens, rl.cache_read_input_tokens,
+			rl.reasoning_tokens,
 			rl.latency_ms, rl.status,
 			rl.estimated_cost_usd, rl.is_streaming, rl.error_details,
 			rl.request_body, rl.response_body,
@@ -411,6 +415,7 @@ func (s *SQLiteStore) GetRequestLog(ctx context.Context, id string) (*RequestLog
 		&d.ProxyKeyPrefix, &d.ProxyKeyLabel,
 		&d.InputTokens, &d.OutputTokens,
 		&d.CacheCreationInputTokens, &d.CacheReadInputTokens,
+		&d.ReasoningTokens,
 		&d.LatencyMs, &d.Status,
 		&d.EstimatedCostUSD, &isStreaming, &d.ErrorDetails,
 		&d.RequestBody, &d.ResponseBody,
@@ -546,6 +551,7 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 	if needsKeyJoin {
 		baseQuery += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
 	}
+	baseQuery = addOwnerScopeJoins(baseQuery, params.ScopeType)
 
 	var conditions []string
 	var args []any
@@ -562,15 +568,16 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 		conditions = append(conditions, "pk.key_prefix = ?")
 		args = append(args, params.KeyPrefix)
 	}
-	switch params.ScopeType {
-	case "user":
-		conditions = append(conditions, "pk.owner_user_id = ?")
-		args = append(args, params.ScopeUserID)
-	case "team":
-		baseQuery += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
-		conditions = append(conditions, "tm.team_id = ?")
-		args = append(args, params.ScopeTeamID)
+	switch params.GroupBy {
+	case "provider":
+		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
+	default: // "model"
+		if params.GroupFilter != "" {
+			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			args = append(args, params.GroupFilter+"%")
+		}
 	}
+	conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
 
 	if len(conditions) > 0 {
 		baseQuery += " WHERE " + strings.Join(conditions, " AND ")
@@ -587,10 +594,9 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 	return &cs, nil
 }
 
-// GetCostBreakdown returns cost aggregated by model or key.
+// GetCostBreakdown returns cost aggregated by model, key, or provider.
 func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error) {
 	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
-	teamJoin := params.ScopeType == "team"
 
 	var query string
 	var args []any
@@ -607,10 +613,7 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 			COUNT(*)
 		FROM request_logs rl
 		JOIN proxy_keys pk ON pk.id = rl.proxy_key_id`
-
-		if teamJoin {
-			query += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
-		}
+		query = addOwnerScopeJoins(query, params.ScopeType)
 
 		var conditions []string
 		if params.From != "" {
@@ -625,18 +628,47 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 			conditions = append(conditions, "pk.key_prefix = ?")
 			args = append(args, params.KeyPrefix)
 		}
-		switch params.ScopeType {
-		case "user":
-			conditions = append(conditions, "pk.owner_user_id = ?")
-			args = append(args, params.ScopeUserID)
-		case "team":
-			conditions = append(conditions, "tm.team_id = ?")
-			args = append(args, params.ScopeTeamID)
-		}
+		conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
 		}
 		query += " GROUP BY rl.proxy_key_id ORDER BY COALESCE(SUM(rl.estimated_cost_usd), 0) DESC"
+
+	case "provider":
+		query = `SELECT
+			rl.provider_name AS group_name,
+			COALESCE(SUM(rl.estimated_cost_usd), 0),
+			COALESCE(SUM(rl.input_tokens), 0),
+			COALESCE(SUM(rl.output_tokens), 0),
+			COALESCE(SUM(rl.cache_creation_input_tokens), 0),
+			COALESCE(SUM(rl.cache_read_input_tokens), 0),
+			COUNT(*)
+		FROM request_logs rl`
+
+		if needsKeyJoin {
+			query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+		}
+		query = addOwnerScopeJoins(query, params.ScopeType)
+
+		var conditions []string
+		if params.From != "" {
+			conditions = append(conditions, "rl.timestamp >= ?")
+			args = append(args, params.From)
+		}
+		if params.To != "" {
+			conditions = append(conditions, "rl.timestamp <= ?")
+			args = append(args, params.To)
+		}
+		if params.KeyPrefix != "" {
+			conditions = append(conditions, "pk.key_prefix = ?")
+			args = append(args, params.KeyPrefix)
+		}
+		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
+		conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
+		if len(conditions) > 0 {
+			query += " WHERE " + strings.Join(conditions, " AND ")
+		}
+		query += " GROUP BY rl.provider_name ORDER BY COALESCE(SUM(rl.estimated_cost_usd), 0) DESC"
 
 	default: // "model" or unset
 		query = `SELECT
@@ -652,9 +684,7 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 		if needsKeyJoin {
 			query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
 		}
-		if teamJoin {
-			query += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
-		}
+		query = addOwnerScopeJoins(query, params.ScopeType)
 
 		var conditions []string
 		if params.From != "" {
@@ -669,14 +699,11 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 			conditions = append(conditions, "pk.key_prefix = ?")
 			args = append(args, params.KeyPrefix)
 		}
-		switch params.ScopeType {
-		case "user":
-			conditions = append(conditions, "pk.owner_user_id = ?")
-			args = append(args, params.ScopeUserID)
-		case "team":
-			conditions = append(conditions, "tm.team_id = ?")
-			args = append(args, params.ScopeTeamID)
+		if params.GroupFilter != "" {
+			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			args = append(args, params.GroupFilter+"%")
 		}
+		conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
 		}
@@ -707,23 +734,24 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 	return entries, nil
 }
 
-// GetCostTimeseries returns daily cost data for charting.
-func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error) {
+// GetCostPricingGroups returns token totals grouped by exact provider/model
+// pair so pricing can be recomputed accurately in the web layer.
+func (s *SQLiteStore) GetCostPricingGroups(ctx context.Context, params CostParams) ([]CostPricingGroup, error) {
 	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
-	teamJoin := params.ScopeType == "team"
 
 	query := `SELECT
-		SUBSTR(CAST(rl.timestamp AS TEXT), 1, 10) AS date,
-		COALESCE(SUM(rl.estimated_cost_usd), 0),
-		COUNT(*)
+		rl.provider_name,
+		rl.model_upstream,
+		COALESCE(SUM(rl.input_tokens), 0),
+		COALESCE(SUM(rl.output_tokens), 0),
+		COALESCE(SUM(rl.cache_creation_input_tokens), 0),
+		COALESCE(SUM(rl.cache_read_input_tokens), 0)
 	FROM request_logs rl`
 
 	if needsKeyJoin {
 		query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
 	}
-	if teamJoin {
-		query += " JOIN oidc_users ou ON ou.id = pk.owner_user_id JOIN team_memberships tm ON tm.user_id = ou.id"
-	}
+	query = addOwnerScopeJoins(query, params.ScopeType)
 
 	var conditions []string
 	var args []any
@@ -740,19 +768,106 @@ func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) 
 		conditions = append(conditions, "pk.key_prefix = ?")
 		args = append(args, params.KeyPrefix)
 	}
-	switch params.ScopeType {
-	case "user":
-		conditions = append(conditions, "pk.owner_user_id = ?")
-		args = append(args, params.ScopeUserID)
-	case "team":
-		conditions = append(conditions, "tm.team_id = ?")
-		args = append(args, params.ScopeTeamID)
+	switch params.GroupBy {
+	case "provider":
+		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
+	default:
+		if params.GroupFilter != "" {
+			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			args = append(args, params.GroupFilter+"%")
+		}
 	}
+	conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions are constant strings; user values bound via ? placeholders in args
+	}
+	query += " GROUP BY rl.provider_name, rl.model_upstream ORDER BY rl.provider_name, rl.model_upstream"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get cost pricing groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var groups []CostPricingGroup
+	for rows.Next() {
+		var group CostPricingGroup
+		if err := rows.Scan(
+			&group.ProviderName,
+			&group.ModelUpstream,
+			&group.InputTokens,
+			&group.OutputTokens,
+			&group.CacheCreationTokens,
+			&group.CacheReadTokens,
+		); err != nil {
+			return nil, fmt.Errorf("scan cost pricing group: %w", err)
+		}
+		groups = append(groups, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cost pricing groups: %w", err)
+	}
+	if groups == nil {
+		groups = []CostPricingGroup{}
+	}
+
+	return groups, nil
+}
+
+// GetCostTimeseries returns daily cost data for charting.
+func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error) {
+	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
+
+	if params.TzLocation != nil {
+		return s.getCostTimeseriesWithLocation(ctx, params, needsKeyJoin)
+	}
+
+	// Shift the stored UTC timestamp to local time before bucketing by date.
+	// SQLite's datetime() accepts '+N seconds' modifiers.
+	// #nosec G201 -- offset is server-computed from IANA timezone, not user input
+	dateExpr := fmt.Sprintf("SUBSTR(datetime(SUBSTR(CAST(rl.timestamp AS TEXT), 1, 19), '%+d seconds'), 1, 10)", params.TzOffsetSeconds)
+	query := fmt.Sprintf(`SELECT
+		%s AS date,
+		COALESCE(SUM(rl.estimated_cost_usd), 0),
+		COUNT(*)
+	FROM request_logs rl`, dateExpr) // #nosec G201
+
+	if needsKeyJoin {
+		query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+	}
+	query = addOwnerScopeJoins(query, params.ScopeType)
+
+	var conditions []string
+	var args []any
+
+	if params.From != "" {
+		conditions = append(conditions, "rl.timestamp >= ?")
+		args = append(args, params.From)
+	}
+	if params.To != "" {
+		conditions = append(conditions, "rl.timestamp <= ?")
+		args = append(args, params.To)
+	}
+	if params.KeyPrefix != "" {
+		conditions = append(conditions, "pk.key_prefix = ?")
+		args = append(args, params.KeyPrefix)
+	}
+	switch params.GroupBy {
+	case "provider":
+		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
+	default: // "model"
+		if params.GroupFilter != "" {
+			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			args = append(args, params.GroupFilter+"%")
+		}
+	}
+	conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
 
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions are hardcoded strings; user input is in parameterized args
 	}
-	query += " GROUP BY SUBSTR(CAST(rl.timestamp AS TEXT), 1, 10) ORDER BY date"
+	query += " GROUP BY " + dateExpr + " ORDER BY date" // #nosec G201
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -776,4 +891,140 @@ func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) 
 	}
 
 	return entries, nil
+}
+
+func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params CostParams, needsKeyJoin bool) ([]CostTimeseriesEntry, error) {
+	query := `SELECT
+		rl.timestamp,
+		COALESCE(rl.estimated_cost_usd, 0)
+	FROM request_logs rl`
+
+	if needsKeyJoin {
+		query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+	}
+	query = addOwnerScopeJoins(query, params.ScopeType)
+
+	var conditions []string
+	var args []any
+
+	if params.From != "" {
+		conditions = append(conditions, "rl.timestamp >= ?")
+		args = append(args, params.From)
+	}
+	if params.To != "" {
+		conditions = append(conditions, "rl.timestamp <= ?")
+		args = append(args, params.To)
+	}
+	if params.KeyPrefix != "" {
+		conditions = append(conditions, "pk.key_prefix = ?")
+		args = append(args, params.KeyPrefix)
+	}
+	switch params.GroupBy {
+	case "provider":
+		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
+	default:
+		if params.GroupFilter != "" {
+			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			args = append(args, params.GroupFilter+"%")
+		}
+	}
+	conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions are hardcoded strings; user input is in parameterized args
+	}
+	query += " ORDER BY rl.timestamp"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get cost timeseries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type bucket struct {
+		costUSD  float64
+		requests int64
+	}
+
+	buckets := make(map[string]bucket)
+	var dates []string
+	for rows.Next() {
+		var timestamp time.Time
+		var cost float64
+		if err := rows.Scan(&timestamp, &cost); err != nil {
+			return nil, fmt.Errorf("scan cost timeseries: %w", err)
+		}
+
+		date := timestamp.In(params.TzLocation).Format("2006-01-02")
+		if _, ok := buckets[date]; !ok {
+			dates = append(dates, date)
+		}
+		entry := buckets[date]
+		entry.costUSD += cost
+		entry.requests++
+		buckets[date] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cost timeseries: %w", err)
+	}
+
+	entries := make([]CostTimeseriesEntry, 0, len(dates))
+	for _, date := range dates {
+		entry := buckets[date]
+		entries = append(entries, CostTimeseriesEntry{
+			Date:     date,
+			CostUSD:  entry.costUSD,
+			Requests: entry.requests,
+		})
+	}
+	if entries == nil {
+		entries = []CostTimeseriesEntry{}
+	}
+
+	return entries, nil
+}
+
+func appendProviderConditions(conditions []string, args []any, column string, params CostParams) ([]string, []any) {
+	if params.GroupFilter == "" && len(params.ProviderGroups) == 0 {
+		return conditions, args
+	}
+
+	var providerConditions []string
+	if params.GroupFilter != "" {
+		providerConditions = append(providerConditions, column+" LIKE ?")
+		args = append(args, params.GroupFilter+"%")
+	}
+	if len(params.ProviderGroups) > 0 {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(params.ProviderGroups)), ",")
+		providerConditions = append(providerConditions, column+" IN ("+placeholders+")")
+		for _, providerGroup := range params.ProviderGroups {
+			args = append(args, providerGroup)
+		}
+	}
+
+	return append(conditions, "("+strings.Join(providerConditions, " OR ")+")"), args
+}
+
+func addOwnerScopeJoins(query string, scopeType string) string {
+	switch scopeType {
+	case "user":
+		return query + " JOIN proxy_key_owners pko ON pko.proxy_key_id = pk.id"
+	case "team":
+		return query + " JOIN proxy_key_owners pko ON pko.proxy_key_id = pk.id JOIN team_memberships tm ON tm.user_id = pko.owner_user_id"
+	default:
+		return query
+	}
+}
+
+func appendOwnerScopeConditions(conditions []string, args []any, scopeType, userID, teamID string) ([]string, []any) {
+	switch scopeType {
+	case "user":
+		conditions = append(conditions, "pko.owner_user_id = ?")
+		args = append(args, userID)
+	case "team":
+		conditions = append(conditions, "tm.team_id = ?")
+		args = append(args, teamID)
+	}
+
+	return conditions, args
 }

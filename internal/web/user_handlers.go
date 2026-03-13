@@ -4,7 +4,7 @@ package web
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -64,7 +64,7 @@ func (h *UserHandlers) UsersAPIHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"users": users}); err != nil {
-		log.Printf("ERROR: write users JSON: %v", err)
+		slog.Error("write users JSON", "error", err)
 	}
 }
 
@@ -133,12 +133,12 @@ func (h *UserHandlers) ChangeRoleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.store.RecordAuditEvent(r.Context(), "user.role_changed", "", id+" → "+role); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
-		log.Printf("ERROR: write change role response: %v", err)
+		slog.Error("write change role response", "error", err)
 	}
 }
 
@@ -178,16 +178,16 @@ func (h *UserHandlers) DeactivateUserHandler(w http.ResponseWriter, r *http.Requ
 
 	// Immediately invalidate all sessions for this user.
 	if err := h.store.DeleteUISessionsByUserID(r.Context(), id); err != nil {
-		log.Printf("WARNING: delete sessions for deactivated user: %v", err)
+		slog.Warn("delete sessions for deactivated user", "error", err)
 	}
 
 	if err := h.store.RecordAuditEvent(r.Context(), "user.deactivated", "", id); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
-		log.Printf("ERROR: write deactivate response: %v", err)
+		slog.Error("write deactivate response", "error", err)
 	}
 }
 
@@ -202,11 +202,11 @@ func (h *UserHandlers) ReactivateUserHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := h.store.RecordAuditEvent(r.Context(), "user.reactivated", "", id); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
-		log.Printf("ERROR: write reactivate response: %v", err)
+		slog.Error("write reactivate response", "error", err)
 	}
 }

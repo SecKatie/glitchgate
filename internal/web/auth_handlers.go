@@ -3,7 +3,7 @@
 package web
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -38,14 +38,14 @@ func (h *AuthHandlers) OIDCStartHandler(w http.ResponseWriter, r *http.Request) 
 
 	state, err := oidc.GenerateState()
 	if err != nil {
-		log.Printf("ERROR: OIDCStartHandler generate state: %v", err)
+		slog.Error("OIDCStartHandler generate state", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	verifier, challenge, err := oidc.GeneratePKCEPair()
 	if err != nil {
-		log.Printf("ERROR: OIDCStartHandler generate pkce: %v", err)
+		slog.Error("OIDCStartHandler generate pkce", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -54,7 +54,7 @@ func (h *AuthHandlers) OIDCStartHandler(w http.ResponseWriter, r *http.Request) 
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 
 	if err := h.store.CreateOIDCState(r.Context(), state, verifier, redirectTo, expiresAt); err != nil {
-		log.Printf("ERROR: OIDCStartHandler store state: %v", err)
+		slog.Error("OIDCStartHandler store state", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -72,9 +72,9 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 
 	// IDP reported an error.
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
-		log.Printf("WARNING: OIDC callback: IDP returned an error (recorded to audit log)")
+		slog.Warn("OIDC callback: IDP returned an error")
 		if err := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", errParam); err != nil {
-			log.Printf("WARNING: record audit event: %v", err)
+			slog.Warn("record audit event", "error", err)
 		}
 		http.Error(w, "Authentication error: "+errParam, http.StatusUnauthorized)
 		return
@@ -84,7 +84,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	stateParam := r.URL.Query().Get("state")
 	oidcState, err := h.store.ConsumeOIDCState(r.Context(), stateParam)
 	if err != nil {
-		log.Printf("ERROR: OIDCCallbackHandler consume state: %v", err)
+		slog.Error("OIDCCallbackHandler consume state", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -96,9 +96,9 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	// Exchange the code for tokens and extract claims.
 	claims, err := h.provider.Exchange(r.Context(), r.URL.Query().Get("code"), oidcState.PKCEVerifier)
 	if err != nil {
-		log.Printf("ERROR: OIDCCallbackHandler exchange: %v", err)
+		slog.Error("OIDCCallbackHandler exchange", "error", err)
 		if auditErr := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", "exchange error"); auditErr != nil {
-			log.Printf("WARNING: record audit event: %v", auditErr)
+			slog.Warn("record audit event", "error", auditErr)
 		}
 		http.Error(w, "Authentication failed. Please try again.", http.StatusUnauthorized)
 		return
@@ -107,7 +107,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	// Upsert the user (first user becomes global_admin).
 	user, err := h.store.UpsertOIDCUser(r.Context(), claims.Subject, claims.Email, claims.DisplayName)
 	if err != nil {
-		log.Printf("ERROR: OIDCCallbackHandler upsert user: %v", err)
+		slog.Error("OIDCCallbackHandler upsert user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -115,7 +115,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	// Deactivated users are rejected before a session is created.
 	if !user.Active {
 		if auditErr := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", "deactivated: "+user.Email); auditErr != nil {
-			log.Printf("WARNING: record audit event: %v", auditErr)
+			slog.Warn("record audit event", "error", auditErr)
 		}
 		http.Error(w, "Your account has been deactivated. Contact an administrator.", http.StatusForbidden)
 		return
@@ -124,7 +124,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	// Create a DB-backed session.
 	sess, err := h.sessions.Create(r.Context(), "oidc", user.ID)
 	if err != nil {
-		log.Printf("ERROR: OIDCCallbackHandler create session: %v", err)
+		slog.Error("OIDCCallbackHandler create session", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -140,7 +140,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	})
 
 	if err := h.store.RecordAuditEvent(r.Context(), "oidc.login", "", user.Email); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	dest := oidcState.RedirectTo

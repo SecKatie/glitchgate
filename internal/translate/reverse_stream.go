@@ -3,12 +3,12 @@
 package translate
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -30,10 +30,20 @@ func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model strin
 	var captured bytes.Buffer
 	var inputTokens, outputTokens int64
 	sentMessageStart := false
-	sentContentBlockStart := false
 	messageID := ""
+	finishReason := "end_turn"
 
-	scanner := bufio.NewScanner(upstream)
+	// Content block state.
+	type toolCallState struct {
+		id         string
+		name       string
+		blockIndex int
+	}
+	toolCalls := make(map[int]*toolCallState) // OAI index → state
+	nextBlockIndex := 0
+	textBlockIndex := -1 // -1 = no text block started yet
+
+	scanner := newSSEScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -43,29 +53,51 @@ func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model strin
 
 		data := line[6:]
 
-		// Handle the [DONE] sentinel.
 		if data == "[DONE]" {
-			// Send content_block_stop, message_delta, and message_stop.
-			if sentContentBlockStart {
+			// Close text block if open.
+			if textBlockIndex >= 0 {
 				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
-					map[string]interface{}{"type": "content_block_stop", "index": 0}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, 0), err
+					map[string]interface{}{"type": "content_block_stop", "index": textBlockIndex}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 				}
 			}
 
+			// Close tool call blocks in ascending block-index order.
+			type tcEntry struct {
+				state *toolCallState
+			}
+			entries := make([]tcEntry, 0, len(toolCalls))
+			for _, s := range toolCalls {
+				entries = append(entries, tcEntry{s})
+			}
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].state.blockIndex < entries[j].state.blockIndex
+			})
+			for _, e := range entries {
+				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
+					map[string]interface{}{"type": "content_block_stop", "index": e.state.blockIndex}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+				}
+			}
+
+			// Map OpenAI finish_reason → Anthropic stop_reason.
 			stopReason := "end_turn"
+			if finishReason == "tool_calls" {
+				stopReason = "tool_use"
+			}
+
 			if err := writeAnthropicSSE(w, rc, &captured, "message_delta",
 				map[string]interface{}{
 					"type":  "message_delta",
 					"delta": map[string]interface{}{"stop_reason": stopReason},
 					"usage": map[string]interface{}{"output_tokens": outputTokens},
 				}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 			}
 
 			if err := writeAnthropicSSE(w, rc, &captured, "message_stop",
 				map[string]interface{}{"type": "message_stop"}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 			}
 			continue
 		}
@@ -100,7 +132,7 @@ func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model strin
 						"usage":   map[string]interface{}{"input_tokens": 0, "output_tokens": 0},
 					},
 				}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 			}
 			sentMessageStart = true
 		}
@@ -115,38 +147,84 @@ func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model strin
 			continue
 		}
 
+		// Capture finish_reason for [DONE] handling.
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			finishReason = *choice.FinishReason
+		}
+
 		// Handle text content deltas.
 		if text, ok := delta.Content.(string); ok && text != "" {
-			if !sentContentBlockStart {
+			if textBlockIndex < 0 {
+				textBlockIndex = nextBlockIndex
+				nextBlockIndex++
 				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
-						"index":         0,
+						"index":         textBlockIndex,
 						"content_block": map[string]interface{}{"type": "text", "text": ""},
 					}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 				}
-				sentContentBlockStart = true
 			}
 
 			if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
 				map[string]interface{}{
 					"type":  "content_block_delta",
-					"index": 0,
+					"index": textBlockIndex,
 					"delta": map[string]interface{}{"type": "text_delta", "text": text},
 				}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 			}
 		}
 
-		// Handle finish_reason — update stop_reason for the final message_delta.
-		if choice.FinishReason != nil {
-			// The stop reason will be sent with the [DONE] handling above.
-			continue
+		// Handle tool call deltas.
+		for _, tc := range delta.ToolCalls {
+			if tc.Index == nil {
+				continue
+			}
+			oaiIdx := *tc.Index
+
+			state, exists := toolCalls[oaiIdx]
+			if !exists {
+				state = &toolCallState{
+					id:         tc.ID,
+					name:       tc.Function.Name,
+					blockIndex: nextBlockIndex,
+				}
+				toolCalls[oaiIdx] = state
+				nextBlockIndex++
+				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+					map[string]interface{}{
+						"type":  "content_block_start",
+						"index": state.blockIndex,
+						"content_block": map[string]interface{}{
+							"type":  "tool_use",
+							"id":    state.id,
+							"name":  state.name,
+							"input": map[string]interface{}{},
+						},
+					}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+				}
+			}
+
+			if tc.Function.Arguments != "" {
+				if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+					map[string]interface{}{
+						"type":  "content_block_delta",
+						"index": state.blockIndex,
+						"delta": map[string]interface{}{
+							"type":         "input_json_delta",
+							"partial_json": tc.Function.Arguments,
+						},
+					}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+				}
+			}
 		}
 	}
 
-	return buildResult(&captured, inputTokens, outputTokens, 0, 0), scanner.Err()
+	return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), scanner.Err()
 }
 
 // writeAnthropicSSE writes a single Anthropic-format SSE event to the client.
