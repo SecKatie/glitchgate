@@ -11,12 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
-
 	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
 	"codeberg.org/kglitchy/glitchgate/internal/translate"
 )
 
@@ -190,8 +187,11 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			latency := time.Since(start).Milliseconds()
 			errMsg := err.Error()
-			h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-				0, 0, 0, 0, 0, latency, http.StatusBadGateway, upstreamBody, []byte(errMsg), &errMsg, isStreaming, attemptCount)
+			h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel,
+				latency, body, attemptCount, handlerResult{
+					Status: http.StatusBadGateway, Body: []byte(errMsg),
+					ErrDetails: &errMsg, IsStreaming: isStreaming,
+				})
 			writeResponsesError(w, http.StatusBadGateway, "server_error", "Failed to reach upstream provider")
 			return
 		}
@@ -205,24 +205,39 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			latency := time.Since(start).Milliseconds()
 			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-			h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-				0, 0, 0, 0, 0, latency, http.StatusServiceUnavailable, upstreamBody, []byte(errMsg), &errMsg, isStreaming, attemptCount)
+			h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel,
+				latency, body, attemptCount, handlerResult{
+					Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
+					ErrDetails: &errMsg, IsStreaming: isStreaming,
+				})
 			writeResponsesError(w, http.StatusServiceUnavailable, "server_error", "All upstream providers failed")
 			return
 		}
 
+		var result handlerResult
 		switch prov.APIFormat() {
 		case "responses":
 			if isStreaming {
-				h.handleResponsesStreaming(w, provResp, proxyKeyID, provKey, req.Model, mapping.UpstreamModel, upstreamBody, start, attemptCount)
+				result = h.handleResponsesStreaming(w, provResp)
 			} else {
-				h.handleResponsesNonStreaming(w, provResp, proxyKeyID, provKey, req.Model, mapping.UpstreamModel, upstreamBody, start, attemptCount)
+				result = h.handleResponsesNonStreaming(w, provResp)
 			}
 		case "anthropic":
-			h.handleAnthropicProviderResponse(w, provResp, body, &req, &mapping, proxyKeyID, provKey, start, attemptCount, isStreaming)
+			if isStreaming {
+				result = h.handleAnthropicProviderStreaming(w, provResp, req.Model)
+			} else {
+				result = h.handleAnthropicProviderNonStreaming(w, provResp, req.Model)
+			}
 		case "openai":
-			h.handleOpenAICCProviderResponse(w, provResp, body, &req, &mapping, proxyKeyID, provKey, start, attemptCount, isStreaming)
+			if isStreaming {
+				result = h.handleOpenAICCProviderStreaming(w, provResp, req.Model)
+			} else {
+				result = h.handleOpenAICCProviderNonStreaming(w, provResp, req.Model)
+			}
 		}
+		latency := time.Since(start).Milliseconds()
+		h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel,
+			latency, body, attemptCount, result)
 		return
 	}
 }
@@ -331,24 +346,23 @@ func compactStringPtr(v *string) string {
 }
 
 // handleResponsesNonStreaming forwards a non-streaming Responses API response.
-func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, resp *provider.Response,
-	proxyKeyID, providerName, modelRequested, modelUpstream string, reqBody []byte, start time.Time, attemptCount int64,
-) {
-	latency := time.Since(start).Milliseconds()
-
-	var errDetails *string
+func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
 	if resp.StatusCode >= 400 {
 		s := string(resp.Body)
-		errDetails = &s
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(resp.Body); err != nil {
 			slog.Warn("write Responses error response", "error", err)
 		}
-		h.logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-			resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens, resp.ReasoningTokens, latency, resp.StatusCode,
-			reqBody, resp.Body, errDetails, false, attemptCount)
-		return
+		return handlerResult{
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
+		}
 	}
 
 	// Forward response as-is.
@@ -357,18 +371,19 @@ func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, re
 	if _, err := w.Write(resp.Body); err != nil {
 		slog.Warn("write Responses response", "error", err)
 	}
-
-	h.logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens, resp.ReasoningTokens, latency, http.StatusOK,
-		reqBody, resp.Body, nil, false, attemptCount)
+	return handlerResult{
+		InputTokens:          resp.InputTokens,
+		OutputTokens:         resp.OutputTokens,
+		CacheReadInputTokens: resp.CacheReadInputTokens,
+		ReasoningTokens:      resp.ReasoningTokens,
+		Status:               http.StatusOK,
+		Body:                 resp.Body,
+	}
 }
 
 // handleResponsesStreaming relays a Responses API SSE stream.
-func (h *ResponsesHandler) handleResponsesStreaming(w http.ResponseWriter, resp *provider.Response,
-	proxyKeyID, providerName, modelRequested, modelUpstream string, reqBody []byte, start time.Time, attemptCount int64,
-) {
+func (h *ResponsesHandler) handleResponsesStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
 	result, err := RelayResponsesSSEStream(w, resp.Stream)
-	latency := time.Since(start).Milliseconds()
 
 	var errDetails *string
 	if err != nil {
@@ -381,41 +396,28 @@ func (h *ResponsesHandler) handleResponsesStreaming(w http.ResponseWriter, resp 
 	if status == 0 {
 		status = http.StatusOK
 	}
-	h.logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		result.InputTokens, result.OutputTokens, result.CacheCreationInputTokens, result.CacheReadInputTokens,
-		result.ReasoningTokens, latency, status, reqBody, result.Body, errDetails, true, attemptCount)
+	return handlerResult{
+		InputTokens:              result.InputTokens,
+		OutputTokens:             result.OutputTokens,
+		CacheCreationInputTokens: result.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.CacheReadInputTokens,
+		ReasoningTokens:          result.ReasoningTokens,
+		Status:                   status,
+		Body:                     result.Body,
+		ErrDetails:               errDetails,
+		IsStreaming:              true,
+	}
 }
 
-func (h *ResponsesHandler) handleAnthropicProviderResponse(w http.ResponseWriter, provResp *provider.Response,
-	body []byte, req *translate.ResponsesRequest, mapping *config.ModelMapping,
-	proxyKeyID, provKey string, start time.Time, attemptCount int64, isStreaming bool,
-) {
-	if isStreaming {
-		// Translate Anthropic SSE stream to Responses API SSE stream.
-		result, err := translate.AnthropicSSEToResponsesSSE(w, provResp.Stream, req.Model)
-		latency := time.Since(start).Milliseconds()
-
-		var errDetails *string
-		if err != nil {
-			s := fmt.Sprintf("stream relay error: %v", err)
-			errDetails = &s
-			slog.Warn("stream relay error", "error", err)
-		}
-
-		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-			result.InputTokens, result.OutputTokens, result.CacheCreationInputTokens, result.CacheReadInputTokens,
-			result.ReasoningTokens, latency, http.StatusOK, body, result.Body, errDetails, true, attemptCount)
-		return
-	}
-
-	// Non-streaming: translate Anthropic response to Responses API format.
+func (h *ResponsesHandler) handleAnthropicProviderNonStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
 	if provResp.StatusCode >= 400 {
-		latency := time.Since(start).Milliseconds()
 		s := string(provResp.Body)
-		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-			0, 0, 0, 0, 0, latency, provResp.StatusCode, body, provResp.Body, &s, false, attemptCount)
 		writeResponsesError(w, provResp.StatusCode, "server_error", s)
-		return
+		return handlerResult{
+			Status:     provResp.StatusCode,
+			Body:       provResp.Body,
+			ErrDetails: &s,
+		}
 	}
 
 	var anthResp struct {
@@ -431,107 +433,108 @@ func (h *ResponsesHandler) handleAnthropicProviderResponse(w http.ResponseWriter
 	}
 	if err := json.Unmarshal(provResp.Body, &anthResp); err != nil {
 		writeResponsesError(w, http.StatusBadGateway, "server_error", "Failed to parse upstream response")
-		return
+		s := "Failed to parse upstream response"
+		return handlerResult{Status: http.StatusBadGateway, Body: provResp.Body, ErrDetails: &s}
 	}
 
-	responsesResp := translate.AnthropicToResponsesResponse(provResp.Body, req.Model)
+	responsesResp := translate.AnthropicToResponsesResponse(provResp.Body, modelRequested)
 	respBody, err := json.Marshal(responsesResp)
 	if err != nil {
 		writeResponsesError(w, http.StatusInternalServerError, "server_error", "Internal server error")
-		return
+		s := "Internal server error"
+		return handlerResult{Status: http.StatusInternalServerError, ErrDetails: &s}
 	}
 
-	latency := time.Since(start).Milliseconds()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(respBody); err != nil {
 		slog.Warn("write Responses response", "error", err)
 	}
-
-	h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-		anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens,
-		anthResp.Usage.CacheCreationInputTokens, anthResp.Usage.CacheReadInputTokens,
-		0, latency, http.StatusOK, body, respBody, nil, false, attemptCount)
+	return handlerResult{
+		InputTokens:              anthResp.Usage.InputTokens,
+		OutputTokens:             anthResp.Usage.OutputTokens,
+		CacheCreationInputTokens: anthResp.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     anthResp.Usage.CacheReadInputTokens,
+		Status:                   http.StatusOK,
+		Body:                     respBody,
+	}
 }
 
-func (h *ResponsesHandler) handleOpenAICCProviderResponse(w http.ResponseWriter, provResp *provider.Response,
-	body []byte, req *translate.ResponsesRequest, mapping *config.ModelMapping,
-	proxyKeyID, provKey string, start time.Time, attemptCount int64, isStreaming bool,
-) {
-	if isStreaming {
-		// Translate OpenAI SSE stream to Responses API SSE stream.
-		result, err := translate.OpenAISSEToResponsesSSE(w, provResp.Stream, req.Model)
-		latency := time.Since(start).Milliseconds()
+func (h *ResponsesHandler) handleAnthropicProviderStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
+	result, err := translate.AnthropicSSEToResponsesSSE(w, provResp.Stream, modelRequested)
 
-		var errDetails *string
-		if err != nil {
-			s := fmt.Sprintf("stream relay error: %v", err)
-			errDetails = &s
-			slog.Warn("stream relay error", "error", err)
-		}
-
-		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-			result.InputTokens, result.OutputTokens, 0, 0,
-			result.ReasoningTokens, latency, http.StatusOK, body, result.Body, errDetails, true, attemptCount)
-		return
+	var errDetails *string
+	if err != nil {
+		s := fmt.Sprintf("stream relay error: %v", err)
+		errDetails = &s
+		slog.Warn("stream relay error", "error", err)
 	}
 
-	// Non-streaming: translate Chat Completions response to Responses API format.
+	return handlerResult{
+		InputTokens:              result.InputTokens,
+		OutputTokens:             result.OutputTokens,
+		CacheCreationInputTokens: result.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.CacheReadInputTokens,
+		ReasoningTokens:          result.ReasoningTokens,
+		Status:                   http.StatusOK,
+		Body:                     result.Body,
+		ErrDetails:               errDetails,
+		IsStreaming:              true,
+	}
+}
+
+func (h *ResponsesHandler) handleOpenAICCProviderNonStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
 	if provResp.StatusCode >= 400 {
-		latency := time.Since(start).Milliseconds()
 		s := string(provResp.Body)
-		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-			0, 0, 0, 0, 0, latency, provResp.StatusCode, body, provResp.Body, &s, false, attemptCount)
 		writeResponsesError(w, provResp.StatusCode, "server_error", s)
-		return
+		return handlerResult{
+			Status:     provResp.StatusCode,
+			Body:       provResp.Body,
+			ErrDetails: &s,
+		}
 	}
 
-	responsesResp := translate.OpenAIToResponsesResponse(provResp.Body, req.Model)
+	responsesResp := translate.OpenAIToResponsesResponse(provResp.Body, modelRequested)
 	respBody, err := json.Marshal(responsesResp)
 	if err != nil {
 		writeResponsesError(w, http.StatusInternalServerError, "server_error", "Internal server error")
-		return
+		s := "Internal server error"
+		return handlerResult{Status: http.StatusInternalServerError, ErrDetails: &s}
 	}
 
-	latency := time.Since(start).Milliseconds()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(respBody); err != nil {
 		slog.Warn("write Responses response", "error", err)
 	}
-
-	h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-		provResp.InputTokens, provResp.OutputTokens, 0, 0,
-		provResp.ReasoningTokens, latency, http.StatusOK, body, respBody, nil, false, attemptCount)
+	return handlerResult{
+		InputTokens:     provResp.InputTokens,
+		OutputTokens:    provResp.OutputTokens,
+		ReasoningTokens: provResp.ReasoningTokens,
+		Status:          http.StatusOK,
+		Body:            respBody,
+	}
 }
 
-func (h *ResponsesHandler) logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream string,
-	inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens, latencyMs int64, status int,
-	requestBody, responseBody []byte, errDetails *string, isStreaming bool, attemptCount int64,
-) {
-	entry := &store.RequestLogEntry{
-		ID:                       uuid.New().String(),
-		ProxyKeyID:               proxyKeyID,
-		Timestamp:                time.Now().UTC(),
-		SourceFormat:             "responses",
-		ProviderName:             providerName,
-		ModelRequested:           modelRequested,
-		ModelUpstream:            modelUpstream,
-		InputTokens:              inputTokens,
-		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: cacheCreationTokens,
-		CacheReadInputTokens:     cacheReadTokens,
-		ReasoningTokens:          reasoningTokens,
-		LatencyMs:                latencyMs,
-		Status:                   status,
-		RequestBody:              RedactRequestBody(requestBody),
-		ResponseBody:             string(responseBody),
-		ErrorDetails:             errDetails,
-		IsStreaming:              isStreaming,
-		FallbackAttempts:         attemptCount,
+func (h *ResponsesHandler) handleOpenAICCProviderStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
+	result, err := translate.OpenAISSEToResponsesSSE(w, provResp.Stream, modelRequested)
+
+	var errDetails *string
+	if err != nil {
+		s := fmt.Sprintf("stream relay error: %v", err)
+		errDetails = &s
+		slog.Warn("stream relay error", "error", err)
 	}
 
-	h.logger.Log(entry)
+	return handlerResult{
+		InputTokens:     result.InputTokens,
+		OutputTokens:    result.OutputTokens,
+		ReasoningTokens: result.ReasoningTokens,
+		Status:          http.StatusOK,
+		Body:            result.Body,
+		ErrDetails:      errDetails,
+		IsStreaming:     true,
+	}
 }
 
 // writeResponsesError writes an error response in Responses API format.
