@@ -202,7 +202,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		providerNames[pricing.ProviderKey(p.Type, baseURL)] = p.Name
 	}
 
-	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl, oidcProvider)
+	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl, oidcProvider, cfg.ModelList, cfg.Providers)
 	authHandlers := web.NewAuthHandlers(st, sessions, oidcProvider)
 	costHandlers := web.NewCostHandlers(st, tmpl, tz, calc, providerNames)
 	userHandlers := web.NewUserHandlers(st, sessions, tmpl)
@@ -258,6 +258,10 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Get("/api/costs", costHandlers.CostSummaryHandler)
 		r.Get("/api/costs/timeseries", costHandlers.CostTimeseriesHandler)
 		r.Get("/api/costs/fragment", costHandlers.CostSummaryFragmentHandler)
+
+		// Models.
+		r.Get("/models", webHandlers.ModelsPage)
+		r.Get("/models/*", webHandlers.ModelDetailPage)
 
 		// Keys.
 		r.Get("/keys", webHandlers.KeysPage)

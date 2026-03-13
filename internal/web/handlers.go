@@ -17,6 +17,7 @@ import (
 	"golang.org/x/text/message"
 
 	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
@@ -56,6 +57,8 @@ type Handlers struct {
 	templates *TemplateSet
 	calc      *pricing.Calculator
 	oidc      OIDCProvider // nil when OIDC not configured
+	modelList []config.ModelMapping
+	providers []config.ProviderConfig
 }
 
 // OIDCProvider is the minimal interface Handlers needs from the OIDC package.
@@ -65,7 +68,7 @@ type OIDCProvider interface {
 }
 
 // NewHandlers creates web UI handlers.
-func NewHandlers(s store.Store, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider) *Handlers {
+func NewHandlers(s store.Store, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, modelList []config.ModelMapping, providers []config.ProviderConfig) *Handlers {
 	return &Handlers{
 		store:     s,
 		sessions:  sessions,
@@ -73,6 +76,8 @@ func NewHandlers(s store.Store, sessions *auth.UISessionStore, masterKey string,
 		templates: tmpl,
 		calc:      calc,
 		oidc:      oidcProvider,
+		modelList: modelList,
+		providers: providers,
 	}
 }
 
@@ -142,6 +147,8 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 				return fmt.Sprintf("%.1fB", float64(n)/1_000_000_000)
 			case n >= 1_000_000:
 				return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+			case n >= 1_000:
+				return fmt.Sprintf("%.1fK", float64(n)/1_000)
 			default:
 				p := message.NewPrinter(language.English)
 				return p.Sprintf("%d", n)

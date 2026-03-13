@@ -1,0 +1,173 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Models - glitchgate{{end}}
+
+{{define "head"}}
+<style>
+  th[data-col] {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  th[data-col]:hover { color: var(--pico-primary); }
+  th[data-col]::after {
+    content: " ⇅";
+    font-size: 0.75em;
+    color: var(--pico-muted-color);
+  }
+  th[data-col][aria-sort="ascending"]::after  { content: " ↑"; color: var(--pico-primary); }
+  th[data-col][aria-sort="descending"]::after { content: " ↓"; color: var(--pico-primary); }
+  .model-kind-badge {
+    display: inline-block;
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+    font-size: 0.72em;
+    font-weight: 600;
+    vertical-align: middle;
+    margin-left: 0.25em;
+  }
+  #model-search { min-width: 16rem; }
+</style>
+{{end}}
+
+{{define "content"}}
+<h2>Models</h2>
+{{if .Models}}
+
+<div class="filter-bar">
+  <label>
+    Search
+    <input id="model-search" type="search" placeholder="Filter by name…" oninput="filterModels()" style="margin-bottom:0">
+  </label>
+  <label>
+    Type
+    <select id="model-kind" onchange="filterModels()" style="margin-bottom:0">
+      <option value="">All</option>
+      <option value="configured">Configured</option>
+      <option value="unconfigured">Seen in logs</option>
+      <option value="virtual">Virtual</option>
+      <option value="wildcard">Wildcard</option>
+    </select>
+  </label>
+  <small id="model-count" style="color:var(--pico-muted-color);align-self:center"></small>
+</div>
+
+<table id="models-table">
+  <thead>
+    <tr>
+      <th data-col="name"   data-type="str" >Model Name</th>
+      <th data-col="prov"   data-type="str" >Provider</th>
+      <th data-col="input"  data-type="num" >Input ($/M)</th>
+      <th data-col="output" data-type="num" >Output ($/M)</th>
+      <th data-col="spend"  data-type="num"  class="cost">Total Spend</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Models}}
+    <tr
+      data-href="/ui/models/{{.EncodedName}}"
+      data-name="{{.ModelName}}"
+      data-kind="{{if .IsUnconfigured}}unconfigured{{else if .IsVirtual}}virtual{{else if .IsWildcard}}wildcard{{else}}configured{{end}}"
+      data-prov="{{if .IsVirtual}}virtual{{else}}{{.ProviderName}} {{.ProviderType}}{{end}}"
+      data-input="{{if .HasPricing}}{{.Pricing.InputPerMillion}}{{else}}-1{{end}}"
+      data-output="{{if .HasPricing}}{{.Pricing.OutputPerMillion}}{{else}}-1{{end}}"
+      data-spend="{{.TotalSpendUSD}}"
+      {{if .IsUnconfigured}}style="color:var(--pico-muted-color)"{{end}}
+    >
+      <td>
+        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>
+        {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span> <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, {{.ModelName | printf "%q"}})">⎘</button>{{else if not .IsWildcard}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, {{.ModelName | printf "%q"}})">⎘</button>{{end}}
+      </td>
+      <td>
+        {{if .IsVirtual}}Virtual{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}—{{end}}
+      </td>
+      <td>{{if .HasPricing}}{{printf "%.4f" .Pricing.InputPerMillion}}{{else}}—{{end}}</td>
+      <td>{{if .HasPricing}}{{printf "%.4f" .Pricing.OutputPerMillion}}{{else}}—{{end}}</td>
+      <td class="cost">${{printf "%.4f" .TotalSpendUSD}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+<p id="no-results" style="display:none;color:var(--pico-muted-color)">No models match the current filter.</p>
+
+<script>
+(function() {
+  var sortCol = '', sortDir = 1;
+
+  function val(row, col) {
+    return row.dataset[col] || '';
+  }
+
+  function cmp(a, b, type) {
+    if (type === 'num') {
+      var an = parseFloat(a), bn = parseFloat(b);
+      if (an === -1 && bn === -1) return 0;
+      if (an === -1) return 1;   // no-price rows sink
+      if (bn === -1) return -1;
+      return an - bn;
+    }
+    return a.toLowerCase().localeCompare(b.toLowerCase());
+  }
+
+  function sortTable(col, type) {
+    var ths = document.querySelectorAll('#models-table th[data-col]');
+    ths.forEach(function(th) {
+      if (th.dataset.col === col) {
+        if (sortCol === col) {
+          sortDir *= -1;
+        } else {
+          sortDir = 1;
+        }
+        sortCol = col;
+        th.setAttribute('aria-sort', sortDir === 1 ? 'ascending' : 'descending');
+      } else {
+        th.removeAttribute('aria-sort');
+      }
+    });
+
+    var tbody = document.querySelector('#models-table tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      return cmp(val(a, col), val(b, col), type) * sortDir;
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+    updateCount();
+  }
+
+  function filterModels() {
+    var search = document.getElementById('model-search').value.toLowerCase();
+    var kind   = document.getElementById('model-kind').value;
+    var rows   = document.querySelectorAll('#models-table tbody tr');
+    rows.forEach(function(row) {
+      var nameMatch = !search || row.dataset.name.toLowerCase().includes(search);
+      var kindMatch = !kind   || row.dataset.kind === kind;
+      row.style.display = (nameMatch && kindMatch) ? '' : 'none';
+    });
+    updateCount();
+  }
+
+  function updateCount() {
+    var rows    = document.querySelectorAll('#models-table tbody tr');
+    var visible = Array.from(rows).filter(function(r) { return r.style.display !== 'none'; }).length;
+    document.getElementById('model-count').textContent =
+      visible === rows.length ? rows.length + ' models' : visible + ' of ' + rows.length + ' models';
+    document.getElementById('no-results').style.display = visible === 0 ? '' : 'none';
+  }
+
+  // Wire header clicks.
+  document.querySelectorAll('#models-table th[data-col]').forEach(function(th) {
+    th.addEventListener('click', function() { sortTable(th.dataset.col, th.dataset.type || 'str'); });
+  });
+
+  // Expose for inline oninput/onchange.
+  window.filterModels = filterModels;
+
+  // Apply default alphabetical sort.
+  sortTable('name', 'str');
+})();
+</script>
+
+{{else}}
+<p>No models configured. Add entries to <code>model_list</code> in your config.</p>
+{{end}}
+{{end}}

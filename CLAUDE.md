@@ -17,6 +17,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-11
 - SQLite — one new migration (`014_add_fallback_attempts.sql`) (008-model-fallback)
 - Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`) + chi/v5 (router), go-resty/v3 (upstream calls), cobra+viper (CLI/config), modernc.org/sqlite (storage), goose/v3 (migrations), testify/require (tests) (010-responses-api-support)
 - SQLite — no schema changes; existing `request_logs` table supports new `source_format` value `"responses"` (010-responses-api-support)
+- Go 1.26.1 + chi/v5 (router), HTMX 2.0.4 (CDN), Pico CSS v2 (CDN), internal/pricing, internal/config, internal/store (011-models-page)
+- SQLite (read-only for this feature; no schema changes) (011-models-page)
 
 - Go 1.24+ with cobra + viper (CLI/config), chi/v5 (HTTP router)
 - net/http (upstream SSE streaming), go-resty/v3 (non-streaming calls)
@@ -63,11 +65,70 @@ make audit              # gosec + govulncheck
 - Translation as pure functions in internal/translate/
 
 ## Recent Changes
+- 011-models-page: Added Go 1.26.1 + chi/v5 (router), HTMX 2.0.4 (CDN), Pico CSS v2 (CDN), internal/pricing, internal/config, internal/store
 - 010-responses-api-support: Added Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`) + chi/v5 (router), go-resty/v3 (upstream calls), cobra+viper (CLI/config), modernc.org/sqlite (storage), goose/v3 (migrations), testify/require (tests)
 - 008-model-fallback: Added Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`) + chi/v5, go-resty/v3, cobra+viper, modernc.org/sqlite, goose/v3, testify/require
-- 007-implement-oidc: Added Go 1.26.1 (module: `codeberg.org/kglitchy/glitchgate`)
 
   monitoring, web UI
 
 <!-- MANUAL ADDITIONS START -->
+## Architecture Overview
+
+glitchgate is an LLM API reverse proxy that handles format translation between three API styles:
+- **Anthropic Messages API** (`/v1/messages`)
+- **OpenAI Chat Completions API** (`/v1/chat/completions`)
+- **OpenAI Responses API** (`/v1/responses`)
+
+Request flow: Client → Proxy Handler → Format Translation → Upstream Provider → Cost Logging → SQLite
+
+Key architectural layers:
+
+- **proxy/** - Core HTTP handlers for `/v1/*` endpoints. Handles fallback chains, streaming (SSE relay vs synthesis), and orchestrates translation. Main entry point: `ServeHTTP` in `handler.go`
+
+- **translate/** - Pure functions for API format conversion (Anthropic ↔ OpenAI ↔ Responses). Each direction has request/response translators. Streaming uses specialized SSE parsers/relays (`stream_translator`, `reverse_stream`, `responses_stream_translator`)
+
+- **provider/** - Interface for upstream LLM services (`Provider` interface). Implementations: `anthropic.Client`, `openai.Client`, `copilot.Client`. Each provider implements `SendRequest()` and reports its native `APIFormat()` ("anthropic", "openai", or "responses")
+
+- **store/** - SQLite data access via `Store` interface. Uses sqlc for query generation from `queries/*.sql`. Migrations embedded in `store/migrations/` and applied via `goose`. All DB operations return Go structs (typed) - no raw SQL in handlers
+
+- **config/** - Viper-based config with `model_list` for client-facing model routing. Uses wildcard prefix matching (`prefix/*`) and virtual model fallback chains with cycle detection
+
+- **web/** - Embedded HTMX + Pico CSS UI via `go:embed`. Session-based auth with OIDC support. Templates use cloned base to avoid block collisions (ParseTemplates)
+
+- **pricing/** - Model-to-cost mapping with built-in defaults for Anthropic, OpenAI, Copilot. Metadata overrides via config `model_list` entries
+
+## Key Patterns
+
+- **Fallback chains**: `Config.FindModel(modelName)` returns ordered dispatch slice. Main handler iterates, retrying on 5xx/429 and logging each attempt count via `fallback_attempts`
+
+- **Format-aware routing**: Provider's `APIFormat()` determines if translation is needed. If "openai" or "responses", handler delegates to `serveViaOpenAIProvider`/`serveViaResponsesProvider` which call translation then pass to provider
+
+- **Streaming**: net/http for upstream SSE; `RelaySSEStream` for passthrough, `SynthesizeAnthropicSSE` for forced non-streaming clients. Response struct has `Stream io.ReadCloser` vs `Body []byte`
+
+- **Async logging**: `AsyncLogger` batches writes to SQLite in background goroutine with channel buffer (default 1000). Handler sends `RequestLogEntry` and returns immediately
+
+- **SQLC workflow**: Edit `.sql` files in `queries/`, run `make generate` to update Go types in `store/`. Migrations in `store/migrations/` are embedded as `var migrations embed.FS`
+
+- **Template clones**: Each page template is cloned from base to let multiple pages define same block names (title, content, head) without collision. Fragments (`templates/fragments/*.html`) are shared across all pages
+
+## Adding a New Provider
+
+1. Implement `Provider` interface in `internal/provider/<providername>/client.go`
+2. Create types.go if struct definitions needed
+3. Add to provider config map in `cmd/serve.go` (switch statement)
+4. If new API format, add translation functions in `translate/`
+
+## Adding Database Queries
+
+1. Add SQL to `queries/*.sql`
+2. Run `make generate` (sqlc generates Go in `internal/store/`)
+3. Add method to `Store` interface
+4. Implement in SQLite struct
+
+## Session & Auth Context
+
+- `Session` from context via `auth.SessionFromContext(r.Context())`
+- Roles: `global_admin`, `team_admin`, `member`
+- Scope enforcement via `store.ListProxyKeysByOwner`/`Store.ListProxyKeysByTeam`
+- Middleware: `web.UISessionMiddleware` + `web.RequireGlobalAdmin` / `web.RequireAdminOrTeamAdmin`
 <!-- MANUAL ADDITIONS END -->

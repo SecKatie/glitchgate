@@ -40,40 +40,41 @@
                 </tr>
             </thead>
             <tbody>
+                {{$grandTotalTokens := addInt64 $.Cost.TotalInputTokens .OutputTokens}}
                 <tr class="token-detail-total">
                     <td>Total Input</td>
-                    <td class="token-detail-value">{{$.Cost.TotalInputTokens}} <span class="token-detail-note">(100%)</span></td>
-                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">&mdash;</td><td class="token-detail-value token-detail-total-cost">${{printf "%.6f" (deref $.Cost.TotalInputCostUSD)}} <span class="token-detail-note">(100%)</span></td>{{end}}
+                    <td class="token-detail-value">{{$.Cost.TotalInputTokens}} <span class="token-detail-note">({{fmtPctInt64 $.Cost.TotalInputTokens $grandTotalTokens}})</span></td>
+                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">&mdash;</td><td class="token-detail-value token-detail-total-cost">${{printf "%.6f" (deref $.Cost.TotalInputCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.TotalInputCostUSD) (deref $.Cost.TotalCostUSD)}})</span></td>{{end}}
                 </tr>
                 <tr>
                     <td class="token-detail-child"><span class="token-detail-marker">↳</span>Uncached Input <span class="token-detail-note">(included in total input)</span></td>
                     <td class="token-detail-value">{{.InputTokens}} <span class="token-detail-note">({{fmtPctInt64 .InputTokens $.Cost.TotalInputTokens}} of total input)</span></td>
-                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.InputRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.InputCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.InputCostUSD) (deref $.Cost.TotalInputCostUSD)}})</span></td>{{end}}
+                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.InputRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.InputCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.InputCostUSD) (deref $.Cost.TotalCostUSD)}})</span></td>{{end}}
                 </tr>
                 {{if gt .CacheCreationInputTokens 0}}
                 <tr>
                     <td class="token-detail-child"><span class="token-detail-marker">↳</span>Cache Write <span class="token-detail-note">(subset of total input)</span></td>
                     <td class="token-detail-value">{{.CacheCreationInputTokens}} <span class="token-detail-note">({{fmtPctInt64 .CacheCreationInputTokens $.Cost.TotalInputTokens}} of total input)</span></td>
-                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.CacheWriteRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.CacheWriteCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.CacheWriteCostUSD) (deref $.Cost.TotalInputCostUSD)}})</span></td>{{end}}
+                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.CacheWriteRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.CacheWriteCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.CacheWriteCostUSD) (deref $.Cost.TotalCostUSD)}})</span></td>{{end}}
                 </tr>
                 {{end}}
                 {{if gt .CacheReadInputTokens 0}}
                 <tr>
                     <td class="token-detail-child"><span class="token-detail-marker">↳</span>Cache Read <span class="token-detail-note">(subset of total input)</span></td>
                     <td class="token-detail-value">{{.CacheReadInputTokens}} <span class="token-detail-note">({{fmtPctInt64 .CacheReadInputTokens $.Cost.TotalInputTokens}} of total input)</span></td>
-                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.CacheReadRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.CacheReadCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.CacheReadCostUSD) (deref $.Cost.TotalInputCostUSD)}})</span></td>{{end}}
+                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.CacheReadRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.CacheReadCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.CacheReadCostUSD) (deref $.Cost.TotalCostUSD)}})</span></td>{{end}}
                 </tr>
                 {{end}}
                 <tr class="token-detail-total">
                     <td>Output</td>
-                    <td class="token-detail-value">{{.OutputTokens}} <span class="token-detail-note">(100%)</span></td>
-                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.OutputRatePerMillion}}</td><td class="token-detail-value token-detail-total-cost">${{printf "%.6f" (deref $.Cost.OutputCostUSD)}} <span class="token-detail-note">(100%)</span></td>{{end}}
+                    <td class="token-detail-value">{{.OutputTokens}} <span class="token-detail-note">({{fmtPctInt64 .OutputTokens $grandTotalTokens}})</span></td>
+                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.OutputRatePerMillion}}</td><td class="token-detail-value token-detail-total-cost">${{printf "%.6f" (deref $.Cost.OutputCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.OutputCostUSD) (deref $.Cost.TotalCostUSD)}})</span></td>{{end}}
                 </tr>
                 {{if gt $.Cost.ReasoningTokens 0}}
                 <tr>
                     <td class="token-detail-child"><span class="token-detail-marker">↳</span>Reasoning <span class="token-detail-note">(subset of output)</span></td>
                     <td class="token-detail-value">{{$.Cost.ReasoningTokens}} <span class="token-detail-note">({{fmtPctInt64 $.Cost.ReasoningTokens .OutputTokens}} of output)</span></td>
-                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.OutputRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.ReasoningCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.ReasoningCostUSD) (deref $.Cost.OutputCostUSD)}})</span></td>{{end}}
+                    {{if $.Cost.PricingKnown}}<td class="token-detail-value token-detail-note">${{printf "%.2f" $.Cost.OutputRatePerMillion}}</td><td class="token-detail-value">${{printf "%.6f" (deref $.Cost.ReasoningCostUSD)}} <span class="token-detail-note">({{fmtPctFloat (deref $.Cost.ReasoningCostUSD) (deref $.Cost.TotalCostUSD)}})</span></td>{{end}}
                 </tr>
                 {{end}}
             </tbody>
