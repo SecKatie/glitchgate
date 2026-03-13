@@ -7,6 +7,21 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
+type keyScope struct {
+	scopeType   string
+	scopeUserID string
+	scopeTeamID string
+}
+
+func visibleKeyScope(sc *auth.UISessionContext) keyScope {
+	scopeType, scopeUserID, scopeTeamID := buildScopeParams(sc)
+	return keyScope{
+		scopeType:   scopeType,
+		scopeUserID: scopeUserID,
+		scopeTeamID: scopeTeamID,
+	}
+}
+
 // buildScopeParams populates the ScopeType/ScopeUserID/ScopeTeamID fields of
 // a ListLogsParams based on the current session context.
 //

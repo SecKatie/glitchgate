@@ -628,20 +628,16 @@ func (h *Handlers) KeysAPIHandler(w http.ResponseWriter, r *http.Request) {
 
 // listKeysForSession returns the keys visible to the current session.
 func (h *Handlers) listKeysForSession(r *http.Request) ([]store.ProxyKeySummary, error) {
-	sc := auth.SessionFromContext(r.Context())
-	if sc == nil || sc.IsMasterKey {
+	scope := visibleKeyScope(auth.SessionFromContext(r.Context()))
+	switch scope.scopeType {
+	case "all":
 		return h.store.ListActiveProxyKeys(r.Context())
-	}
-	switch sc.Role {
-	case "global_admin":
+	case "team":
+		return h.store.ListProxyKeysByTeam(r.Context(), scope.scopeTeamID)
+	case "user":
+		return h.store.ListProxyKeysByOwner(r.Context(), scope.scopeUserID)
+	default:
 		return h.store.ListActiveProxyKeys(r.Context())
-	case "team_admin":
-		if sc.TeamID != nil {
-			return h.store.ListProxyKeysByTeam(r.Context(), *sc.TeamID)
-		}
-		return h.store.ListProxyKeysByOwner(r.Context(), sc.SessionID)
-	default: // member
-		return h.store.ListProxyKeysByOwner(r.Context(), sc.User.ID)
 	}
 }
 
