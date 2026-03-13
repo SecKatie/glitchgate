@@ -29,11 +29,11 @@
             <tr><th>Token Type</th><th class="token-detail-value">Count</th><th class="token-detail-value">Cost</th></tr>
         </thead>
         <tbody>
-            <tr class="token-detail-total">
+            {{$grandTotalTokens := addInt64 .TotalAllInputTokens .Summary.TotalOutputTokens}}<tr class="token-detail-total">
                 <td>Total Input</td>
-                <td class="token-detail-value">{{fmtTokens .TotalAllInputTokens}} <span class="token-detail-note">(100%)</span></td>
+                <td class="token-detail-value">{{fmtTokens .TotalAllInputTokens}} <span class="token-detail-note">({{fmtPctInt64 .TotalAllInputTokens $grandTotalTokens}})</span></td>
                 <td class="token-detail-value token-detail-total-cost">
-                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.TotalInputCostUSD}} <span class="token-detail-note">(100%)</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.TotalInputCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.TotalInputCostUSD .Summary.TotalCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
                 </td>
             </tr>
             <tr>
@@ -63,9 +63,9 @@
             {{end}}
             <tr class="token-detail-total">
                 <td>Output</td>
-                <td class="token-detail-value">{{fmtTokens .Summary.TotalOutputTokens}} <span class="token-detail-note">(100%)</span></td>
+                <td class="token-detail-value">{{fmtTokens .Summary.TotalOutputTokens}} <span class="token-detail-note">({{fmtPctInt64 .Summary.TotalOutputTokens $grandTotalTokens}})</span></td>
                 <td class="token-detail-value token-detail-total-cost">
-                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.OutputCostUSD}} <span class="token-detail-note">(100%)</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.OutputCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.OutputCostUSD .Summary.TotalCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
                 </td>
             </tr>
         </tbody>

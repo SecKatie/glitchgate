@@ -475,6 +475,69 @@ func (s *SQLiteStore) CountLogsSince(ctx context.Context, sinceID string, params
 	return count, nil
 }
 
+// GetModelUsageSummary returns aggregated usage stats for the given model_requested value.
+// Returns a zero-value summary (not an error) when no logs exist for the model.
+func (s *SQLiteStore) GetModelUsageSummary(ctx context.Context, modelName string) (*ModelUsageSummary, error) {
+	const query = `SELECT
+		COUNT(*),
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(estimated_cost_usd), 0),
+		COALESCE(MAX(provider_name), ''),
+		COALESCE(MAX(model_upstream), '')
+	FROM request_logs
+	WHERE model_requested = ?`
+
+	var summary ModelUsageSummary
+	if err := s.db.QueryRowContext(ctx, query, modelName).Scan(
+		&summary.RequestCount,
+		&summary.InputTokens,
+		&summary.OutputTokens,
+		&summary.TotalCostUSD,
+		&summary.ProviderName,
+		&summary.UpstreamModel,
+	); err != nil {
+		return nil, fmt.Errorf("get model usage summary: %w", err)
+	}
+
+	return &summary, nil
+}
+
+// GetAllModelUsageSummaries returns aggregated usage stats for every model seen in request_logs,
+// keyed by model name. A single GROUP BY query replaces N per-model round-trips.
+func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error) {
+	const query = `SELECT
+		model_requested,
+		COUNT(*),
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(estimated_cost_usd), 0),
+		COALESCE(MAX(provider_name), ''),
+		COALESCE(MAX(model_upstream), '')
+	FROM request_logs
+	GROUP BY model_requested`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("get all model usage summaries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]*ModelUsageSummary)
+	for rows.Next() {
+		var modelName string
+		var summary ModelUsageSummary
+		if err := rows.Scan(&modelName, &summary.RequestCount, &summary.InputTokens, &summary.OutputTokens, &summary.TotalCostUSD, &summary.ProviderName, &summary.UpstreamModel); err != nil {
+			return nil, fmt.Errorf("scan model usage summary: %w", err)
+		}
+		result[modelName] = &summary
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate model usage summaries: %w", err)
+	}
+	return result, nil
+}
+
 // ListDistinctModels returns all distinct model_requested values from request_logs.
 func (s *SQLiteStore) ListDistinctModels(ctx context.Context) ([]string, error) {
 	const query = `SELECT DISTINCT model_requested FROM request_logs ORDER BY model_requested`
@@ -573,7 +636,7 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
 	default: // "model"
 		if params.GroupFilter != "" {
-			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			conditions = append(conditions, "rl.model_requested LIKE ?")
 			args = append(args, params.GroupFilter+"%")
 		}
 	}
@@ -672,7 +735,7 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 
 	default: // "model" or unset
 		query = `SELECT
-			rl.model_upstream AS group_name,
+			rl.model_requested AS group_name,
 			COALESCE(SUM(rl.estimated_cost_usd), 0),
 			COALESCE(SUM(rl.input_tokens), 0),
 			COALESCE(SUM(rl.output_tokens), 0),
@@ -700,14 +763,14 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 			args = append(args, params.KeyPrefix)
 		}
 		if params.GroupFilter != "" {
-			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			conditions = append(conditions, "rl.model_requested LIKE ?")
 			args = append(args, params.GroupFilter+"%")
 		}
 		conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
 		}
-		query += " GROUP BY rl.model_upstream ORDER BY COALESCE(SUM(rl.estimated_cost_usd), 0) DESC"
+		query += " GROUP BY rl.model_requested ORDER BY COALESCE(SUM(rl.estimated_cost_usd), 0) DESC"
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -773,7 +836,7 @@ func (s *SQLiteStore) GetCostPricingGroups(ctx context.Context, params CostParam
 		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
 	default:
 		if params.GroupFilter != "" {
-			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			conditions = append(conditions, "rl.model_requested LIKE ?")
 			args = append(args, params.GroupFilter+"%")
 		}
 	}
@@ -924,7 +987,7 @@ func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params 
 		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
 	default:
 		if params.GroupFilter != "" {
-			conditions = append(conditions, "rl.model_upstream LIKE ?")
+			conditions = append(conditions, "rl.model_requested LIKE ?")
 			args = append(args, params.GroupFilter+"%")
 		}
 	}
