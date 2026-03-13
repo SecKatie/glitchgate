@@ -22,12 +22,12 @@ import (
 // Stub store for handler tests
 // ---------------------------------------------------------------------------
 
-// stubModelStore is a minimal store.Store stub that only implements
-// GetModelUsageSummary. Any other method panics — tests should not call them.
+// stubModelStore is a minimal HandlersStore stub that only implements
+// model-related methods. Any other method panics — tests should not call them.
 type stubModelStore struct {
-	store.Store // embed to satisfy interface; other methods panic
-	summary     *store.ModelUsageSummary
-	err         error
+	HandlersStore // embed to satisfy interface; other methods panic
+	summary       *store.ModelUsageSummary
+	err           error
 }
 
 func (s *stubModelStore) GetModelUsageSummary(_ context.Context, _ string) (*store.ModelUsageSummary, error) {

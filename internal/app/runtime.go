@@ -116,7 +116,7 @@ func (rt *Runtime) StartMaintenance(ctx context.Context, cfg *config.Config) {
 	go runMaintenanceLoop(ctx, rt.Store, cfg) // #nosec G118 -- This is a process-lifetime maintenance goroutine controlled by the caller-provided app context.
 }
 
-func runMaintenanceLoop(ctx context.Context, st store.Store, cfg *config.Config) {
+func runMaintenanceLoop(ctx context.Context, st store.MaintenanceStore, cfg *config.Config) {
 	cleanupTicker := time.NewTicker(time.Hour)
 	defer cleanupTicker.Stop()
 

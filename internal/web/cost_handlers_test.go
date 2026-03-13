@@ -15,7 +15,7 @@ import (
 )
 
 type stubCostAPIStore struct {
-	store.Store
+	store.CostQueryStore
 	summary               *store.CostSummary
 	breakdown             []store.CostBreakdownEntry
 	pricingGroups         []store.CostPricingGroup
