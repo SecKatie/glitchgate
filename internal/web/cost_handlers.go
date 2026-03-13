@@ -459,16 +459,19 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	timeseries, err := h.store.GetCostTimeseries(r.Context(), params)
+	timeseriesPricingGroups, err := h.store.GetCostTimeseriesPricingGroups(r.Context(), params)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	var maxRequests int64
-	for _, e := range timeseries {
-		if e.Requests > maxRequests {
-			maxRequests = e.Requests
+	pricedTimeseries := priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames)
+	aggregatedTimeseries := aggregatePricedTimeseries(pricedTimeseries, "day")
+
+	var maxCost float64
+	for _, e := range aggregatedTimeseries {
+		if e.CostUSD > maxCost {
+			maxCost = e.CostUSD
 		}
 	}
 	var maxBreakdownRequests int64
@@ -515,8 +518,8 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		"TokenCosts":           tokenCosts,
 		"Breakdown":            breakdown,
 		"BreakdownCosts":       breakdownCosts,
-		"Timeseries":           timeseries,
-		"MaxRequests":          float64(maxRequests),
+		"Timeseries":           aggregatedTimeseries,
+		"MaxCost":              maxCost,
 		"MaxBreakdownRequests": float64(maxBreakdownRequests),
 		"HasIncompleteData":    hasIncompleteData,
 		"From":                 fromDate,
@@ -564,16 +567,19 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	timeseries, err := h.store.GetCostTimeseries(r.Context(), params)
+	timeseriesPricingGroups, err := h.store.GetCostTimeseriesPricingGroups(r.Context(), params)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	var maxRequests int64
-	for _, e := range timeseries {
-		if e.Requests > maxRequests {
-			maxRequests = e.Requests
+	pricedTimeseries := priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames)
+	aggregatedTimeseries := aggregatePricedTimeseries(pricedTimeseries, "day")
+
+	var maxCost float64
+	for _, e := range aggregatedTimeseries {
+		if e.CostUSD > maxCost {
+			maxCost = e.CostUSD
 		}
 	}
 	var maxBreakdownRequests int64
@@ -604,8 +610,8 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 		"TokenCosts":           tokenCosts,
 		"Breakdown":            breakdown,
 		"BreakdownCosts":       breakdownCosts,
-		"Timeseries":           timeseries,
-		"MaxRequests":          float64(maxRequests),
+		"Timeseries":           aggregatedTimeseries,
+		"MaxCost":              maxCost,
 		"MaxBreakdownRequests": float64(maxBreakdownRequests),
 		"HasIncompleteData":    hasIncompleteData,
 		"GroupBy":              groupBy,

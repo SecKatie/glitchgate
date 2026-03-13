@@ -250,6 +250,7 @@ type CostPricingGroup struct {
 // CostTimeseriesEntry holds cost data for a single time bucket.
 type CostTimeseriesEntry struct {
 	Date     string
+	CostUSD  float64
 	Requests int64
 }
 

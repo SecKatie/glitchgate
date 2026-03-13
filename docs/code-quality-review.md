@@ -122,7 +122,7 @@ The three proxy entrypoints repeat the same lifecycle: parse request, resolve mo
 
 Refactor target: introduce a single proxy pipeline that works in terms of source format, provider capabilities, request translators, and response adapters. Make retry/fallback policy live in one place. This is the highest leverage change because every new model-routing feature, provider type, and logging rule currently has to be implemented three times.
 
-Status 2026-03-13: the cross-format fallback continuation bug is fixed in the Anthropic and OpenAI entrypoints. The broader proxy-pipeline unification is still open.
+Status 2026-03-13: completed. The three proxy entrypoints now execute through one shared proxy pipeline keyed by upstream API format. Fallback-chain iteration, provider send/retry/log behavior, and per-format route selection all live in one place, while each entrypoint contributes only its source-specific request validation plus request/response translators.
 
 2. Extract application bootstrap and provider compilation out of `cmd/serve.go`.
 
@@ -172,7 +172,7 @@ Refactor target: build one shared SSE engine with pluggable event translators, a
 1. Completed 2026-03-13: Fix the scope bug and add focused authorization policy tests.
 2. Completed 2026-03-13: repair cost API semantics by routing all cost views through one pricing presenter.
 3. Completed 2026-03-13: repair cross-format fallback continuation in the Anthropic and OpenAI proxy entrypoints.
-4. Next: collapse proxy orchestration into one fallback-aware pipeline.
-5. Extract bootstrap/provider compilation from `cmd/serve.go`.
+4. Completed 2026-03-13: collapse proxy orchestration into one fallback-aware pipeline.
+5. Next: extract bootstrap/provider compilation from `cmd/serve.go`.
 6. Split `store.Store` and add joined projection queries for admin pages.
 7. Unify SSE and transport helpers.

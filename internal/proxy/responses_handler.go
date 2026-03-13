@@ -109,134 +109,118 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxyKeyID = pk.ID
 	}
 
-	// Iterate the fallback chain.
-	for attempt, mapping := range chain {
-		attemptCount := int64(attempt + 1)
+	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
+		SourceFormat: "responses",
+		ProxyKeyID:   proxyKeyID,
+		ModelRequest: req.Model,
+		IsStreaming:  isStreaming,
+		Start:        start,
+	}, h.routeBuilders(w, r, body, &req, isStreaming), func(providerName string) {
+		writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", providerName))
+	}, func(prov provider.Provider) bool {
+		writeResponsesError(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("Unsupported upstream format %q for provider %s", prov.APIFormat(), prov.Name()))
+		return true
+	}, func() {
+		writeResponsesError(w, http.StatusBadGateway, "server_error", "Failed to reach upstream provider")
+	}, func() {
+		writeResponsesError(w, http.StatusServiceUnavailable, "server_error", "All upstream providers failed")
+	})
+}
 
-		// Find the provider for this chain entry.
-		prov, ok := h.providers[mapping.Provider]
-		if !ok {
-			writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", mapping.Provider))
-			return
-		}
-
-		providerName := providerNameFor(prov)
-
-		var (
-			upstreamBody []byte
-			provResp     *provider.Response
-		)
-
-		// Route based on upstream provider format.
-		switch prov.APIFormat() {
-		case "responses":
+func (h *ResponsesHandler) routeBuilders(
+	w http.ResponseWriter,
+	r *http.Request,
+	body []byte,
+	req *translate.ResponsesRequest,
+	isStreaming bool,
+) map[string]routeBuilder {
+	return map[string]routeBuilder{
+		"responses": func(attempt chainAttempt) (*routePlan, bool) {
+			mapping := attempt.Mapping
 			var bodyMap map[string]any
 			if err := json.Unmarshal(body, &bodyMap); err != nil {
 				writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", "Invalid JSON in request body")
-				return
+				return nil, true
 			}
 			bodyMap["model"] = mapping.UpstreamModel
-			upstreamBody, err = json.Marshal(bodyMap)
+			upstreamBody, err := json.Marshal(bodyMap)
 			if err != nil {
 				writeResponsesError(w, http.StatusInternalServerError, "server_error", "Internal server error")
-				return
+				return nil, true
 			}
-		case "anthropic":
-			var anthReq any
-			anthReq, err = translate.ResponsesToAnthropic(&req, mapping.UpstreamModel)
+			return &routePlan{
+				ProviderRequest: &provider.Request{
+					Body:        upstreamBody,
+					Headers:     r.Header.Clone(),
+					Model:       mapping.UpstreamModel,
+					IsStreaming: isStreaming,
+				},
+				RequestBody: body,
+				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if isStreaming {
+						return h.handleResponsesStreaming(w, provResp)
+					}
+					return h.handleResponsesNonStreaming(w, provResp)
+				},
+			}, false
+		},
+		"anthropic": func(attempt chainAttempt) (*routePlan, bool) {
+			mapping := attempt.Mapping
+			anthReq, err := translate.ResponsesToAnthropic(req, mapping.UpstreamModel)
 			if err != nil {
 				writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
-				return
+				return nil, true
 			}
-			upstreamBody, err = json.Marshal(anthReq)
+			upstreamBody, err := json.Marshal(anthReq)
 			if err != nil {
 				writeResponsesError(w, http.StatusInternalServerError, "server_error", "Internal server error")
-				return
+				return nil, true
 			}
-		case "openai":
-			var ccReq any
-			ccReq, err = translate.ResponsesToOpenAI(&req, mapping.UpstreamModel)
+			return &routePlan{
+				ProviderRequest: &provider.Request{
+					Body:        upstreamBody,
+					Headers:     r.Header.Clone(),
+					Model:       mapping.UpstreamModel,
+					IsStreaming: isStreaming,
+				},
+				RequestBody: body,
+				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if isStreaming {
+						return h.handleAnthropicProviderStreaming(w, provResp, req.Model)
+					}
+					return h.handleAnthropicProviderNonStreaming(w, provResp, req.Model)
+				},
+			}, false
+		},
+		"openai": func(attempt chainAttempt) (*routePlan, bool) {
+			mapping := attempt.Mapping
+			ccReq, err := translate.ResponsesToOpenAI(req, mapping.UpstreamModel)
 			if err != nil {
 				writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
-				return
+				return nil, true
 			}
-			upstreamBody, err = json.Marshal(ccReq)
+			upstreamBody, err := json.Marshal(ccReq)
 			if err != nil {
 				writeResponsesError(w, http.StatusInternalServerError, "server_error", "Internal server error")
-				return
+				return nil, true
 			}
-		default:
-			writeResponsesError(w, http.StatusBadRequest, "invalid_request_error",
-				fmt.Sprintf("Unsupported upstream format %q for provider %s", prov.APIFormat(), prov.Name()))
-			return
-		}
-
-		provReq := &provider.Request{
-			Body:        upstreamBody,
-			Headers:     r.Header.Clone(),
-			Model:       mapping.UpstreamModel,
-			IsStreaming: isStreaming,
-		}
-
-		provResp, err = prov.SendRequest(r.Context(), provReq)
-		if err != nil {
-			if attempt < len(chain)-1 {
-				continue
-			}
-			latency := time.Since(start).Milliseconds()
-			errMsg := err.Error()
-			h.logger.logEntry(proxyKeyID, "responses", providerName, req.Model, mapping.UpstreamModel, "",
-				latency, body, attemptCount, handlerResult{
-					Status: http.StatusBadGateway, Body: []byte(errMsg),
-					ErrDetails: &errMsg, IsStreaming: isStreaming,
-				})
-			writeResponsesError(w, http.StatusBadGateway, "server_error", "Failed to reach upstream provider")
-			return
-		}
-
-		if isFallbackStatus(provResp.StatusCode) {
-			if provResp.Stream != nil {
-				_ = provResp.Stream.Close()
-			}
-			if attempt < len(chain)-1 {
-				continue
-			}
-			latency := time.Since(start).Milliseconds()
-			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-			h.logger.logEntry(proxyKeyID, "responses", providerName, req.Model, mapping.UpstreamModel, "",
-				latency, body, attemptCount, handlerResult{
-					Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
-					ErrDetails: &errMsg, IsStreaming: isStreaming,
-				})
-			writeResponsesError(w, http.StatusServiceUnavailable, "server_error", "All upstream providers failed")
-			return
-		}
-
-		var result handlerResult
-		switch prov.APIFormat() {
-		case "responses":
-			if isStreaming {
-				result = h.handleResponsesStreaming(w, provResp)
-			} else {
-				result = h.handleResponsesNonStreaming(w, provResp)
-			}
-		case "anthropic":
-			if isStreaming {
-				result = h.handleAnthropicProviderStreaming(w, provResp, req.Model)
-			} else {
-				result = h.handleAnthropicProviderNonStreaming(w, provResp, req.Model)
-			}
-		case "openai":
-			if isStreaming {
-				result = h.handleOpenAICCProviderStreaming(w, provResp, req.Model)
-			} else {
-				result = h.handleOpenAICCProviderNonStreaming(w, provResp, req.Model)
-			}
-		}
-		latency := time.Since(start).Milliseconds()
-		h.logger.logEntry(proxyKeyID, "responses", providerName, req.Model, mapping.UpstreamModel, "",
-			latency, body, attemptCount, result)
-		return
+			return &routePlan{
+				ProviderRequest: &provider.Request{
+					Body:        upstreamBody,
+					Headers:     r.Header.Clone(),
+					Model:       mapping.UpstreamModel,
+					IsStreaming: isStreaming,
+				},
+				RequestBody: body,
+				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if isStreaming {
+						return h.handleOpenAICCProviderStreaming(w, provResp, req.Model)
+					}
+					return h.handleOpenAICCProviderNonStreaming(w, provResp, req.Model)
+				},
+			}, false
+		},
 	}
 }
 

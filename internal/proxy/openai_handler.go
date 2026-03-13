@@ -75,110 +75,23 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxyKeyID = pk.ID
 	}
 
-	// Iterate the fallback chain.
-	for attempt, mapping := range chain {
-		attemptCount := int64(attempt + 1)
-
-		// Find the provider for this chain entry.
-		prov, ok := h.providers[mapping.Provider]
-		if !ok {
-			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", mapping.Provider))
-			return
-		}
-
-		// Format-aware routing: OpenAI-native providers (e.g. Copilot) skip translation.
-		if prov.APIFormat() == "openai" {
-			if !h.serveOpenAINative(w, r, &oaiReq, body, &mapping, prov, proxyKeyID, start, attemptCount, attempt < len(chain)-1) {
-				continue
-			}
-			return
-		}
-
-		// Format-aware routing: Responses API providers require CC→Responses translation.
-		if prov.APIFormat() == "responses" {
-			if !h.serveOpenAIViaResponsesProvider(w, r, &oaiReq, body, &mapping, prov, proxyKeyID, start, attemptCount, attempt < len(chain)-1) {
-				continue
-			}
-			return
-		}
-
-		// Translate OpenAI request to Anthropic format.
-		oaiReqCopy := oaiReq
-		oaiReqCopy.Model = mapping.UpstreamModel
-		anthReq, err := translate.OpenAIToAnthropic(&oaiReqCopy)
-		if err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
-			return
-		}
-
-		// Serialize the Anthropic request for the provider.
-		anthBody, err := json.Marshal(anthReq)
-		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
-			return
-		}
-
-		// Build the provider request.
-		provReq := &provider.Request{
-			Body:        anthBody,
-			Headers:     r.Header.Clone(),
-			Model:       mapping.UpstreamModel,
-			IsStreaming: oaiReq.Stream,
-		}
-
-		// Send the request upstream.
-		provResp, err := prov.SendRequest(r.Context(), provReq)
-		if err != nil {
-			// Network error — try next entry if available.
-			if attempt < len(chain)-1 {
-				continue
-			}
-			latency := time.Since(start).Milliseconds()
-			errMsg := err.Error()
-			providerName := providerNameFor(prov)
-			h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-				latency, body, attemptCount, handlerResult{
-					Status: http.StatusBadGateway, Body: []byte(errMsg),
-					ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
-				})
-			writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
-			return
-		}
-
-		// Check if we should fall back due to the response status.
-		if isFallbackStatus(provResp.StatusCode) {
-			if provResp.Stream != nil {
-				_ = provResp.Stream.Close()
-			}
-			if attempt < len(chain)-1 {
-				continue
-			}
-			// All entries exhausted.
-			latency := time.Since(start).Milliseconds()
-			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-			providerName := providerNameFor(prov)
-			h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-				latency, body, attemptCount, handlerResult{
-					Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
-					ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
-				})
-			writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "All upstream providers failed")
-			return
-		}
-
-		// Success.
-		providerName := providerNameFor(prov)
-		var result handlerResult
-		if oaiReq.Stream {
-			result = h.handleOpenAIStreaming(w, provResp, mapping.ModelName)
-		} else {
-			result = h.handleOpenAINonStreaming(w, provResp, mapping.ModelName)
-		}
-		latency := time.Since(start).Milliseconds()
-		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-			latency, body, attemptCount, result)
-		return
-	}
+	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
+		SourceFormat: "openai",
+		ProxyKeyID:   proxyKeyID,
+		ModelRequest: oaiReq.Model,
+		IsStreaming:  oaiReq.Stream,
+		Start:        start,
+	}, h.routeBuilders(w, r, &oaiReq, body), func(providerName string) {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", providerName))
+	}, func(prov provider.Provider) bool {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("Unsupported upstream format %q for provider %s", prov.APIFormat(), prov.Name()))
+		return true
+	}, func() {
+		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
+	}, func() {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "All upstream providers failed")
+	})
 }
 
 func (h *OpenAIHandler) handleOpenAINonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
@@ -267,80 +180,83 @@ func (h *OpenAIHandler) handleOpenAIStreaming(w http.ResponseWriter, resp *provi
 	}
 }
 
-// serveOpenAINative handles requests to OpenAI-native providers (e.g. Copilot)
+func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oaiReq *translate.ChatCompletionRequest, rawBody []byte) map[string]routeBuilder {
+	return map[string]routeBuilder{
+		"anthropic": func(attempt chainAttempt) (*routePlan, bool) {
+			mapping := attempt.Mapping
+			oaiReqCopy := *oaiReq
+			oaiReqCopy.Model = mapping.UpstreamModel
+			anthReq, err := translate.OpenAIToAnthropic(&oaiReqCopy)
+			if err != nil {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
+				return nil, true
+			}
+
+			anthBody, err := json.Marshal(anthReq)
+			if err != nil {
+				writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
+				return nil, true
+			}
+
+			return &routePlan{
+				ProviderRequest: &provider.Request{
+					Body:        anthBody,
+					Headers:     r.Header.Clone(),
+					Model:       mapping.UpstreamModel,
+					IsStreaming: oaiReq.Stream,
+				},
+				RequestBody: rawBody,
+				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if oaiReq.Stream {
+						return h.handleOpenAIStreaming(w, provResp, mapping.ModelName)
+					}
+					return h.handleOpenAINonStreaming(w, provResp, mapping.ModelName)
+				},
+			}, false
+		},
+		"openai": func(attempt chainAttempt) (*routePlan, bool) {
+			return h.buildOpenAINativeRoute(w, r, oaiReq, rawBody, &attempt.Mapping)
+		},
+		"responses": func(attempt chainAttempt) (*routePlan, bool) {
+			return h.buildResponsesRoute(w, r, oaiReq, rawBody, &attempt.Mapping)
+		},
+	}
+}
+
+// buildOpenAINativeRoute handles requests to OpenAI-native providers
 // without translating through Anthropic format.
-func (h *OpenAIHandler) serveOpenAINative(w http.ResponseWriter, r *http.Request,
+func (h *OpenAIHandler) buildOpenAINativeRoute(w http.ResponseWriter, r *http.Request,
 	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
-	mapping *config.ModelMapping, prov provider.Provider, proxyKeyID string, start time.Time, attemptCount int64,
-	hasMoreFallbacks bool,
-) bool {
+	mapping *config.ModelMapping,
+) (*routePlan, bool) {
 	// Replace model name in the raw JSON body to preserve all original fields.
 	var bodyMap map[string]any
 	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "Invalid JSON in request body")
-		return true
+		return nil, true
 	}
 	bodyMap["model"] = mapping.UpstreamModel
 	nativeBody, err := json.Marshal(bodyMap)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
-		return true
+		return nil, true
 	}
 
-	provReq := &provider.Request{
-		Body:        nativeBody,
-		Headers:     r.Header.Clone(),
-		Model:       mapping.UpstreamModel,
-		IsStreaming: oaiReq.Stream,
-	}
-
-	provResp, err := prov.SendRequest(r.Context(), provReq)
-	if err != nil {
-		if hasMoreFallbacks {
-			return false
-		}
-		latency := time.Since(start).Milliseconds()
-		errMsg := err.Error()
-		providerName := providerNameFor(prov)
-		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-			latency, rawBody, attemptCount, handlerResult{
-				Status: http.StatusBadGateway, Body: []byte(errMsg),
-				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
-			})
-		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
-		return true
-	}
-
-	if isFallbackStatus(provResp.StatusCode) {
-		if provResp.Stream != nil {
-			_ = provResp.Stream.Close()
-		}
-		if hasMoreFallbacks {
-			return false
-		}
-		latency := time.Since(start).Milliseconds()
-		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-		providerName := providerNameFor(prov)
-		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-			latency, rawBody, attemptCount, handlerResult{
-				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
-				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
-			})
-		writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "All upstream providers failed")
-		return true
-	}
-
-	providerName := providerNameFor(prov)
-	var result handlerResult
-	if oaiReq.Stream {
-		result = h.handleOpenAINativeStreaming(w, provResp)
-	} else {
-		result = h.handleOpenAINativeNonStreaming(w, provResp)
-	}
-	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-		latency, rawBody, attemptCount, result)
-	return true
+	return &routePlan{
+		ProviderRequest: &provider.Request{
+			Body:        nativeBody,
+			Headers:     r.Header.Clone(),
+			Model:       mapping.UpstreamModel,
+			IsStreaming: oaiReq.Stream,
+		},
+		RequestBody: rawBody,
+		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			if oaiReq.Stream {
+				return h.handleOpenAINativeStreaming(w, provResp)
+			}
+			return h.handleOpenAINativeNonStreaming(w, provResp)
+		},
+	}, false
 }
 
 func (h *OpenAIHandler) handleOpenAINativeNonStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
@@ -406,83 +322,42 @@ func (h *OpenAIHandler) handleOpenAINativeStreaming(w http.ResponseWriter, resp 
 	}
 }
 
-// serveOpenAIViaResponsesProvider handles CC requests that need to be sent
-// to a Responses API upstream. Translates CC→Responses on request and
-// Responses→CC on response.
-func (h *OpenAIHandler) serveOpenAIViaResponsesProvider(w http.ResponseWriter, r *http.Request,
+// buildResponsesRoute handles CC requests that need to be sent to a Responses
+// API upstream. Translates CC→Responses on request and Responses→CC on response.
+func (h *OpenAIHandler) buildResponsesRoute(w http.ResponseWriter, r *http.Request,
 	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
-	mapping *config.ModelMapping, prov provider.Provider, proxyKeyID string, start time.Time, attemptCount int64,
-	hasMoreFallbacks bool,
-) bool {
+	mapping *config.ModelMapping,
+) (*routePlan, bool) {
 	// Translate CC to Responses API format.
 	oaiReqCopy := *oaiReq
 	oaiReqCopy.Model = mapping.UpstreamModel
 	respReq, err := translate.OpenAIToResponses(&oaiReqCopy, mapping.UpstreamModel)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
-		return true
+		return nil, true
 	}
 
 	respBody, err := json.Marshal(respReq)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
-		return true
+		return nil, true
 	}
 
-	provReq := &provider.Request{
-		Body:        respBody,
-		Headers:     r.Header.Clone(),
-		Model:       mapping.UpstreamModel,
-		IsStreaming: oaiReq.Stream,
-	}
-
-	provResp, err := prov.SendRequest(r.Context(), provReq)
-	if err != nil {
-		if hasMoreFallbacks {
-			return false
-		}
-		latency := time.Since(start).Milliseconds()
-		errMsg := err.Error()
-		providerName := providerNameFor(prov)
-		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-			latency, rawBody, attemptCount, handlerResult{
-				Status: http.StatusBadGateway, Body: []byte(errMsg),
-				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
-			})
-		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
-		return true
-	}
-
-	if isFallbackStatus(provResp.StatusCode) {
-		if provResp.Stream != nil {
-			_ = provResp.Stream.Close()
-		}
-		if hasMoreFallbacks {
-			return false
-		}
-		latency := time.Since(start).Milliseconds()
-		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-		providerName := providerNameFor(prov)
-		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-			latency, rawBody, attemptCount, handlerResult{
-				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
-				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
-			})
-		writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "All upstream providers failed")
-		return true
-	}
-
-	providerName := providerNameFor(prov)
-	var result handlerResult
-	if oaiReq.Stream {
-		result = h.handleResponsesProviderStreamingToCC(w, provResp, mapping.ModelName)
-	} else {
-		result = h.handleResponsesProviderNonStreamingToCC(w, provResp, mapping.ModelName)
-	}
-	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
-		latency, rawBody, attemptCount, result)
-	return true
+	return &routePlan{
+		ProviderRequest: &provider.Request{
+			Body:        respBody,
+			Headers:     r.Header.Clone(),
+			Model:       mapping.UpstreamModel,
+			IsStreaming: oaiReq.Stream,
+		},
+		RequestBody: rawBody,
+		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			if oaiReq.Stream {
+				return h.handleResponsesProviderStreamingToCC(w, provResp, mapping.ModelName)
+			}
+			return h.handleResponsesProviderNonStreamingToCC(w, provResp, mapping.ModelName)
+		},
+	}, false
 }
 
 func (h *OpenAIHandler) handleResponsesProviderNonStreamingToCC(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
