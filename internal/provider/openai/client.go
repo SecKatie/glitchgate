@@ -7,22 +7,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
+	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 )
 
 // Client implements the provider.Provider interface for OpenAI-compatible APIs.
 type Client struct {
-	name       string
-	baseURL    string
-	authMode   string // "proxy_key" or "forward"
-	apiKey     string // used when authMode == "proxy_key"
-	apiType    string // "chat_completions" or "responses"
-	httpClient *http.Client
+	name           string
+	baseURL        string
+	authMode       string // "proxy_key" or "forward"
+	apiKey         string // used when authMode == "proxy_key"
+	apiType        string // "chat_completions" or "responses"
+	httpClient     *http.Client
+	requestTimeout time.Duration
 }
 
 // NewClient creates an OpenAI provider client.
@@ -31,13 +35,19 @@ func NewClient(name, baseURL, authMode, apiKey, apiType string) *Client {
 		apiType = APITypeChatCompletions
 	}
 	return &Client{
-		name:       name,
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		authMode:   authMode,
-		apiKey:     apiKey,
-		apiType:    apiType,
-		httpClient: &http.Client{},
+		name:           name,
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		authMode:       authMode,
+		apiKey:         apiKey,
+		apiType:        apiType,
+		httpClient:     provider.BuildHTTPClient(),
+		requestTimeout: config.DefaultUpstreamRequestTimeout,
 	}
+}
+
+// SetTimeouts overrides the default upstream request deadline.
+func (c *Client) SetTimeouts(requestTimeout time.Duration) {
+	c.requestTimeout = requestTimeout
 }
 
 // Name returns the provider's short identifier.
@@ -56,6 +66,16 @@ func (c *Client) APIFormat() string {
 
 // SendRequest dispatches a request to the OpenAI-compatible API.
 func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provider.Response, error) {
+	// For streaming requests, don't apply a request timeout that would cancel
+	// the context when this function returns. The stream continues to be read
+	// after SendRequest completes. Rely on ResponseHeaderTimeout for the initial
+	// connection, and let the stream remain open until the server completes.
+	if !req.IsStreaming {
+		var cancel context.CancelFunc
+		ctx, cancel = provider.ContextWithDefaultTimeout(ctx, c.requestTimeout)
+		defer cancel()
+	}
+
 	var endpoint string
 	switch c.apiType {
 	case APITypeResponses:
@@ -109,7 +129,11 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		return provResp, nil
 	}
 
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			slog.Warn("closing response body", "error", cerr)
+		}
+	}()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response from %s: %w", c.name, err)

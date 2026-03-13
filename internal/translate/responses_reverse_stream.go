@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -26,6 +27,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens int64
 	sentMessageStart := false
+	sentStop := false
 	messageID := ""
 	openBlocks := make(map[int]string)
 
@@ -46,6 +48,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+			slog.Warn("failed to parse Responses API SSE event type", "error", err, "data", data[:min(len(data), 256)])
 			continue
 		}
 
@@ -58,6 +61,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				} `json:"response"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.created event", "error", err)
 				continue
 			}
 			messageID = strings.TrimPrefix(event.Response.ID, "resp_")
@@ -88,6 +92,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				} `json:"item"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.output_item.added event", "error", err)
 				continue
 			}
 
@@ -108,6 +113,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				OutputIndex int `json:"output_index"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.content_part.added event", "error", err)
 				continue
 			}
 
@@ -129,6 +135,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				Delta       string `json:"delta"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.output_text.delta event", "error", err)
 				continue
 			}
 
@@ -163,6 +170,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				} `json:"part"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.reasoning_summary_part event", "error", err)
 				continue
 			}
 
@@ -194,6 +202,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				OutputIndex int `json:"output_index"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.content_part.done event", "error", err)
 				continue
 			}
 
@@ -213,6 +222,7 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				} `json:"item"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.output_item.done event", "error", err)
 				continue
 			}
 
@@ -234,16 +244,17 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 					} `json:"usage"`
 				} `json:"response"`
 			}
-			if err := json.Unmarshal([]byte(data), &event); err == nil {
-				if event.Response.Usage != nil {
-					inputTokens = event.Response.Usage.InputTokens
-					outputTokens = event.Response.Usage.OutputTokens
-					if event.Response.Usage.InputTokensDetails != nil {
-						cacheReadTokens = event.Response.Usage.InputTokensDetails.CachedTokens
-					}
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.completed event", "error", err)
+			} else if event.Response.Usage != nil {
+				inputTokens = event.Response.Usage.InputTokens
+				outputTokens = event.Response.Usage.OutputTokens
+				if event.Response.Usage.InputTokensDetails != nil {
+					cacheReadTokens = event.Response.Usage.InputTokensDetails.CachedTokens
 				}
 			}
 
+			sentStop = true
 			stopReason := "end_turn"
 			if err := writeAnthropicSSE(w, rc, &captured, "message_delta",
 				map[string]interface{}{
@@ -259,6 +270,10 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 			}
 		}
+	}
+
+	if sentMessageStart && !sentStop {
+		slog.Warn("upstream Responses API stream ended without response.completed")
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), scanner.Err()
@@ -282,6 +297,7 @@ func ResponsesSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	messageID := ""
 	var created int64
 	sentInitial := false
+	sentStop := false
 
 	scanner := newSSEScanner(upstream)
 	for scanner.Scan() {
@@ -309,6 +325,7 @@ func ResponsesSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+			slog.Warn("failed to parse Responses API SSE event type", "error", err, "data", data[:min(len(data), 256)])
 			continue
 		}
 
@@ -321,6 +338,7 @@ func ResponsesSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				} `json:"response"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.created event", "error", err)
 				continue
 			}
 			messageID = "chatcmpl-" + strings.TrimPrefix(event.Response.ID, "resp_")
@@ -343,6 +361,7 @@ func ResponsesSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				Delta string `json:"delta"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.output_text.delta event", "error", err)
 				continue
 			}
 
@@ -366,16 +385,17 @@ func ResponsesSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					} `json:"usage"`
 				} `json:"response"`
 			}
-			if err := json.Unmarshal([]byte(data), &event); err == nil {
-				if event.Response.Usage != nil {
-					inputTokens = event.Response.Usage.InputTokens
-					outputTokens = event.Response.Usage.OutputTokens
-					if event.Response.Usage.InputTokensDetails != nil {
-						cacheReadTokens = event.Response.Usage.InputTokensDetails.CachedTokens
-					}
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse response.completed event", "error", err)
+			} else if event.Response.Usage != nil {
+				inputTokens = event.Response.Usage.InputTokens
+				outputTokens = event.Response.Usage.OutputTokens
+				if event.Response.Usage.InputTokensDetails != nil {
+					cacheReadTokens = event.Response.Usage.InputTokensDetails.CachedTokens
 				}
 			}
 
+			sentStop = true
 			finishReason := "stop"
 			chunk := buildChunk(messageID, model, created, &ChatMessage{}, &finishReason)
 			if err := writeSSEChunk(w, rc, &captured, chunk); err != nil {
@@ -392,6 +412,10 @@ func ResponsesSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), flushErr
 			}
 		}
+	}
+
+	if sentInitial && !sentStop {
+		slog.Warn("upstream Responses API stream ended without response.completed")
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), scanner.Err()

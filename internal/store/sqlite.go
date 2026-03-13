@@ -206,8 +206,8 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		model_requested, model_upstream, input_tokens, output_tokens,
 		cache_creation_input_tokens, cache_read_input_tokens,
 		reasoning_tokens, latency_ms, status, request_body, response_body,
-		estimated_cost_usd, error_details, is_streaming, fallback_attempts
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		error_details, is_streaming, fallback_attempts
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	isStreaming := 0
 	if entry.IsStreaming {
@@ -236,7 +236,6 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		entry.Status,
 		entry.RequestBody,
 		entry.ResponseBody,
-		entry.EstimatedCostUSD,
 		entry.ErrorDetails,
 		isStreaming,
 		fallbackAttempts,
@@ -248,18 +247,46 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 	return nil
 }
 
+// PruneRequestLogs deletes request log rows older than before in bounded batches.
+func (s *SQLiteStore) PruneRequestLogs(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	const query = `
+		DELETE FROM request_logs
+		WHERE id IN (
+			SELECT id
+			FROM request_logs
+			WHERE timestamp < ?
+			ORDER BY timestamp ASC
+			LIMIT ?
+		)`
+
+	res, err := s.db.ExecContext(ctx, query, before, limit)
+	if err != nil {
+		return 0, fmt.Errorf("prune request logs: %w", err)
+	}
+
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("prune request logs rows affected: %w", err)
+	}
+
+	return deleted, nil
+}
+
 // --------------------------------------------------------------------------
 // Request log listing and detail
 // --------------------------------------------------------------------------
 
 // allowedSortColumns prevents SQL injection in ORDER BY clauses.
 var allowedSortColumns = map[string]string{ // #nosec G101 -- column allowlist, not credentials
-	"timestamp":          "rl.timestamp",
-	"latency_ms":         "rl.latency_ms",
-	"input_tokens":       "rl.input_tokens",
-	"output_tokens":      "rl.output_tokens",
-	"estimated_cost_usd": "rl.estimated_cost_usd",
-	"status":             "rl.status",
+	"timestamp":     "rl.timestamp",
+	"latency_ms":    "rl.latency_ms",
+	"input_tokens":  "rl.input_tokens",
+	"output_tokens": "rl.output_tokens",
+	"status":        "rl.status",
 }
 
 // ListRequestLogs returns a filtered, sorted, paginated list of log summaries
@@ -343,7 +370,7 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 			rl.cache_creation_input_tokens, rl.cache_read_input_tokens,
 			rl.reasoning_tokens,
 			rl.latency_ms, rl.status,
-			rl.estimated_cost_usd, rl.is_streaming, rl.error_details,
+			rl.is_streaming, rl.error_details,
 			rl.fallback_attempts
 		%s
 		%s
@@ -369,7 +396,7 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 			&l.CacheCreationInputTokens, &l.CacheReadInputTokens,
 			&l.ReasoningTokens,
 			&l.LatencyMs, &l.Status,
-			&l.EstimatedCostUSD, &isStreaming, &l.ErrorDetails,
+			&isStreaming, &l.ErrorDetails,
 			&l.FallbackAttempts,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan request log: %w", err)
@@ -398,7 +425,7 @@ func (s *SQLiteStore) GetRequestLog(ctx context.Context, id string) (*RequestLog
 			rl.cache_creation_input_tokens, rl.cache_read_input_tokens,
 			rl.reasoning_tokens,
 			rl.latency_ms, rl.status,
-			rl.estimated_cost_usd, rl.is_streaming, rl.error_details,
+			rl.is_streaming, rl.error_details,
 			rl.request_body, rl.response_body,
 			rl.fallback_attempts
 		FROM request_logs rl
@@ -417,7 +444,7 @@ func (s *SQLiteStore) GetRequestLog(ctx context.Context, id string) (*RequestLog
 		&d.CacheCreationInputTokens, &d.CacheReadInputTokens,
 		&d.ReasoningTokens,
 		&d.LatencyMs, &d.Status,
-		&d.EstimatedCostUSD, &isStreaming, &d.ErrorDetails,
+		&isStreaming, &d.ErrorDetails,
 		&d.RequestBody, &d.ResponseBody,
 		&d.FallbackAttempts,
 	); err != nil {
@@ -481,8 +508,9 @@ func (s *SQLiteStore) GetModelUsageSummary(ctx context.Context, modelName string
 	const query = `SELECT
 		COUNT(*),
 		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(cache_creation_input_tokens), 0),
+		COALESCE(SUM(cache_read_input_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
-		COALESCE(SUM(estimated_cost_usd), 0),
 		COALESCE(MAX(provider_name), ''),
 		COALESCE(MAX(model_upstream), '')
 	FROM request_logs
@@ -492,8 +520,9 @@ func (s *SQLiteStore) GetModelUsageSummary(ctx context.Context, modelName string
 	if err := s.db.QueryRowContext(ctx, query, modelName).Scan(
 		&summary.RequestCount,
 		&summary.InputTokens,
+		&summary.CacheCreationInputTokens,
+		&summary.CacheReadInputTokens,
 		&summary.OutputTokens,
-		&summary.TotalCostUSD,
 		&summary.ProviderName,
 		&summary.UpstreamModel,
 	); err != nil {
@@ -510,8 +539,9 @@ func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string
 		model_requested,
 		COUNT(*),
 		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(cache_creation_input_tokens), 0),
+		COALESCE(SUM(cache_read_input_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
-		COALESCE(SUM(estimated_cost_usd), 0),
 		COALESCE(MAX(provider_name), ''),
 		COALESCE(MAX(model_upstream), '')
 	FROM request_logs
@@ -527,7 +557,7 @@ func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string
 	for rows.Next() {
 		var modelName string
 		var summary ModelUsageSummary
-		if err := rows.Scan(&modelName, &summary.RequestCount, &summary.InputTokens, &summary.OutputTokens, &summary.TotalCostUSD, &summary.ProviderName, &summary.UpstreamModel); err != nil {
+		if err := rows.Scan(&modelName, &summary.RequestCount, &summary.InputTokens, &summary.CacheCreationInputTokens, &summary.CacheReadInputTokens, &summary.OutputTokens, &summary.ProviderName, &summary.UpstreamModel); err != nil {
 			return nil, fmt.Errorf("scan model usage summary: %w", err)
 		}
 		result[modelName] = &summary
@@ -603,7 +633,6 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
 
 	baseQuery := `SELECT
-		COALESCE(SUM(estimated_cost_usd), 0),
 		COALESCE(SUM(input_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
 		COALESCE(SUM(cache_creation_input_tokens), 0),
@@ -648,7 +677,7 @@ func (s *SQLiteStore) GetCostSummary(ctx context.Context, params CostParams) (*C
 
 	var cs CostSummary
 	if err := s.db.QueryRowContext(ctx, baseQuery, args...).Scan(
-		&cs.TotalCostUSD, &cs.TotalInputTokens, &cs.TotalOutputTokens,
+		&cs.TotalInputTokens, &cs.TotalOutputTokens,
 		&cs.TotalCacheCreationTokens, &cs.TotalCacheReadTokens, &cs.TotalRequests,
 	); err != nil {
 		return nil, fmt.Errorf("get cost summary: %w", err)
@@ -668,7 +697,6 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 	case "key":
 		query = `SELECT
 			pk.key_prefix || ' (' || pk.label || ')' AS group_name,
-			COALESCE(SUM(rl.estimated_cost_usd), 0),
 			COALESCE(SUM(rl.input_tokens), 0),
 			COALESCE(SUM(rl.output_tokens), 0),
 			COALESCE(SUM(rl.cache_creation_input_tokens), 0),
@@ -695,12 +723,11 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
 		}
-		query += " GROUP BY rl.proxy_key_id ORDER BY COALESCE(SUM(rl.estimated_cost_usd), 0) DESC"
+		query += " GROUP BY rl.proxy_key_id ORDER BY COUNT(*) DESC, group_name ASC"
 
 	case "provider":
 		query = `SELECT
 			rl.provider_name AS group_name,
-			COALESCE(SUM(rl.estimated_cost_usd), 0),
 			COALESCE(SUM(rl.input_tokens), 0),
 			COALESCE(SUM(rl.output_tokens), 0),
 			COALESCE(SUM(rl.cache_creation_input_tokens), 0),
@@ -731,12 +758,11 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
 		}
-		query += " GROUP BY rl.provider_name ORDER BY COALESCE(SUM(rl.estimated_cost_usd), 0) DESC"
+		query += " GROUP BY rl.provider_name ORDER BY COUNT(*) DESC, group_name ASC"
 
 	default: // "model" or unset
 		query = `SELECT
 			rl.model_requested AS group_name,
-			COALESCE(SUM(rl.estimated_cost_usd), 0),
 			COALESCE(SUM(rl.input_tokens), 0),
 			COALESCE(SUM(rl.output_tokens), 0),
 			COALESCE(SUM(rl.cache_creation_input_tokens), 0),
@@ -770,7 +796,7 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
 		}
-		query += " GROUP BY rl.model_requested ORDER BY COALESCE(SUM(rl.estimated_cost_usd), 0) DESC"
+		query += " GROUP BY rl.model_requested ORDER BY COUNT(*) DESC, group_name ASC"
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -782,7 +808,7 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 	var entries []CostBreakdownEntry
 	for rows.Next() {
 		var e CostBreakdownEntry
-		if err := rows.Scan(&e.Group, &e.CostUSD, &e.InputTokens, &e.OutputTokens, &e.CacheCreationTokens, &e.CacheReadTokens, &e.Requests); err != nil {
+		if err := rows.Scan(&e.Group, &e.InputTokens, &e.OutputTokens, &e.CacheCreationTokens, &e.CacheReadTokens, &e.Requests); err != nil {
 			return nil, fmt.Errorf("scan cost breakdown: %w", err)
 		}
 		entries = append(entries, e)
@@ -800,11 +826,20 @@ func (s *SQLiteStore) GetCostBreakdown(ctx context.Context, params CostParams) (
 // GetCostPricingGroups returns token totals grouped by exact provider/model
 // pair so pricing can be recomputed accurately in the web layer.
 func (s *SQLiteStore) GetCostPricingGroups(ctx context.Context, params CostParams) ([]CostPricingGroup, error) {
-	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
+	groupByKey := params.GroupBy == "key"
+	needsKeyJoin := groupByKey || params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
+
+	keyPrefixSelect := ""
+	keyPrefixGroupBy := ""
+	if groupByKey {
+		keyPrefixSelect = "\n\t\tCOALESCE(pk.key_prefix, ''),"
+		keyPrefixGroupBy = ", pk.key_prefix"
+	}
 
 	query := `SELECT
+		rl.model_requested,
 		rl.provider_name,
-		rl.model_upstream,
+		rl.model_upstream,` + keyPrefixSelect + `
 		COALESCE(SUM(rl.input_tokens), 0),
 		COALESCE(SUM(rl.output_tokens), 0),
 		COALESCE(SUM(rl.cache_creation_input_tokens), 0),
@@ -845,7 +880,8 @@ func (s *SQLiteStore) GetCostPricingGroups(ctx context.Context, params CostParam
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions are constant strings; user values bound via ? placeholders in args
 	}
-	query += " GROUP BY rl.provider_name, rl.model_upstream ORDER BY rl.provider_name, rl.model_upstream"
+	query += " GROUP BY rl.model_requested, rl.provider_name, rl.model_upstream" + keyPrefixGroupBy +
+		" ORDER BY rl.model_requested, rl.provider_name, rl.model_upstream" + keyPrefixGroupBy
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -856,15 +892,31 @@ func (s *SQLiteStore) GetCostPricingGroups(ctx context.Context, params CostParam
 	var groups []CostPricingGroup
 	for rows.Next() {
 		var group CostPricingGroup
-		if err := rows.Scan(
-			&group.ProviderName,
-			&group.ModelUpstream,
-			&group.InputTokens,
-			&group.OutputTokens,
-			&group.CacheCreationTokens,
-			&group.CacheReadTokens,
-		); err != nil {
-			return nil, fmt.Errorf("scan cost pricing group: %w", err)
+		var scanErr error
+		if groupByKey {
+			scanErr = rows.Scan(
+				&group.ModelRequested,
+				&group.ProviderName,
+				&group.ModelUpstream,
+				&group.ProxyKeyPrefix,
+				&group.InputTokens,
+				&group.OutputTokens,
+				&group.CacheCreationTokens,
+				&group.CacheReadTokens,
+			)
+		} else {
+			scanErr = rows.Scan(
+				&group.ModelRequested,
+				&group.ProviderName,
+				&group.ModelUpstream,
+				&group.InputTokens,
+				&group.OutputTokens,
+				&group.CacheCreationTokens,
+				&group.CacheReadTokens,
+			)
+		}
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan cost pricing group: %w", scanErr)
 		}
 		groups = append(groups, group)
 	}
@@ -892,7 +944,6 @@ func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) 
 	dateExpr := fmt.Sprintf("SUBSTR(datetime(SUBSTR(CAST(rl.timestamp AS TEXT), 1, 19), '%+d seconds'), 1, 10)", params.TzOffsetSeconds)
 	query := fmt.Sprintf(`SELECT
 		%s AS date,
-		COALESCE(SUM(rl.estimated_cost_usd), 0),
 		COUNT(*)
 	FROM request_logs rl`, dateExpr) // #nosec G201
 
@@ -941,7 +992,7 @@ func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) 
 	var entries []CostTimeseriesEntry
 	for rows.Next() {
 		var e CostTimeseriesEntry
-		if err := rows.Scan(&e.Date, &e.CostUSD, &e.Requests); err != nil {
+		if err := rows.Scan(&e.Date, &e.Requests); err != nil {
 			return nil, fmt.Errorf("scan cost timeseries: %w", err)
 		}
 		entries = append(entries, e)
@@ -958,8 +1009,7 @@ func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) 
 
 func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params CostParams, needsKeyJoin bool) ([]CostTimeseriesEntry, error) {
 	query := `SELECT
-		rl.timestamp,
-		COALESCE(rl.estimated_cost_usd, 0)
+		rl.timestamp
 	FROM request_logs rl`
 
 	if needsKeyJoin {
@@ -1004,17 +1054,11 @@ func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params 
 	}
 	defer func() { _ = rows.Close() }()
 
-	type bucket struct {
-		costUSD  float64
-		requests int64
-	}
-
-	buckets := make(map[string]bucket)
+	buckets := make(map[string]int64)
 	var dates []string
 	for rows.Next() {
 		var timestamp time.Time
-		var cost float64
-		if err := rows.Scan(&timestamp, &cost); err != nil {
+		if err := rows.Scan(&timestamp); err != nil {
 			return nil, fmt.Errorf("scan cost timeseries: %w", err)
 		}
 
@@ -1022,10 +1066,7 @@ func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params 
 		if _, ok := buckets[date]; !ok {
 			dates = append(dates, date)
 		}
-		entry := buckets[date]
-		entry.costUSD += cost
-		entry.requests++
-		buckets[date] = entry
+		buckets[date]++
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate cost timeseries: %w", err)
@@ -1033,11 +1074,9 @@ func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params 
 
 	entries := make([]CostTimeseriesEntry, 0, len(dates))
 	for _, date := range dates {
-		entry := buckets[date]
 		entries = append(entries, CostTimeseriesEntry{
 			Date:     date,
-			CostUSD:  entry.costUSD,
-			Requests: entry.requests,
+			Requests: buckets[date],
 		})
 	}
 	if entries == nil {

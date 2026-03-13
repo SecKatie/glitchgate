@@ -71,7 +71,7 @@
       data-prov="{{if .IsVirtual}}virtual{{else}}{{.ProviderName}} {{.ProviderType}}{{end}}"
       data-input="{{if .HasPricing}}{{.Pricing.InputPerMillion}}{{else}}-1{{end}}"
       data-output="{{if .HasPricing}}{{.Pricing.OutputPerMillion}}{{else}}-1{{end}}"
-      data-spend="{{.TotalSpendUSD}}"
+      data-spend="{{if .HasPricing}}{{.TotalSpendUSD}}{{else}}-1{{end}}"
       {{if .IsUnconfigured}}style="color:var(--pico-muted-color)"{{end}}
     >
       <td>
@@ -83,7 +83,7 @@
       </td>
       <td>{{if .HasPricing}}{{printf "%.4f" .Pricing.InputPerMillion}}{{else}}—{{end}}</td>
       <td>{{if .HasPricing}}{{printf "%.4f" .Pricing.OutputPerMillion}}{{else}}—{{end}}</td>
-      <td class="cost">${{printf "%.4f" .TotalSpendUSD}}</td>
+      <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}—{{end}}</td>
     </tr>
     {{end}}
   </tbody>

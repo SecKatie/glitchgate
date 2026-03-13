@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -59,6 +60,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 	created := time.Now().Unix()
 	messageID := ""
 	sentInitial := false
+	sentStop := false
 	thinkingBlockIndices := make(map[int]bool)
 
 	scanner := newSSEScanner(upstream)
@@ -76,6 +78,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+			slog.Warn("failed to parse Anthropic SSE event type", "error", err, "data", data[:min(len(data), 256)])
 			continue
 		}
 
@@ -83,6 +86,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 		case "message_start":
 			var event anthropic.MessageStartEvent
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse message_start event", "error", err)
 				continue
 			}
 			messageID = "chatcmpl-" + event.Message.ID
@@ -107,15 +111,16 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 		case "content_block_start":
 			// Track thinking blocks by index so we can skip their deltas.
 			var cbEvent anthropic.ContentBlockStartEvent
-			if err := json.Unmarshal([]byte(data), &cbEvent); err == nil {
-				if cbEvent.ContentBlock.Type == "thinking" {
-					thinkingBlockIndices[cbEvent.Index] = true
-				}
+			if err := json.Unmarshal([]byte(data), &cbEvent); err != nil {
+				slog.Warn("failed to parse content_block_start event", "error", err)
+			} else if cbEvent.ContentBlock.Type == "thinking" {
+				thinkingBlockIndices[cbEvent.Index] = true
 			}
 
 		case "content_block_delta":
 			var event anthropic.ContentBlockDeltaEvent
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse content_block_delta event", "error", err)
 				continue
 			}
 
@@ -153,6 +158,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 		case "message_delta":
 			var event anthropic.MessageDeltaEvent
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				slog.Warn("failed to parse message_delta event", "error", err)
 				continue
 			}
 
@@ -167,6 +173,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			}
 
 		case "message_stop":
+			sentStop = true
 			// Write the [DONE] sentinel.
 			done := "data: [DONE]\n\n"
 			captured.WriteString(done)
@@ -180,6 +187,10 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 		case "ping":
 			// Ignore ping events.
 		}
+	}
+
+	if sentInitial && !sentStop {
+		slog.Warn("upstream Anthropic stream ended without message_stop")
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), scanner.Err()

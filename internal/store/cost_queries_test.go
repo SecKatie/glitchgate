@@ -415,8 +415,8 @@ func TestProviderGroupFiltersApplyAcrossCostQueries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pricingGroups, 4)
 	require.Equal(t, "openai", pricingGroups[0].ProviderName)
-	require.Equal(t, "openai_responses:api.openai.com", pricingGroups[2].ProviderName)
-	require.Equal(t, "openai_responses:chatgpt.com", pricingGroups[3].ProviderName)
+	require.Equal(t, "openai_responses:chatgpt.com", pricingGroups[2].ProviderName)
+	require.Equal(t, "openai_responses:api.openai.com", pricingGroups[3].ProviderName)
 
 	timeseries, err := st.GetCostTimeseries(ctx, params)
 	require.NoError(t, err)

@@ -11,7 +11,7 @@
     <div class="cost-headline">
         <div class="cost-headline-item">
             <div class="cost-headline-value">
-                {{if $.Cost.PricingKnown}}${{printf "%.6f" (deref $.Cost.TotalCostUSD)}}{{else if .EstimatedCostUSD}}${{printf "%.6f" (deref .EstimatedCostUSD)}}{{else}}Unknown{{end}}
+                {{if $.Cost.PricingKnown}}${{printf "%.6f" (deref $.Cost.TotalCostUSD)}}{{else}}Unknown{{end}}
             </div>
             <div class="cost-headline-label">Estimated Cost</div>
         </div>

@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 )
 
@@ -20,19 +22,21 @@ type Client struct {
 	name     string
 	tokenDir string
 
-	mu           sync.Mutex
-	githubToken  *GitHubToken
-	sessionToken *SessionToken
-	httpClient   *http.Client
+	mu             sync.Mutex
+	githubToken    *GitHubToken
+	sessionToken   *SessionToken
+	httpClient     *http.Client
+	requestTimeout time.Duration
 }
 
 // NewClient creates a Copilot provider client.
 // It reads stored tokens from tokenDir immediately.
 func NewClient(name, tokenDir string) *Client {
 	c := &Client{
-		name:       name,
-		tokenDir:   tokenDir,
-		httpClient: &http.Client{},
+		name:           name,
+		tokenDir:       tokenDir,
+		httpClient:     provider.BuildHTTPClient(),
+		requestTimeout: config.DefaultUpstreamRequestTimeout,
 	}
 
 	// Attempt to load cached tokens at construction time.
@@ -46,6 +50,11 @@ func NewClient(name, tokenDir string) *Client {
 	return c
 }
 
+// SetTimeouts overrides the default upstream request deadline.
+func (c *Client) SetTimeouts(requestTimeout time.Duration) {
+	c.requestTimeout = requestTimeout
+}
+
 // Name returns the provider's short identifier.
 func (c *Client) Name() string { return c.name }
 
@@ -57,6 +66,17 @@ func (c *Client) APIFormat() string { return "openai" }
 
 // SendRequest dispatches a request to the GitHub Copilot chat completions API.
 func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provider.Response, error) {
+	// For non-streaming requests apply the configured deadline. Streaming
+	// requests must not have a context deadline: the transport's
+	// ResponseHeaderTimeout guards the initial connection phase and, once
+	// headers are received, the stream stays open until the server finishes
+	// or the client disconnects.
+	if !req.IsStreaming {
+		var cancel context.CancelFunc
+		ctx, cancel = provider.ContextWithDefaultTimeout(ctx, c.requestTimeout)
+		defer cancel()
+	}
+
 	sessionToken, apiBase, err := c.getSessionToken(ctx)
 	if err != nil {
 		return nil, err
@@ -92,7 +112,11 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		return provResp, nil
 	}
 
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			slog.Warn("closing response body", "error", cerr)
+		}
+	}()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response from %s: %w", c.name, err)

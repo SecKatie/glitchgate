@@ -44,6 +44,33 @@ type AggregateCostBreakdown struct {
 	CacheWriteCostUSD float64
 	CacheReadCostUSD  float64
 	OutputCostUSD     float64
+	TotalCostUSD      float64
+}
+
+// LogRowWithCost wraps a RequestLogSummary with a computed estimated cost.
+// EstimatedCostUSD is nil when pricing is not configured for the model.
+type LogRowWithCost struct {
+	store.RequestLogSummary
+	EstimatedCostUSD *float64
+}
+
+// enrichLogs computes estimated costs for a slice of log summaries.
+func enrichLogs(logs []store.RequestLogSummary, calc *pricing.Calculator) []LogRowWithCost {
+	rows := make([]LogRowWithCost, len(logs))
+	for i, log := range logs {
+		row := LogRowWithCost{RequestLogSummary: log}
+		if calc != nil {
+			if entry, ok := calc.Lookup(log.ProviderName, log.ModelUpstream); ok {
+				cost := float64(log.InputTokens)*entry.InputPerMillion/1_000_000 +
+					float64(log.CacheCreationInputTokens)*entry.CacheWritePerMillion/1_000_000 +
+					float64(log.CacheReadInputTokens)*entry.CacheReadPerMillion/1_000_000 +
+					float64(log.OutputTokens)*entry.OutputPerMillion/1_000_000
+				row.EstimatedCostUSD = &cost
+			}
+		}
+		rows[i] = row
+	}
+	return rows
 }
 
 // computeCostBreakdown computes per-category token costs from a log entry
@@ -90,6 +117,50 @@ func computeCostBreakdown(log *store.RequestLogDetail, calc *pricing.Calculator)
 	return cb
 }
 
+// buildBreakdownCosts returns a map from breakdown group key to estimated cost USD.
+// The key dimension depends on groupBy: "model" uses model_requested, "provider" uses the
+// display provider name (via providerNames), "key" uses proxy_key_prefix.
+// Models/providers/keys without pricing data are omitted.
+func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculator, groupBy string, providerNames map[string]string) map[string]float64 {
+	if calc == nil || len(groups) == 0 {
+		return nil
+	}
+	costs := make(map[string]float64)
+	for _, group := range groups {
+		entry, ok := calc.Lookup(group.ProviderName, group.ModelUpstream)
+		if !ok {
+			continue
+		}
+		cost := float64(group.InputTokens)*entry.InputPerMillion/1_000_000 +
+			float64(group.CacheCreationTokens)*entry.CacheWritePerMillion/1_000_000 +
+			float64(group.CacheReadTokens)*entry.CacheReadPerMillion/1_000_000 +
+			float64(group.OutputTokens)*entry.OutputPerMillion/1_000_000
+
+		var key string
+		switch groupBy {
+		case "provider":
+			key = group.ProviderName
+			if providerNames != nil {
+				if name, ok := providerNames[group.ProviderName]; ok && name != "" {
+					key = name
+				}
+			}
+		case "key":
+			key = group.ProxyKeyPrefix
+		default: // "model"
+			key = group.ModelRequested
+		}
+		if key == "" {
+			continue
+		}
+		costs[key] += cost
+	}
+	if len(costs) == 0 {
+		return nil
+	}
+	return costs
+}
+
 // computeAggregateCostBreakdown computes per-category costs across many logs by
 // grouping token totals by exact provider/model pair before applying pricing.
 // If any non-zero usage group lacks pricing, PricingKnown is false.
@@ -117,6 +188,7 @@ func computeAggregateCostBreakdown(groups []store.CostPricingGroup, calc *pricin
 	}
 
 	cb.TotalInputCostUSD = cb.InputCostUSD + cb.CacheWriteCostUSD + cb.CacheReadCostUSD
+	cb.TotalCostUSD = cb.TotalInputCostUSD + cb.OutputCostUSD
 	cb.PricingKnown = cb.HasAnyPricing && !hasUnknownUsage
 	cb.PartialPricing = cb.HasAnyPricing && hasUnknownUsage
 	return cb

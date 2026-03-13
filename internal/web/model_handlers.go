@@ -130,10 +130,18 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Populate spend from the usage map (O(1) per item, no extra DB calls).
+	// Populate spend from the usage map, computing cost from pricing when available.
 	for i := range items {
-		if u, ok := usageMap[items[i].ModelName]; ok {
-			items[i].TotalSpendUSD = u.TotalCostUSD
+		u, ok := usageMap[items[i].ModelName]
+		if !ok {
+			continue
+		}
+		if items[i].HasPricing && items[i].Pricing != nil {
+			p := items[i].Pricing
+			items[i].TotalSpendUSD = float64(u.InputTokens)*p.InputPerMillion/1_000_000 +
+				float64(u.CacheCreationInputTokens)*p.CacheWritePerMillion/1_000_000 +
+				float64(u.CacheReadInputTokens)*p.CacheReadPerMillion/1_000_000 +
+				float64(u.OutputTokens)*p.OutputPerMillion/1_000_000
 		}
 	}
 
@@ -199,6 +207,14 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 	} else if found == nil && usage.ProviderName != "" {
 		view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providers, h.calc, usage.ProviderName, usage.UpstreamModel)
 		view.UpstreamModel = usage.UpstreamModel
+	}
+
+	if view.HasPricing && view.Pricing != nil {
+		p := view.Pricing
+		usage.TotalCostUSD = float64(usage.InputTokens)*p.InputPerMillion/1_000_000 +
+			float64(usage.CacheCreationInputTokens)*p.CacheWritePerMillion/1_000_000 +
+			float64(usage.CacheReadInputTokens)*p.CacheReadPerMillion/1_000_000 +
+			float64(usage.OutputTokens)*p.OutputPerMillion/1_000_000
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -15,6 +15,11 @@ Routes requests to upstream providers, logs all traffic to a local SQLite databa
 - Cache token logging (Anthropic prompt caching)
 - Cost calculation for a wide range of models (Anthropic, OpenAI, Gemini, Copilot)
 - Embedded web UI for browsing logs and usage (protected by a master key)
+- Multi-modal support: image content in requests (images, diagrams) across all providers
+- Request security: validation, sanitization, and size limits for client requests
+- Provider timeouts: configurable per-provider connection and request deadlines
+- Rate limiting: per-key request throttling with configurable limits
+- Cost query performance: optimized indexing for quick spend lookups
 
 ## Usage
 
@@ -24,6 +29,14 @@ make build
 ```
 
 See `make help` or the `cmd/` directory for all available commands. See [docs/configuration.md](docs/configuration.md) for full configuration reference including GitHub Copilot setup.
+
+## Recent Changes
+
+- **Security hardening**: Request validation, input sanitization, timeout support, rate limiting
+- **Cost query performance**: New indexes for spend lookups and log pruning
+- **Multi-modal support**: Image content handling across all providers
+- **Request size limits**: Configurable maximum request body sizes per provider
+- **Provider deadlines**: Configurable connection and request timeouts
 
 ## Development
 

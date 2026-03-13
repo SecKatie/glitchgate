@@ -8,7 +8,7 @@
     <td>{{sumTokens .InputTokens .CacheCreationInputTokens .CacheReadInputTokens}}</td>
     <td>{{.OutputTokens}}</td>
     <td>{{.LatencyMs}}ms</td>
-    <td class="cost">{{if .EstimatedCostUSD}}${{printf "%.4f" (deref .EstimatedCostUSD)}}{{else}}<span class="cost-unknown" title="No pricing data for this model">n/a</span>{{end}}</td>
+    <td class="cost">{{if .EstimatedCostUSD}}${{printf "%.6f" (deref .EstimatedCostUSD)}}{{else}}<span class="cost-unknown" title="No pricing configured for this model">n/a</span>{{end}}</td>
     <td><a href="/ui/logs/{{.ID}}">View</a></td>
 </tr>
 {{else}}

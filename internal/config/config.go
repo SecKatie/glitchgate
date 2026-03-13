@@ -9,20 +9,35 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
 
 // Config holds the top-level application configuration.
 type Config struct {
-	MasterKey    string           `mapstructure:"master_key"    yaml:"master_key"`
-	Listen       string           `mapstructure:"listen"        yaml:"listen"`
-	DatabasePath string           `mapstructure:"database_path" yaml:"database_path"`
-	LogPath      string           `mapstructure:"log_path"      yaml:"log_path"` // Path to log file; default "glitchgate.log"
-	Timezone     string           `mapstructure:"timezone"      yaml:"timezone"` // IANA timezone name, e.g. "America/New_York"
-	Providers    []ProviderConfig `mapstructure:"providers"  yaml:"providers"`
-	ModelList    []ModelMapping   `mapstructure:"model_list" yaml:"model_list"`
-	OIDC         *OIDCConfig      `mapstructure:"oidc"       yaml:"oidc"`
+	MasterKey                 string           `mapstructure:"master_key"    yaml:"master_key"`
+	Listen                    string           `mapstructure:"listen"        yaml:"listen"`
+	DatabasePath              string           `mapstructure:"database_path" yaml:"database_path"`
+	LogPath                   string           `mapstructure:"log_path"      yaml:"log_path"` // Path to log file; default "glitchgate.log"
+	Timezone                  string           `mapstructure:"timezone"      yaml:"timezone"` // IANA timezone name, e.g. "America/New_York"
+	ProxyMaxBodyBytes         int              `mapstructure:"proxy_max_body_bytes"          yaml:"proxy_max_body_bytes"`
+	UpstreamRequestTimeout    time.Duration    `mapstructure:"upstream_request_timeout"      yaml:"upstream_request_timeout"`
+	AsyncLogBufferSize        int              `mapstructure:"async_log_buffer_size"         yaml:"async_log_buffer_size"`
+	AsyncLogWriteTimeout      time.Duration    `mapstructure:"async_log_write_timeout"       yaml:"async_log_write_timeout"`
+	LoginRateLimitPerMinute   int              `mapstructure:"login_rate_limit_per_minute"   yaml:"login_rate_limit_per_minute"`
+	LoginRateLimitBurst       int              `mapstructure:"login_rate_limit_burst"        yaml:"login_rate_limit_burst"`
+	ProxyRateLimitPerMinute   int              `mapstructure:"proxy_rate_limit_per_minute"   yaml:"proxy_rate_limit_per_minute"`
+	ProxyRateLimitBurst       int              `mapstructure:"proxy_rate_limit_burst"        yaml:"proxy_rate_limit_burst"`
+	ProxyIPRateLimitPerMinute int              `mapstructure:"proxy_ip_rate_limit_per_minute" yaml:"proxy_ip_rate_limit_per_minute"`
+	ProxyIPRateLimitBurst     int              `mapstructure:"proxy_ip_rate_limit_burst"     yaml:"proxy_ip_rate_limit_burst"`
+	RequestLogRetention       time.Duration    `mapstructure:"request_log_retention"         yaml:"request_log_retention"`
+	RequestLogPruneInterval   time.Duration    `mapstructure:"request_log_prune_interval"    yaml:"request_log_prune_interval"`
+	RequestLogPruneBatchSize  int              `mapstructure:"request_log_prune_batch_size"  yaml:"request_log_prune_batch_size"`
+	RequestLogBodyMaxBytes    int              `mapstructure:"request_log_body_max_bytes"    yaml:"request_log_body_max_bytes"`
+	Providers                 []ProviderConfig `mapstructure:"providers"  yaml:"providers"`
+	ModelList                 []ModelMapping   `mapstructure:"model_list" yaml:"model_list"`
+	OIDC                      *OIDCConfig      `mapstructure:"oidc"       yaml:"oidc"`
 
 	// resolvedChains is populated at Load time. It maps every non-wildcard model
 	// name to its ordered dispatch slice (one entry for direct models, multiple
@@ -30,6 +45,25 @@ type Config struct {
 	// FindModel falls through to the wildcard scan for those.
 	resolvedChains map[string][]ModelMapping
 }
+
+// Default operational limits and retention settings used when config values
+// are omitted or invalid.
+const (
+	DefaultProxyMaxBodyBytes         = 4 << 20
+	DefaultUpstreamRequestTimeout    = 5 * time.Minute
+	DefaultAsyncLogBufferSize        = 1000
+	DefaultAsyncLogWriteTimeout      = 5 * time.Second
+	DefaultLoginRateLimitPerMinute   = 10
+	DefaultLoginRateLimitBurst       = 5
+	DefaultProxyRateLimitPerMinute   = 120
+	DefaultProxyRateLimitBurst       = 30
+	DefaultProxyIPRateLimitPerMinute = 240
+	DefaultProxyIPRateLimitBurst     = 60
+	DefaultRequestLogRetention       = 30 * 24 * time.Hour
+	DefaultRequestLogPruneInterval   = time.Hour
+	DefaultRequestLogPruneBatchSize  = 1000
+	DefaultRequestLogBodyMaxBytes    = 64 << 10
+)
 
 // OIDCConfig holds the OIDC provider configuration.
 type OIDCConfig struct {
@@ -110,6 +144,20 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("database_path", "glitchgate.db")
 	v.SetDefault("log_path", "glitchgate.log")
 	v.SetDefault("timezone", "UTC")
+	v.SetDefault("proxy_max_body_bytes", DefaultProxyMaxBodyBytes)
+	v.SetDefault("upstream_request_timeout", DefaultUpstreamRequestTimeout)
+	v.SetDefault("async_log_buffer_size", DefaultAsyncLogBufferSize)
+	v.SetDefault("async_log_write_timeout", DefaultAsyncLogWriteTimeout)
+	v.SetDefault("login_rate_limit_per_minute", DefaultLoginRateLimitPerMinute)
+	v.SetDefault("login_rate_limit_burst", DefaultLoginRateLimitBurst)
+	v.SetDefault("proxy_rate_limit_per_minute", DefaultProxyRateLimitPerMinute)
+	v.SetDefault("proxy_rate_limit_burst", DefaultProxyRateLimitBurst)
+	v.SetDefault("proxy_ip_rate_limit_per_minute", DefaultProxyIPRateLimitPerMinute)
+	v.SetDefault("proxy_ip_rate_limit_burst", DefaultProxyIPRateLimitBurst)
+	v.SetDefault("request_log_retention", DefaultRequestLogRetention)
+	v.SetDefault("request_log_prune_interval", DefaultRequestLogPruneInterval)
+	v.SetDefault("request_log_prune_batch_size", DefaultRequestLogPruneBatchSize)
+	v.SetDefault("request_log_body_max_bytes", DefaultRequestLogBodyMaxBytes)
 	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
 
 	// Read config file (not an error if none exists).

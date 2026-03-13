@@ -3,6 +3,7 @@
 package proxy
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,10 +46,17 @@ func (l *AsyncLogger) logEntry(
 		ReasoningTokens:          r.ReasoningTokens,
 		LatencyMs:                latencyMs,
 		Status:                   r.Status,
-		RequestBody:              RedactRequestBody(requestBody),
-		ResponseBody:             string(r.Body),
+		RequestBody:              truncateLoggedBody(RedactRequestBody(requestBody), l.bodyMaxBytes),
+		ResponseBody:             truncateLoggedBody(string(r.Body), l.bodyMaxBytes),
 		ErrorDetails:             r.ErrDetails,
 		IsStreaming:              r.IsStreaming,
 		FallbackAttempts:         attemptCount,
 	})
+}
+
+func truncateLoggedBody(body string, maxBytes int) string {
+	if maxBytes <= 0 || len(body) <= maxBytes {
+		return body
+	}
+	return fmt.Sprintf("%s\n[TRUNCATED original_bytes=%d]", body[:maxBytes], len(body))
 }

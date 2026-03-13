@@ -3,7 +3,7 @@
 <div class="summary-cards">
     <article class="summary-card">
         <div class="label">Total Cost</div>
-        <div class="value">${{printf "%.2f" .Summary.TotalCostUSD}}</div>
+        <div class="value">${{printf "%.2f" .TokenCosts.TotalCostUSD}}</div>
     </article>
     <article class="summary-card">
         <div class="label">Total Requests</div>
@@ -33,7 +33,7 @@
                 <td>Total Input</td>
                 <td class="token-detail-value">{{fmtTokens .TotalAllInputTokens}} <span class="token-detail-note">({{fmtPctInt64 .TotalAllInputTokens $grandTotalTokens}})</span></td>
                 <td class="token-detail-value token-detail-total-cost">
-                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.TotalInputCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.TotalInputCostUSD .Summary.TotalCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.TotalInputCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.TotalInputCostUSD .TokenCosts.TotalCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
                 </td>
             </tr>
             <tr>
@@ -65,7 +65,7 @@
                 <td>Output</td>
                 <td class="token-detail-value">{{fmtTokens .Summary.TotalOutputTokens}} <span class="token-detail-note">({{fmtPctInt64 .Summary.TotalOutputTokens $grandTotalTokens}})</span></td>
                 <td class="token-detail-value token-detail-total-cost">
-                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.OutputCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.OutputCostUSD .Summary.TotalCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.OutputCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.OutputCostUSD .TokenCosts.TotalCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
                 </td>
             </tr>
         </tbody>
@@ -83,13 +83,13 @@
 
 <!-- Daily cost chart -->
 {{if and .Timeseries (gt (len .Timeseries) 1)}}
-<h3>Daily Cost Trend</h3>
+<h3>Daily Request Trend</h3>
 <figure>
     <div class="bar-chart">
         {{range .Timeseries}}
-        <div class="bar-col" title="{{.Date}}: ${{printf "%.4f" .CostUSD}} ({{.Requests}} req)">
-            <div class="bar-val">${{printf "%.2f" .CostUSD}}</div>
-            <div class="bar" style="height: {{if gt $.MaxCost 0.0}}{{barPct .CostUSD $.MaxCost}}%{{else}}2px{{end}};"></div>
+        <div class="bar-col" title="{{.Date}}: {{.Requests}} req">
+            <div class="bar-val">{{.Requests}}</div>
+            <div class="bar" style="height: {{if gt $.MaxRequests 0.0}}{{barPct (toFloat64 .Requests) $.MaxRequests}}%{{else}}2px{{end}};"></div>
         </div>
         {{end}}
     </div>
@@ -109,26 +109,26 @@
     <thead>
         <tr>
             <th>{{if eq .GroupBy "key"}}API Key{{else if eq .GroupBy "provider"}}Provider{{else}}Model{{end}}</th>
-            <th>Cost</th>
-            <th>Cost (USD)</th>
+            <th></th>
             <th>Total Input Tokens</th>
             <th>Output Tokens</th>
             <th>Requests</th>
+            <th>Est. Cost</th>
         </tr>
     </thead>
     <tbody>
         {{range .Breakdown}}
         <tr>
-            <td class="mono">{{if and (eq $.GroupBy "provider") $.ProviderNames}}{{or (index $.ProviderNames .Group) .Group}}{{else}}{{.Group}}{{end}}</td>
+            <td class="mono">{{if and (eq $.GroupBy "provider") $.ProviderNames}}{{or (index $.ProviderNames .Group) .Group}}{{else if eq $.GroupBy "model"}}<a href="/ui/models/{{urlPathEscape .Group}}">{{.Group}}</a>{{else}}{{.Group}}{{end}}</td>
             <td>
                 <div class="breakdown-bar-cell">
-                    <span class="breakdown-bar" style="width: {{if gt $.MaxBreakdownCost 0.0}}{{barPct .CostUSD $.MaxBreakdownCost}}{{else}}0{{end}}px; min-width: 2px; max-width: 100px;"></span>
+                    <span class="breakdown-bar" style="width: {{if gt $.MaxBreakdownRequests 0.0}}{{barPct (toFloat64 .Requests) $.MaxBreakdownRequests}}{{else}}0{{end}}px; min-width: 2px; max-width: 100px;"></span>
                 </div>
             </td>
-            <td class="cost">${{printf "%.4f" .CostUSD}}</td>
             <td>{{fmtTokens (sumTokens .InputTokens .CacheCreationTokens .CacheReadTokens)}}</td>
             <td>{{fmtTokens .OutputTokens}}</td>
             <td>{{.Requests}}</td>
+            <td>{{$cost := index $.BreakdownCosts .Group}}{{if $cost}}${{printf "%.4f" $cost}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
         </tr>
         {{end}}
     </tbody>

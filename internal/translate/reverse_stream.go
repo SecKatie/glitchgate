@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -30,6 +31,7 @@ func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model strin
 	var captured bytes.Buffer
 	var inputTokens, outputTokens int64
 	sentMessageStart := false
+	sentDone := false
 	messageID := ""
 	finishReason := "end_turn"
 
@@ -99,12 +101,15 @@ func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model strin
 				map[string]interface{}{"type": "message_stop"}); err != nil {
 				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 			}
+
+			sentDone = true
 			continue
 		}
 
 		// Parse the OpenAI chunk.
 		var chunk ChatCompletionResponse
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			slog.Warn("failed to parse upstream SSE chunk", "error", err, "data", data[:min(len(data), 256)])
 			continue
 		}
 
@@ -222,6 +227,10 @@ func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model strin
 				}
 			}
 		}
+	}
+
+	if sentMessageStart && !sentDone {
+		slog.Warn("upstream OpenAI stream ended without [DONE] after message_start was sent")
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), scanner.Err()
