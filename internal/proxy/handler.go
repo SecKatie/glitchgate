@@ -4,7 +4,6 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -65,10 +64,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 
-	// Read the request body.
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+	body, ok := readRequestBodyWithLimit(w, r, h.cfg.ProxyMaxBodyBytes, "invalid_request_error", writeAnthropicError)
+	if !ok {
 		return
 	}
 
@@ -243,9 +240,10 @@ func (h *Handler) handleStreaming(w http.ResponseWriter, resp *provider.Response
 
 	var errDetails *string
 	if err != nil {
-		s := fmt.Sprintf("stream relay error: %v", err)
-		errDetails = &s
-		slog.Warn("stream relay error", "error", err)
+		errDetails = streamRelayErrorDetails(err)
+		if errDetails != nil {
+			slog.Warn("stream relay error", "error", err)
+		}
 	}
 
 	status := resp.StatusCode
@@ -393,9 +391,10 @@ func (h *Handler) handleOpenAIProviderStreaming(w http.ResponseWriter, resp *pro
 
 	var errDetails *string
 	if err != nil {
-		s := fmt.Sprintf("stream relay error: %v", err)
-		errDetails = &s
-		slog.Warn("stream relay error", "error", err)
+		errDetails = streamRelayErrorDetails(err)
+		if errDetails != nil {
+			slog.Warn("stream relay error", "error", err)
+		}
 	}
 
 	status := resp.StatusCode
@@ -579,9 +578,10 @@ func (h *Handler) handleResponsesProviderStreaming(w http.ResponseWriter, resp *
 
 	var errDetails *string
 	if err != nil {
-		s := fmt.Sprintf("stream relay error: %v", err)
-		errDetails = &s
-		slog.Warn("stream relay error", "error", err)
+		errDetails = streamRelayErrorDetails(err)
+		if errDetails != nil {
+			slog.Warn("stream relay error", "error", err)
+		}
 	}
 
 	status := resp.StatusCode

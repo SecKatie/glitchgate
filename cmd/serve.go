@@ -28,6 +28,7 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
 	openaiprov "codeberg.org/kglitchy/glitchgate/internal/provider/openai"
 	"codeberg.org/kglitchy/glitchgate/internal/proxy"
+	"codeberg.org/kglitchy/glitchgate/internal/ratelimit"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 	"codeberg.org/kglitchy/glitchgate/internal/web"
 )
@@ -68,30 +69,43 @@ func runServe(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 
+	requestTimeout := positiveDuration(cfg.UpstreamRequestTimeout, config.DefaultUpstreamRequestTimeout)
+	asyncLogBufferSize := positiveInt(cfg.AsyncLogBufferSize, config.DefaultAsyncLogBufferSize)
+	asyncLogWriteTimeout := positiveDuration(cfg.AsyncLogWriteTimeout, config.DefaultAsyncLogWriteTimeout)
+	requestLogBodyMaxBytes := positiveInt(cfg.RequestLogBodyMaxBytes, config.DefaultRequestLogBodyMaxBytes)
+
 	// Build provider map from config.
 	providers := make(map[string]provider.Provider)
 	for _, pc := range cfg.Providers {
 		switch pc.Type {
 		case "anthropic":
-			providers[pc.Name] = anthropic.NewClient(pc.Name, pc.BaseURL, pc.AuthMode, pc.APIKey, pc.DefaultVersion)
+			client := anthropic.NewClient(pc.Name, pc.BaseURL, pc.AuthMode, pc.APIKey, pc.DefaultVersion)
+			client.SetTimeouts(requestTimeout)
+			providers[pc.Name] = client
 		case "github_copilot":
 			tokenDir := pc.TokenDir
 			if tokenDir == "" {
 				tokenDir = copilot.DefaultTokenDir()
 			}
-			providers[pc.Name] = copilot.NewClient(pc.Name, tokenDir)
+			client := copilot.NewClient(pc.Name, tokenDir)
+			client.SetTimeouts(requestTimeout)
+			providers[pc.Name] = client
 		case "openai":
 			baseURL := pc.BaseURL
 			if baseURL == "" {
 				baseURL = "https://api.openai.com"
 			}
-			providers[pc.Name] = openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
+			client := openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
+			client.SetTimeouts(requestTimeout)
+			providers[pc.Name] = client
 		case "openai_responses":
 			baseURL := pc.BaseURL
 			if baseURL == "" {
 				baseURL = "https://api.openai.com"
 			}
-			providers[pc.Name] = openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
+			client := openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
+			client.SetTimeouts(requestTimeout)
+			providers[pc.Name] = client
 		default:
 			return fmt.Errorf("unsupported provider type %q for provider %q", pc.Type, pc.Name)
 		}
@@ -149,7 +163,13 @@ func runServe(_ *cobra.Command, _ []string) error {
 	calc := pricing.NewCalculator(pricingMap)
 
 	// Create async logger.
-	asyncLogger := proxy.NewAsyncLogger(st, 1000)
+	asyncLogger := proxy.NewAsyncLoggerWithOptions(st, proxy.AsyncLoggerOptions{
+		BufferSize:      asyncLogBufferSize,
+		WriteTimeout:    asyncLogWriteTimeout,
+		EnqueueTimeout:  100 * time.Millisecond,
+		SummaryInterval: time.Minute,
+		BodyMaxBytes:    requestLogBodyMaxBytes,
+	})
 	defer asyncLogger.Close()
 
 	// Load display timezone (default UTC).
@@ -168,11 +188,30 @@ func runServe(_ *cobra.Command, _ []string) error {
 	r := chi.NewRouter()
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Recoverer)
+	r.Use(web.SecurityHeadersMiddleware)
 	r.Use(warnOnNotFound)
+
+	loginRateLimiter := ratelimit.New(
+		positiveInt(cfg.LoginRateLimitPerMinute, config.DefaultLoginRateLimitPerMinute),
+		positiveInt(cfg.LoginRateLimitBurst, config.DefaultLoginRateLimitBurst),
+		15*time.Minute,
+	)
+	proxyKeyRateLimiter := ratelimit.New(
+		positiveInt(cfg.ProxyRateLimitPerMinute, config.DefaultProxyRateLimitPerMinute),
+		positiveInt(cfg.ProxyRateLimitBurst, config.DefaultProxyRateLimitBurst),
+		15*time.Minute,
+	)
+	proxyIPRateLimiter := ratelimit.New(
+		positiveInt(cfg.ProxyIPRateLimitPerMinute, config.DefaultProxyIPRateLimitPerMinute),
+		positiveInt(cfg.ProxyIPRateLimitBurst, config.DefaultProxyIPRateLimitBurst),
+		15*time.Minute,
+	)
 
 	// Proxy routes — authenticated with proxy API key.
 	r.Route("/v1", func(r chi.Router) {
+		r.Use(proxy.IPRateLimitMiddleware(proxyIPRateLimiter))
 		r.Use(proxy.AuthMiddleware(st))
+		r.Use(proxy.KeyRateLimitMiddleware(proxyKeyRateLimiter))
 		r.Post("/messages", proxyHandler.ServeHTTP)
 		r.Post("/chat/completions", openaiHandler.ServeHTTP)
 		r.Post("/responses", responsesHandler.ServeHTTP)
@@ -210,14 +249,53 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	// Start background cleanup goroutine for expired sessions and OIDC state.
 	go func() {
+		cleanupTicker := time.NewTicker(time.Hour)
+		defer cleanupTicker.Stop()
+
+		retention := cfg.RequestLogRetention
+		if retention < 0 {
+			retention = config.DefaultRequestLogRetention
+		}
+
+		pruneInterval := cfg.RequestLogPruneInterval
+		if retention > 0 {
+			pruneInterval = positiveDuration(pruneInterval, config.DefaultRequestLogPruneInterval)
+		}
+
+		var pruneTicker *time.Ticker
+		if retention > 0 {
+			pruneTicker = time.NewTicker(pruneInterval)
+			defer pruneTicker.Stop()
+		}
+
 		for {
-			time.Sleep(time.Hour)
-			ctx := context.Background()
-			if err := st.CleanupExpiredSessions(ctx); err != nil {
-				slog.Warn("cleanup sessions", "error", err)
-			}
-			if err := st.CleanupExpiredOIDCState(ctx); err != nil {
-				slog.Warn("cleanup oidc state", "error", err)
+			select {
+			case <-cleanupTicker.C:
+				ctx := context.Background()
+				if err := st.CleanupExpiredSessions(ctx); err != nil {
+					slog.Warn("cleanup sessions", "error", err)
+				}
+				if err := st.CleanupExpiredOIDCState(ctx); err != nil {
+					slog.Warn("cleanup oidc state", "error", err)
+				}
+			case <-pruneTick(pruneTicker):
+				cutoff := time.Now().UTC().Add(-retention)
+				batchSize := positiveInt(cfg.RequestLogPruneBatchSize, config.DefaultRequestLogPruneBatchSize)
+				var total int64
+				for {
+					deleted, err := st.PruneRequestLogs(context.Background(), cutoff, batchSize)
+					if err != nil {
+						slog.Warn("prune request logs", "error", err)
+						break
+					}
+					total += deleted
+					if deleted < int64(batchSize) {
+						break
+					}
+				}
+				if total > 0 {
+					slog.Info("pruned request logs", "deleted", total, "cutoff", cutoff)
+				}
 			}
 		}
 	}()
@@ -228,7 +306,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	// Public web routes (no session required).
 	r.Get("/ui/login", webHandlers.LoginPage)
-	r.Post("/ui/api/login", webHandlers.LoginHandler)
+	r.With(web.LoginRateLimitMiddleware(loginRateLimiter)).Post("/ui/api/login", webHandlers.LoginHandler)
 
 	// OIDC auth routes (public — no session required).
 	r.Get("/ui/auth/oidc", authHandlers.OIDCStartHandler)
@@ -334,4 +412,25 @@ func runServe(_ *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(ctx)
+}
+
+func positiveInt(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func positiveDuration(value, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func pruneTick(ticker *time.Ticker) <-chan time.Time {
+	if ticker == nil {
+		return nil
+	}
+	return ticker.C
 }

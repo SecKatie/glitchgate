@@ -42,6 +42,34 @@ log_path: "~/data/glitchgate/proxy.log"
 # IANA timezone for the web UI. Default: "UTC"
 timezone: "America/New_York"
 
+# Proxy body size limit. Default: 4 MiB.
+proxy_max_body_bytes: 4194304
+
+# Default upstream timeouts. Defaults: 2m non-streaming, 30m streaming.
+upstream_request_timeout: 2m
+upstream_stream_timeout: 30m
+
+# Async request log writer settings.
+async_log_buffer_size: 1000
+async_log_write_timeout: 5s
+
+# Login throttling by client IP.
+login_rate_limit_per_minute: 10
+login_rate_limit_burst: 5
+
+# Proxy throttling by authenticated key plus a coarse IP guard before auth.
+proxy_rate_limit_per_minute: 120
+proxy_rate_limit_burst: 30
+proxy_ip_rate_limit_per_minute: 240
+proxy_ip_rate_limit_burst: 60
+
+# Request log retention and stored-body truncation.
+# Set request_log_retention: 0 to disable pruning.
+request_log_retention: 720h
+request_log_prune_interval: 1h
+request_log_prune_batch_size: 1000
+request_log_body_max_bytes: 65536
+
 providers:
   - name: "anthropic"
     type: "anthropic"            # default type; can be omitted
@@ -182,6 +210,26 @@ glitchgate auth copilot --name copilot-personal
 #### Token Storage
 
 Tokens are stored in `token_dir` with `0600` permissions. The short-lived Copilot session token is refreshed automatically.
+
+## Security and Operational Controls
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `proxy_max_body_bytes` | `4194304` | Reject proxy request bodies above this size with `413` |
+| `upstream_request_timeout` | `2m` | Default deadline for non-streaming upstream requests when the caller did not supply one |
+| `upstream_stream_timeout` | `30m` | Default deadline for streaming upstream requests when the caller did not supply one |
+| `async_log_buffer_size` | `1000` | Buffered request-log queue depth before backpressure and drops |
+| `async_log_write_timeout` | `5s` | Maximum time allowed for one async log database insert |
+| `login_rate_limit_per_minute` | `10` | Per-IP token refill rate for `POST /ui/api/login` |
+| `login_rate_limit_burst` | `5` | Per-IP login burst size |
+| `proxy_rate_limit_per_minute` | `120` | Per-proxy-key token refill rate for `/v1/*` |
+| `proxy_rate_limit_burst` | `30` | Per-proxy-key burst size |
+| `proxy_ip_rate_limit_per_minute` | `240` | Coarse per-IP refill rate on `/v1/*` before authentication |
+| `proxy_ip_rate_limit_burst` | `60` | Coarse per-IP burst size on `/v1/*` before authentication |
+| `request_log_retention` | `720h` | Age cutoff for pruning `request_logs`; `0` disables pruning |
+| `request_log_prune_interval` | `1h` | How often the background pruning job runs |
+| `request_log_prune_batch_size` | `1000` | Maximum rows deleted per prune batch |
+| `request_log_body_max_bytes` | `65536` | Maximum bytes retained for stored request/response bodies after redaction |
 
 ## Model List
 

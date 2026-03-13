@@ -29,6 +29,7 @@ type Store interface {
 	InsertRequestLog(ctx context.Context, log *RequestLogEntry) error
 	ListRequestLogs(ctx context.Context, params ListLogsParams) ([]RequestLogSummary, int64, error)
 	GetRequestLog(ctx context.Context, id string) (*RequestLogDetail, error)
+	PruneRequestLogs(ctx context.Context, before time.Time, limit int) (int64, error)
 	// ListDistinctModels returns all distinct model_requested values from
 	// request_logs, ordered alphabetically.
 	ListDistinctModels(ctx context.Context) ([]string, error)
@@ -90,12 +91,14 @@ type Store interface {
 
 // ModelUsageSummary holds aggregated usage statistics for a single model name.
 type ModelUsageSummary struct {
-	RequestCount  int64
-	InputTokens   int64
-	OutputTokens  int64
-	TotalCostUSD  float64
-	ProviderName  string // most-recently-seen provider_name from logs (may be empty)
-	UpstreamModel string // most-recently-seen model_upstream from logs (may be empty)
+	RequestCount             int64
+	InputTokens              int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
+	OutputTokens             int64
+	TotalCostUSD             float64
+	ProviderName             string // most-recently-seen provider_name from logs (may be empty)
+	UpstreamModel            string // most-recently-seen model_upstream from logs (may be empty)
 }
 
 // ProxyKey represents a full proxy-key row, including the hash.
@@ -134,7 +137,6 @@ type RequestLogEntry struct {
 	Status                   int
 	RequestBody              string
 	ResponseBody             string
-	EstimatedCostUSD         *float64
 	ErrorDetails             *string
 	IsStreaming              bool
 	FallbackAttempts         int64
@@ -173,7 +175,6 @@ type RequestLogSummary struct {
 	ReasoningTokens          int64
 	LatencyMs                int64
 	Status                   int
-	EstimatedCostUSD         *float64
 	IsStreaming              bool
 	ErrorDetails             *string
 	FallbackAttempts         int64
@@ -212,7 +213,6 @@ type CostParams struct {
 
 // CostSummary holds aggregated cost totals for a date range.
 type CostSummary struct {
-	TotalCostUSD             float64
 	TotalInputTokens         int64
 	TotalOutputTokens        int64
 	TotalCacheCreationTokens int64
@@ -223,7 +223,6 @@ type CostSummary struct {
 // CostBreakdownEntry holds cost aggregated by a grouping dimension.
 type CostBreakdownEntry struct {
 	Group               string
-	CostUSD             float64
 	InputTokens         int64
 	OutputTokens        int64
 	CacheCreationTokens int64
@@ -234,8 +233,10 @@ type CostBreakdownEntry struct {
 // CostPricingGroup holds token totals grouped by exact provider/model pair so
 // the web layer can apply pricing rates without ambiguity.
 type CostPricingGroup struct {
+	ModelRequested      string
 	ProviderName        string
 	ModelUpstream       string
+	ProxyKeyPrefix      string // populated only when GroupBy == "key"
 	InputTokens         int64
 	OutputTokens        int64
 	CacheCreationTokens int64
@@ -245,7 +246,6 @@ type CostPricingGroup struct {
 // CostTimeseriesEntry holds cost data for a single time bucket.
 type CostTimeseriesEntry struct {
 	Date     string
-	CostUSD  float64
 	Requests int64
 }
 

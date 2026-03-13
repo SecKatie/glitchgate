@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 )
 
@@ -22,6 +25,7 @@ type Client struct {
 	apiKey         string // used when authMode == "proxy_key"
 	defaultVersion string
 	httpClient     *http.Client
+	requestTimeout time.Duration
 }
 
 // NewClient creates an Anthropic provider client.
@@ -32,8 +36,14 @@ func NewClient(name, baseURL, authMode, apiKey, defaultVersion string) *Client {
 		authMode:       authMode,
 		apiKey:         apiKey,
 		defaultVersion: defaultVersion,
-		httpClient:     &http.Client{},
+		httpClient:     provider.BuildHTTPClient(),
+		requestTimeout: config.DefaultUpstreamRequestTimeout,
 	}
+}
+
+// SetTimeouts overrides the default upstream request deadline.
+func (c *Client) SetTimeouts(requestTimeout time.Duration) {
+	c.requestTimeout = requestTimeout
 }
 
 // Name returns the provider's short identifier.
@@ -49,6 +59,16 @@ func (c *Client) APIFormat() string { return "anthropic" }
 // For streaming requests, Response.Stream is set and the caller must close it.
 // For non-streaming requests, Response.Body is populated.
 func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provider.Response, error) {
+	// For streaming requests, don't apply a request timeout that would cancel
+	// the context when this function returns. The stream continues to be read
+	// after SendRequest completes. Rely on ResponseHeaderTimeout for the initial
+	// connection, and let the stream remain open until the server completes.
+	if !req.IsStreaming {
+		var cancel context.CancelFunc
+		ctx, cancel = provider.ContextWithDefaultTimeout(ctx, c.requestTimeout)
+		defer cancel()
+	}
+
 	url := c.baseURL + "/v1/messages"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(req.Body)))
@@ -107,7 +127,11 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		return provResp, nil
 	}
 
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			slog.Warn("closing response body", "error", cerr)
+		}
+	}()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response from %s: %w", c.name, err)

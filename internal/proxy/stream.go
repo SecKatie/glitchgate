@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -269,7 +270,10 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 			},
 		},
 	}
-	data, _ := json.Marshal(msgStart)
+	data, err := json.Marshal(msgStart)
+	if err != nil {
+		return &StreamResult{}, fmt.Errorf("marshalling message_start: %w", err)
+	}
 	if err := emit("message_start", string(data)); err != nil {
 		return &StreamResult{Body: captured.Bytes()}, err
 	}
@@ -304,7 +308,10 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 				},
 			}
 		}
-		data, _ = json.Marshal(startBlock)
+		data, err := json.Marshal(startBlock)
+		if err != nil {
+			return &StreamResult{Body: captured.Bytes()}, fmt.Errorf("marshalling content_block_start: %w", err)
+		}
 		if err := emit("content_block_start", string(data)); err != nil {
 			return &StreamResult{Body: captured.Bytes()}, err
 		}
@@ -313,7 +320,10 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 		var delta anthropic.DeltaBlock
 		switch block.Type {
 		case "tool_use":
-			inputJSON, _ := json.Marshal(block.Input)
+			inputJSON, err := json.Marshal(block.Input)
+			if err != nil {
+				return &StreamResult{Body: captured.Bytes()}, fmt.Errorf("marshalling tool input: %w", err)
+			}
 			delta = anthropic.DeltaBlock{Type: "input_json_delta", PartialJSON: string(inputJSON)}
 		default:
 			delta = anthropic.DeltaBlock{Type: "text_delta", Text: block.Text}
@@ -323,14 +333,20 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 			Index: i,
 			Delta: delta,
 		}
-		data, _ = json.Marshal(deltaEvt)
+		data, err = json.Marshal(deltaEvt)
+		if err != nil {
+			return &StreamResult{Body: captured.Bytes()}, fmt.Errorf("marshalling content_block_delta: %w", err)
+		}
 		if err := emit("content_block_delta", string(data)); err != nil {
 			return &StreamResult{Body: captured.Bytes()}, err
 		}
 
 		// content_block_stop
 		stopEvt := map[string]interface{}{"type": "content_block_stop", "index": i}
-		data, _ = json.Marshal(stopEvt)
+		data, err = json.Marshal(stopEvt)
+		if err != nil {
+			return &StreamResult{Body: captured.Bytes()}, fmt.Errorf("marshalling content_block_stop: %w", err)
+		}
 		if err := emit("content_block_stop", string(data)); err != nil {
 			return &StreamResult{Body: captured.Bytes()}, err
 		}
@@ -342,7 +358,10 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 		Delta: anthropic.MessageDelta{StopReason: resp.StopReason, StopSequence: resp.StopSequence},
 		Usage: &anthropic.DeltaUsage{OutputTokens: resp.Usage.OutputTokens},
 	}
-	data, _ = json.Marshal(msgDelta)
+	data, err = json.Marshal(msgDelta)
+	if err != nil {
+		return &StreamResult{Body: captured.Bytes()}, fmt.Errorf("marshalling message_delta: %w", err)
+	}
 	if err := emit("message_delta", string(data)); err != nil {
 		return &StreamResult{Body: captured.Bytes()}, err
 	}

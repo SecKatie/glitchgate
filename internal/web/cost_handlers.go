@@ -474,6 +474,7 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
 
 	data := map[string]any{
 		"ActiveTab":            "costs",
@@ -481,6 +482,7 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		"Summary":              summary,
 		"TokenCosts":           tokenCosts,
 		"Breakdown":            breakdown,
+		"BreakdownCosts":       breakdownCosts,
 		"Timeseries":           timeseries,
 		"MaxRequests":          float64(maxRequests),
 		"MaxBreakdownRequests": float64(maxBreakdownRequests),
@@ -563,11 +565,13 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 	}
 
 	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
 
 	data := map[string]any{
 		"Summary":              summary,
 		"TokenCosts":           tokenCosts,
 		"Breakdown":            breakdown,
+		"BreakdownCosts":       breakdownCosts,
 		"Timeseries":           timeseries,
 		"MaxRequests":          float64(maxRequests),
 		"MaxBreakdownRequests": float64(maxBreakdownRequests),

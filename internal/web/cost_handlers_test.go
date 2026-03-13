@@ -75,7 +75,6 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 	entries := []store.CostBreakdownEntry{
 		{
 			Group:               "anthropic:api.anthropic.com",
-			CostUSD:             10,
 			InputTokens:         100,
 			OutputTokens:        50,
 			CacheCreationTokens: 5,
@@ -84,7 +83,6 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 		},
 		{
 			Group:               "anthropic:vertex",
-			CostUSD:             15,
 			InputTokens:         120,
 			OutputTokens:        70,
 			CacheCreationTokens: 3,
@@ -93,7 +91,6 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 		},
 		{
 			Group:               "openai",
-			CostUSD:             8,
 			InputTokens:         90,
 			OutputTokens:        20,
 			CacheCreationTokens: 1,
@@ -109,16 +106,15 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 	})
 
 	require.Len(t, result, 2)
-	require.Equal(t, "claude-max", result[0].Group)
-	require.InDelta(t, 25.0, result[0].CostUSD, 0.001)
-	require.Equal(t, int64(220), result[0].InputTokens)
-	require.Equal(t, int64(120), result[0].OutputTokens)
-	require.Equal(t, int64(8), result[0].CacheCreationTokens)
-	require.Equal(t, int64(11), result[0].CacheReadTokens)
+	// Both groups have 3 requests; alphabetical tiebreaker puts "chatgpt-pro" before "claude-max".
+	require.Equal(t, "chatgpt-pro", result[0].Group)
 	require.Equal(t, int64(3), result[0].Requests)
 
-	require.Equal(t, "chatgpt-pro", result[1].Group)
-	require.InDelta(t, 8.0, result[1].CostUSD, 0.001)
+	require.Equal(t, "claude-max", result[1].Group)
+	require.Equal(t, int64(220), result[1].InputTokens)
+	require.Equal(t, int64(120), result[1].OutputTokens)
+	require.Equal(t, int64(8), result[1].CacheCreationTokens)
+	require.Equal(t, int64(11), result[1].CacheReadTokens)
 	require.Equal(t, int64(3), result[1].Requests)
 }
 

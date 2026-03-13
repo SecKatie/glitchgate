@@ -23,7 +23,6 @@ func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 			TotalCacheCreationTokens: 30,
 			TotalCacheReadTokens:     60,
 			TotalOutputTokens:        20,
-			TotalCostUSD:             14,
 		},
 		"TotalAllInputTokens": int64(100),
 		"TokenCosts": &AggregateCostBreakdown{
@@ -35,6 +34,7 @@ func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 			CacheWriteCostUSD: 3,
 			CacheReadCostUSD:  6,
 			OutputCostUSD:     4,
+			TotalCostUSD:      14,
 		},
 	})
 

@@ -932,7 +932,7 @@ func parseSSEResponse(body string) []anthropic.ContentBlock {
 }
 
 // prettyJSON re-indents a JSON string. Returns the original string if it
-// cannot be parsed as JSON.
+// cannot be parsed as JSON. HTML characters are not escaped.
 func prettyJSON(s string) string {
 	if s == "" {
 		return s
@@ -941,9 +941,12 @@ func prettyJSON(s string) string {
 	if err := json.Unmarshal([]byte(s), &raw); err != nil {
 		return s
 	}
-	out, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(raw); err != nil {
 		return s
 	}
-	return string(out)
+	return strings.TrimSuffix(buf.String(), "\n")
 }

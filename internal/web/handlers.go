@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -125,6 +126,7 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 			}
 			return []ConvTurn{*t}
 		},
+		"toFloat64": func(n int64) float64 { return float64(n) },
 		"barPct": func(value, total float64) float64 {
 			if total <= 0 {
 				return 0
@@ -166,6 +168,7 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 			}
 			return fmt.Sprintf("%.1f%%", (part/total)*100)
 		},
+		"urlPathEscape": url.PathEscape,
 	}
 }
 
@@ -379,7 +382,7 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 
 	data := map[string]any{
 		"ActiveTab":    "logs",
-		"Logs":         logs,
+		"Logs":         enrichLogs(logs, h.calc),
 		"Page":         params.Page,
 		"TotalPages":   totalPages,
 		"Total":        total,
@@ -439,7 +442,7 @@ func (h *Handlers) LogsAPIHandler(w http.ResponseWriter, r *http.Request) {
 			firstID = logs[0].ID
 		}
 		data := map[string]any{
-			"Logs":       logs,
+			"Logs":       enrichLogs(logs, h.calc),
 			"Page":       params.Page,
 			"TotalPages": totalPages,
 			"Total":      total,
