@@ -118,9 +118,11 @@ internal/web/user_handlers.go:94:			if team, err := h.store.GetTeamByID(r.Contex
 
 1. Unify proxy request orchestration and fallback semantics.
 
-The three proxy entrypoints repeat the same lifecycle: parse request, resolve model chain, branch on `APIFormat()`, send upstream, retry on fallback statuses, log, then translate the response. The duplication is in `internal/proxy/handler.go:58`, `internal/proxy/openai_handler.go:38`, and `internal/proxy/responses_handler.go:38`. It has already caused behavioral skew: `internal/proxy/handler.go:113-121` and `internal/proxy/openai_handler.go:90-98` return into format-specific helpers before the outer fallback loop can continue, so cross-format fallback is effectively bypassed in those paths.
+The three proxy entrypoints repeat the same lifecycle: parse request, resolve model chain, branch on `APIFormat()`, send upstream, retry on fallback statuses, log, then translate the response. The duplication is in `internal/proxy/handler.go:58`, `internal/proxy/openai_handler.go:38`, and `internal/proxy/responses_handler.go:38`. It already caused behavioral skew before the 2026-03-13 fix: `internal/proxy/handler.go:113-121` and `internal/proxy/openai_handler.go:90-98` returned into format-specific helpers before the outer fallback loop could continue, so cross-format fallback was effectively bypassed in those paths.
 
 Refactor target: introduce a single proxy pipeline that works in terms of source format, provider capabilities, request translators, and response adapters. Make retry/fallback policy live in one place. This is the highest leverage change because every new model-routing feature, provider type, and logging rule currently has to be implemented three times.
+
+Status 2026-03-13: the cross-format fallback continuation bug is fixed in the Anthropic and OpenAI entrypoints. The broader proxy-pipeline unification is still open.
 
 2. Extract application bootstrap and provider compilation out of `cmd/serve.go`.
 
@@ -134,11 +136,15 @@ The most concrete correctness issue I found is in key visibility. `internal/web/
 
 Refactor target: fix the `sc.SessionID` bug immediately, then move authorization decisions into a small policy module used by handlers. This should reduce drift and make scope behavior testable as policy rather than incidental control flow.
 
+Status 2026-03-13: the `sc.SessionID` bug is fixed and key visibility now flows through a shared scope helper. The broader authorization-policy extraction is still open.
+
 4. Make cost calculation a shared service and make cost APIs truthful.
 
 The web package repeats token-to-cost math in `internal/web/model_handlers.go:142-145`, `internal/web/model_handlers.go:215-218`, and throughout `internal/web/costview.go:57-186`. At the same time, the JSON cost endpoints return zero-dollar placeholders even though the HTML path computes real pricing later: `internal/web/cost_handlers.go:200-224` and `internal/web/cost_handlers.go:265-270` hardcode `CostUSD` and `TotalCostUSD` to `0`.
 
 Refactor target: move all view-facing pricing computation behind one service or presenter layer that consumes `pricing.Calculator`. Use it for JSON APIs, HTML pages, log detail, and model detail. This is important before tiered pricing lands, because the current scattering will make that feature expensive and error-prone.
+
+Status 2026-03-13: completed. Cost math now goes through shared helpers, JSON summary/timeseries endpoints return computed dollars, and the web layer uses pricing-aware grouping for truthful totals.
 
 5. Split the store contract by domain and move list projections into the store layer.
 
@@ -154,16 +160,17 @@ Refactor target: build one shared SSE engine with pluggable event translators, a
 
 ## Concrete bugs worth fixing first
 
-- `internal/web/handlers.go:642` should almost certainly use `sc.User.ID`, not `sc.SessionID`.
-- `internal/web/cost_handlers.go:204`, `internal/web/cost_handlers.go:224`, and `internal/web/cost_handlers.go:269` make the cost APIs lie about dollars.
-- `internal/proxy/handler.go:113-121` and `internal/proxy/openai_handler.go:90-98` bypass outer fallback continuation for cross-format providers.
+- Fixed 2026-03-13: `internal/web/handlers.go:642` should almost certainly use `sc.User.ID`, not `sc.SessionID`.
+- Fixed 2026-03-13: `internal/web/cost_handlers.go:204`, `internal/web/cost_handlers.go:224`, and `internal/web/cost_handlers.go:269` made the cost APIs lie about dollars.
+- Fixed 2026-03-13: `internal/proxy/handler.go:113-121` and `internal/proxy/openai_handler.go:90-98` bypassed outer fallback continuation for cross-format providers.
 - `internal/translate/stream_translator.go:141-144` drops streamed tool-call argument deltas.
 
 ## Suggested order of work
 
 1. Completed 2026-03-13: Fix the scope bug and add focused authorization policy tests.
-2. Next: repair cost API semantics by routing all cost views through one pricing presenter.
-3. Collapse proxy orchestration into one fallback-aware pipeline.
-4. Extract bootstrap/provider compilation from `cmd/serve.go`.
-5. Split `store.Store` and add joined projection queries for admin pages.
-6. Unify SSE and transport helpers.
+2. Completed 2026-03-13: repair cost API semantics by routing all cost views through one pricing presenter.
+3. Completed 2026-03-13: repair cross-format fallback continuation in the Anthropic and OpenAI proxy entrypoints.
+4. Next: collapse proxy orchestration into one fallback-aware pipeline.
+5. Extract bootstrap/provider compilation from `cmd/serve.go`.
+6. Split `store.Store` and add joined projection queries for admin pages.
+7. Unify SSE and transport helpers.

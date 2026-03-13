@@ -909,11 +909,158 @@ func TestFallback_AnthropicPrimary_OpenAICC_BothFail(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	// After primary (Anthropic, 500) triggers fallback, secondary (OpenAI CC) dispatches
-	// end-to-end — a 502 from it is forwarded as-is via translation.
+	// Both fallback entries fail, so the handler returns an upstream failure.
 	require.True(t, rec.Code >= 400, "should return error status when both fail")
 
 	logger.Close()
+}
+
+func buildAnthropicCrossFormatMiddleFallbackHandler(t *testing.T, primaryURL, secondaryURL, tertiaryURL, secondaryType string) (*proxy.Handler, *store.SQLiteStore, *proxy.AsyncLogger) {
+	t.Helper()
+	st, _ := setupFallbackStore(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	var secondaryYAML string
+	if secondaryType == "openai" || secondaryType == "openai_responses" {
+		secondaryYAML = fmt.Sprintf(`
+  - name: secondary
+    type: %s
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key2`, secondaryType, secondaryURL)
+	}
+
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+  - name: primary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1
+    default_version: "2023-06-01"
+%s
+  - name: tertiary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key3
+    default_version: "2023-06-01"
+model_list:
+  - model_name: virtual
+    fallbacks: [primary-model, secondary-model, tertiary-model]
+  - model_name: primary-model
+    provider: primary
+    upstream_model: claude-3
+  - model_name: secondary-model
+    provider: secondary
+    upstream_model: gpt-4o
+  - model_name: tertiary-model
+    provider: tertiary
+    upstream_model: claude-3-5
+`, primaryURL, secondaryYAML, tertiaryURL)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	var apiType string
+	switch secondaryType {
+	case "openai_responses":
+		apiType = openaiprov.APITypeResponses
+	default:
+		apiType = openaiprov.APITypeChatCompletions
+	}
+
+	providers := map[string]provider.Provider{
+		"primary":   anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01"),
+		"secondary": openaiprov.NewClient("secondary", secondaryURL, "proxy_key", "key2", apiType),
+		"tertiary":  anthropic.NewClient("tertiary", tertiaryURL, "proxy_key", "key3", "2023-06-01"),
+	}
+
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	return handler, st, logger
+}
+
+func TestFallback_Anthropic_OpenAISecondaryRetriesToTertiary(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryHits++
+		require.Equal(t, "/v1/chat/completions", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer secondary.Close()
+
+	tertiaryHits := 0
+	tertiary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		tertiaryHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(anthropicSuccessResponse()))
+	}))
+	defer tertiary.Close()
+
+	handler, st, logger := buildAnthropicCrossFormatMiddleFallbackHandler(t, primary.URL, secondary.URL, tertiary.URL, "openai")
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, secondaryHits)
+	require.Equal(t, 1, tertiaryHits)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(3), logs[0].FallbackAttempts)
+}
+
+func TestFallback_Anthropic_ResponsesSecondaryRetriesToTertiary(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryHits++
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer secondary.Close()
+
+	tertiaryHits := 0
+	tertiary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		tertiaryHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(anthropicSuccessResponse()))
+	}))
+	defer tertiary.Close()
+
+	handler, st, logger := buildAnthropicCrossFormatMiddleFallbackHandler(t, primary.URL, secondary.URL, tertiary.URL, "openai_responses")
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, secondaryHits)
+	require.Equal(t, 1, tertiaryHits)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(3), logs[0].FallbackAttempts)
 }
 
 // buildAnthropicSSEStream constructs a valid Anthropic SSE stream payload.
