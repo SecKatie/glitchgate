@@ -2,9 +2,31 @@
 <!-- Summary cards -->
 <div class="summary-cards">
     <article class="summary-card">
-        <div class="label">Total Cost</div>
+        <div class="label">{{if eq .GroupBy "provider"}}Est. Token Cost{{else}}Total Cost{{end}}</div>
         <div class="value">${{printf "%.2f" .TokenCosts.TotalCostUSD}}</div>
     </article>
+    {{if and (eq .GroupBy "provider") .ProviderComparisonSummary.HasAnySubscription}}
+    <article class="summary-card">
+        <div class="label">Monthly Subscriptions</div>
+        <div class="value">${{printf "%.2f" .ProviderComparisonSummary.TotalSubscriptionCost}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Token vs Subscription</div>
+        <div class="value">{{if .ProviderComparisonSummary.TokenVsSubscriptionPct}}{{printf "%+.1f%%" (deref .ProviderComparisonSummary.TokenVsSubscriptionPct)}}{{else}}—{{end}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Effective Subscription $/MTok</div>
+        <div class="value">{{if .ProviderComparisonSummary.EffectiveTokenCostPerMTok}}${{printf "%.2f" (deref .ProviderComparisonSummary.EffectiveTokenCostPerMTok)}}{{else}}—{{end}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Avg Real Token $/MTok</div>
+        <div class="value">{{if .ProviderComparisonSummary.AverageRealTokenCostPerMTok}}${{printf "%.2f" (deref .ProviderComparisonSummary.AverageRealTokenCostPerMTok)}}{{else}}—{{end}}</div>
+    </article>
+    <article class="summary-card">
+        <div class="label">Effective vs Real $/MTok</div>
+        <div class="value">{{if .ProviderComparisonSummary.EffectiveVsRealPct}}{{printf "%+.1f%%" (deref .ProviderComparisonSummary.EffectiveVsRealPct)}}{{else}}—{{end}}</div>
+    </article>
+    {{end}}
     <article class="summary-card">
         <div class="label">Total Requests</div>
         <div class="value">{{.Summary.TotalRequests}}</div>
@@ -104,6 +126,11 @@
 <!-- Breakdown table -->
 {{if .Breakdown}}
 <h3>Breakdown by {{if eq .GroupBy "key"}}API Key{{else if eq .GroupBy "provider"}}Provider{{else}}Model{{end}}</h3>
+{{if and (eq .GroupBy "provider") .ProviderComparisonSummary.HasAnySubscription}}
+<p style="margin:-0.5rem 0 1rem;color:var(--pico-muted-color);font-size:0.9em">
+    Monthly subscription cost is compared against token spend and average real token pricing for the selected date range.
+</p>
+{{end}}
 <figure>
 <table>
     <thead>
@@ -113,7 +140,14 @@
             <th>Total Input Tokens</th>
             <th>Output Tokens</th>
             <th>Requests</th>
-            <th>Est. Cost</th>
+            <th>{{if eq .GroupBy "provider"}}Est. Token Cost{{else}}Est. Cost{{end}}</th>
+            {{if eq .GroupBy "provider"}}
+            <th>Monthly Subscription</th>
+            <th>Token vs Subscription</th>
+            <th>Effective Subscription $/MTok</th>
+            <th>Avg Real Token $/MTok</th>
+            <th>Effective vs Real $/MTok</th>
+            {{end}}
         </tr>
     </thead>
     <tbody>
@@ -129,6 +163,13 @@
             <td>{{fmtTokens .OutputTokens}}</td>
             <td>{{.Requests}}</td>
             <td>{{$cost := index $.BreakdownCosts .Group}}{{if $cost}}${{printf "%.4f" $cost}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            {{if eq $.GroupBy "provider"}}
+            <td>{{$comparison := index $.ProviderComparisons .Group}}{{if $comparison}}${{printf "%.2f" $comparison.MonthlySubscriptionCost}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td>{{$comparison := index $.ProviderComparisons .Group}}{{if and $comparison $comparison.TokenVsSubscriptionPct}}{{printf "%+.1f%%" (deref $comparison.TokenVsSubscriptionPct)}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td>{{$comparison := index $.ProviderComparisons .Group}}{{if and $comparison $comparison.EffectiveTokenCostPerMTok}}${{printf "%.2f" (deref $comparison.EffectiveTokenCostPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td>{{$comparison := index $.ProviderComparisons .Group}}{{if and $comparison $comparison.AverageRealTokenCostPerMTok}}${{printf "%.2f" (deref $comparison.AverageRealTokenCostPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td>{{$comparison := index $.ProviderComparisons .Group}}{{if and $comparison $comparison.EffectiveVsRealPct}}{{printf "%+.1f%%" (deref $comparison.EffectiveVsRealPct)}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            {{end}}
         </tr>
         {{end}}
     </tbody>

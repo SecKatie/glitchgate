@@ -13,6 +13,10 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
+func float64Ptr(v float64) *float64 {
+	return &v
+}
+
 func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 	templates := ParseTemplates(time.UTC)
 	rec := httptest.NewRecorder()
@@ -48,4 +52,95 @@ func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 	require.Contains(t, body, "$4.000000 <span class=\"token-detail-note\">(28.6%)</span>")
 	require.Contains(t, body, "Per-category costs are partial because some models in this filtered result set do not have pricing configured.")
 	require.False(t, strings.Contains(body, "(partial)</span>"))
+}
+
+func TestCostSummaryTemplateShowsProviderSubscriptionComparisons(t *testing.T) {
+	templates := ParseTemplates(time.UTC)
+	rec := httptest.NewRecorder()
+
+	err := templates.ExecuteNamed(rec, "cost_summary", map[string]any{
+		"GroupBy": "provider",
+		"Summary": store.CostSummary{
+			TotalRequests:     2,
+			TotalInputTokens:  100,
+			TotalOutputTokens: 20,
+		},
+		"TotalAllInputTokens": int64(100),
+		"TokenCosts": &AggregateCostBreakdown{
+			HasAnyPricing: true,
+			TotalCostUSD:  18.5,
+		},
+		"Breakdown": []store.CostBreakdownEntry{
+			{Group: "chatgpt-pro", InputTokens: 100, OutputTokens: 20, Requests: 2},
+		},
+		"BreakdownCosts": map[string]float64{
+			"chatgpt-pro": 18.5,
+		},
+		"ProviderComparisons": map[string]*ProviderSpendComparison{
+			"chatgpt-pro": {
+				MonthlySubscriptionCost:       20.0,
+				TokenMinusSubscriptionUSD:     -1.5,
+				TokenVsSubscriptionPct:        float64Ptr(-7.5),
+				TotalTokens:                   120,
+				EffectiveTokenCostPerMTok:     float64Ptr(166666.6666666667),
+				AverageRealTokenCostPerMTok:   float64Ptr(154166.6666666667),
+				EffectiveMinusRealCostPerMTok: float64Ptr(12500.0),
+				EffectiveVsRealPct:            float64Ptr(8.108108108108109),
+			},
+		},
+		"ProviderComparisonSummary": ProviderSpendComparisonSummary{
+			HasAnySubscription:            true,
+			TotalSubscriptionCost:         20.0,
+			TokenMinusSubscription:        -1.5,
+			TokenVsSubscriptionPct:        float64Ptr(-7.5),
+			EffectiveTokenCostPerMTok:     float64Ptr(166666.6666666667),
+			AverageRealTokenCostPerMTok:   float64Ptr(154166.6666666667),
+			EffectiveMinusRealCostPerMTok: float64Ptr(12500.0),
+			EffectiveVsRealPct:            float64Ptr(8.108108108108109),
+		},
+		"MaxBreakdownRequests": float64(2),
+	})
+
+	require.NoError(t, err)
+	body := rec.Body.String()
+
+	require.Contains(t, body, "Monthly Subscriptions")
+	require.Contains(t, body, "Token vs Subscription")
+	require.Contains(t, body, "Effective Subscription $/MTok")
+	require.Contains(t, body, "Avg Real Token $/MTok")
+	require.Contains(t, body, "Effective vs Real $/MTok")
+	require.Contains(t, body, "Monthly subscription cost is compared against token spend and average real token pricing for the selected date range.")
+	require.Contains(t, body, "$20.00")
+	require.Contains(t, body, "-7.5%")
+	require.Contains(t, body, "$166666.67")
+	require.Contains(t, body, "$154166.67")
+	require.Contains(t, body, "&#43;8.1%")
+}
+
+func TestCostsPageTemplatePushesFilterStateIntoURL(t *testing.T) {
+	templates := ParseTemplates(time.UTC)
+	rec := httptest.NewRecorder()
+
+	err := templates.ExecuteTemplate(rec, "costs.html", map[string]any{
+		"From":                "2026-03-01",
+		"To":                  "2026-03-31",
+		"GroupBy":             "provider",
+		"GroupFilter":         "chatgpt",
+		"Summary":             store.CostSummary{},
+		"TokenCosts":          &AggregateCostBreakdown{},
+		"TotalAllInputTokens": int64(0),
+	})
+
+	require.NoError(t, err)
+	body := rec.Body.String()
+
+	require.Contains(t, body, `action="/ui/costs"`)
+	require.Contains(t, body, `method="get"`)
+	require.Contains(t, body, `hx-get="/ui/costs"`)
+	require.Contains(t, body, `hx-select="#cost-content"`)
+	require.Contains(t, body, `hx-target="#cost-content"`)
+	require.Contains(t, body, `hx-swap="outerHTML"`)
+	require.Contains(t, body, `hx-push-url="true"`)
+	require.Contains(t, body, `<option value="provider" selected>Provider</option>`)
+	require.Contains(t, body, `value="chatgpt"`)
 }

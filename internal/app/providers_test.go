@@ -9,10 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func float64ptr(v float64) *float64 {
+	return &v
+}
+
 func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	cfg := &config.Config{
 		Providers: []config.ProviderConfig{
-			{Name: "chatgpt-pro", Type: "openai", AuthMode: "proxy_key"},
+			{Name: "chatgpt-pro", Type: "openai", AuthMode: "proxy_key", MonthlySubscriptionCost: float64ptr(20)},
 			{Name: "segment", Type: "openai", BaseURL: "https://api.synthetic.new/v1"},
 			{Name: "copilot", Type: "github_copilot"},
 		},
@@ -45,6 +49,11 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	require.Equal(t, "chatgpt-pro", providerNames["openai:api.openai.com"])
 	require.Equal(t, "segment", providerNames["openai:api.synthetic.new"])
 	require.Equal(t, "copilot", providerNames["github_copilot:api.githubcopilot.com"])
+
+	subscriptions := registry.ProviderMonthlySubscriptions()
+	require.Equal(t, 20.0, subscriptions["chatgpt-pro"])
+	_, ok := subscriptions["segment"]
+	require.False(t, ok)
 
 	calc := registry.Calculator()
 	override, ok := calc.Lookup("chatgpt-pro", "gpt-5.4")
@@ -105,6 +114,7 @@ func TestBootstrapBuildsRuntime(t *testing.T) {
 	require.NotNil(t, runtime.Calculator)
 	require.Equal(t, time.UTC, runtime.Timezone)
 	require.Equal(t, "chatgpt-pro", runtime.ProviderNames["openai:api.openai.com"])
+	require.Empty(t, runtime.ProviderMonthlySubscriptions)
 
 	entry, ok := runtime.Calculator.Lookup("chatgpt-pro", "gpt-4o")
 	require.True(t, ok)

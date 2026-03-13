@@ -104,6 +104,52 @@ type AggregateCostBreakdown struct {
 	TotalCostUSD      float64
 }
 
+// ProviderSpendComparison compares provider token spend for the selected
+// filter window against an operator-configured monthly subscription cost.
+type ProviderSpendComparison struct {
+	TokenCostUSD                  float64
+	MonthlySubscriptionCost       float64
+	TokenMinusSubscriptionUSD     float64
+	TokenVsSubscriptionPct        *float64
+	TotalTokens                   int64
+	EffectiveTokenCostPerMTok     *float64
+	AverageRealTokenCostPerMTok   *float64
+	EffectiveMinusRealCostPerMTok *float64
+	EffectiveVsRealPct            *float64
+}
+
+// ProviderSpendComparisonSummary aggregates provider subscription comparisons
+// across the currently visible provider rows.
+type ProviderSpendComparisonSummary struct {
+	HasAnySubscription            bool
+	ComparedProviders             int
+	TotalTokenCostUSD             float64
+	TotalSubscriptionCost         float64
+	TokenMinusSubscription        float64
+	TokenVsSubscriptionPct        *float64
+	TotalTokens                   int64
+	EffectiveTokenCostPerMTok     *float64
+	AverageRealTokenCostPerMTok   *float64
+	EffectiveMinusRealCostPerMTok *float64
+	EffectiveVsRealPct            *float64
+}
+
+func pricePerMillionTokens(amountUSD float64, totalTokens int64) *float64 {
+	if totalTokens <= 0 {
+		return nil
+	}
+	value := amountUSD * 1_000_000 / float64(totalTokens)
+	return &value
+}
+
+func percentDelta(delta, baseline float64) *float64 {
+	if baseline == 0 {
+		return nil
+	}
+	value := (delta / baseline) * 100
+	return &value
+}
+
 // LogRowWithCost wraps a RequestLogSummary with a computed estimated cost.
 // EstimatedCostUSD is nil when pricing is not configured for the model.
 type LogRowWithCost struct {
@@ -261,4 +307,62 @@ func computeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, c
 	cb.PricingKnown = cb.HasAnyPricing && !hasUnknownUsage
 	cb.PartialPricing = cb.HasAnyPricing && hasUnknownUsage
 	return cb
+}
+
+func buildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdownCosts map[string]float64, subscriptions map[string]float64) (map[string]*ProviderSpendComparison, ProviderSpendComparisonSummary) {
+	if len(breakdown) == 0 || len(subscriptions) == 0 {
+		return nil, ProviderSpendComparisonSummary{}
+	}
+
+	comparisons := make(map[string]*ProviderSpendComparison, len(breakdown))
+	var summary ProviderSpendComparisonSummary
+
+	for _, entry := range breakdown {
+		subscription, ok := subscriptions[entry.Group]
+		if !ok {
+			continue
+		}
+
+		tokenCost, ok := breakdownCosts[entry.Group]
+		if !ok {
+			continue
+		}
+		totalTokens := entry.InputTokens + entry.CacheCreationTokens + entry.CacheReadTokens + entry.OutputTokens
+		comparison := &ProviderSpendComparison{
+			TokenCostUSD:              tokenCost,
+			MonthlySubscriptionCost:   subscription,
+			TokenMinusSubscriptionUSD: tokenCost - subscription,
+			TotalTokens:               totalTokens,
+		}
+		comparison.TokenVsSubscriptionPct = percentDelta(comparison.TokenMinusSubscriptionUSD, subscription)
+		comparison.EffectiveTokenCostPerMTok = pricePerMillionTokens(subscription, totalTokens)
+		comparison.AverageRealTokenCostPerMTok = pricePerMillionTokens(tokenCost, totalTokens)
+		if comparison.EffectiveTokenCostPerMTok != nil && comparison.AverageRealTokenCostPerMTok != nil {
+			delta := *comparison.EffectiveTokenCostPerMTok - *comparison.AverageRealTokenCostPerMTok
+			comparison.EffectiveMinusRealCostPerMTok = &delta
+			comparison.EffectiveVsRealPct = percentDelta(delta, *comparison.AverageRealTokenCostPerMTok)
+		}
+		comparisons[entry.Group] = comparison
+
+		summary.HasAnySubscription = true
+		summary.ComparedProviders++
+		summary.TotalTokenCostUSD += tokenCost
+		summary.TotalSubscriptionCost += subscription
+		summary.TokenMinusSubscription += comparison.TokenMinusSubscriptionUSD
+		summary.TotalTokens += totalTokens
+	}
+
+	if len(comparisons) == 0 {
+		return nil, ProviderSpendComparisonSummary{}
+	}
+	summary.EffectiveTokenCostPerMTok = pricePerMillionTokens(summary.TotalSubscriptionCost, summary.TotalTokens)
+	summary.AverageRealTokenCostPerMTok = pricePerMillionTokens(summary.TotalTokenCostUSD, summary.TotalTokens)
+	summary.TokenVsSubscriptionPct = percentDelta(summary.TokenMinusSubscription, summary.TotalSubscriptionCost)
+	if summary.EffectiveTokenCostPerMTok != nil && summary.AverageRealTokenCostPerMTok != nil {
+		delta := *summary.EffectiveTokenCostPerMTok - *summary.AverageRealTokenCostPerMTok
+		summary.EffectiveMinusRealCostPerMTok = &delta
+		summary.EffectiveVsRealPct = percentDelta(delta, *summary.AverageRealTokenCostPerMTok)
+	}
+
+	return comparisons, summary
 }

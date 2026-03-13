@@ -19,26 +19,28 @@ import (
 
 // CostHandlers groups the HTTP handlers for cost dashboard endpoints.
 type CostHandlers struct {
-	store         store.Store
-	templates     *TemplateSet
-	tz            *time.Location
-	calc          *pricing.Calculator
-	providerNames map[string]string // provider name or legacy raw key → display name
+	store                        store.Store
+	templates                    *TemplateSet
+	tz                           *time.Location
+	calc                         *pricing.Calculator
+	providerNames                map[string]string  // provider name or legacy raw key → display name
+	providerMonthlySubscriptions map[string]float64 // provider display name → configured monthly subscription cost
 }
 
 // NewCostHandlers creates a new CostHandlers with the given store, template set,
 // display timezone (pass nil or time.UTC for UTC), and provider name map
 // (provider name or legacy raw key → display name). Pass nil if no providers are configured.
-func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string) *CostHandlers {
+func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string, providerMonthlySubscriptions map[string]float64) *CostHandlers {
 	if tz == nil {
 		tz = time.UTC
 	}
 	return &CostHandlers{
-		store:         s,
-		templates:     tmpl,
-		tz:            tz,
-		calc:          calc,
-		providerNames: providerNames,
+		store:                        s,
+		templates:                    tmpl,
+		tz:                           tz,
+		calc:                         calc,
+		providerNames:                providerNames,
+		providerMonthlySubscriptions: providerMonthlySubscriptions,
 	}
 }
 
@@ -47,25 +49,39 @@ func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location, calc *
 // --------------------------------------------------------------------------
 
 type costSummaryResponse struct {
-	TotalCostUSD             float64                  `json:"total_cost_usd"`
-	TotalInputTokens         int64                    `json:"total_input_tokens"`
-	TotalOutputTokens        int64                    `json:"total_output_tokens"`
-	TotalCacheCreationTokens int64                    `json:"total_cache_creation_tokens"`
-	TotalCacheReadTokens     int64                    `json:"total_cache_read_tokens"`
-	TotalRequests            int64                    `json:"total_requests"`
-	Breakdown                []costBreakdownEntryJSON `json:"breakdown"`
-	From                     string                   `json:"from"`
-	To                       string                   `json:"to"`
+	TotalCostUSD                     float64                  `json:"total_cost_usd"`
+	TotalInputTokens                 int64                    `json:"total_input_tokens"`
+	TotalOutputTokens                int64                    `json:"total_output_tokens"`
+	TotalCacheCreationTokens         int64                    `json:"total_cache_creation_tokens"`
+	TotalCacheReadTokens             int64                    `json:"total_cache_read_tokens"`
+	TotalRequests                    int64                    `json:"total_requests"`
+	TotalMonthlySubscriptionCostUSD  *float64                 `json:"total_monthly_subscription_cost_usd,omitempty"`
+	TotalTokenMinusSubscriptionUSD   *float64                 `json:"total_token_minus_subscription_usd,omitempty"`
+	TotalTokenVsSubscriptionPct      *float64                 `json:"total_token_vs_subscription_pct,omitempty"`
+	EffectiveTokenCostPerMTokUSD     *float64                 `json:"effective_token_cost_per_mtok_usd,omitempty"`
+	AverageRealTokenCostPerMTokUSD   *float64                 `json:"average_real_token_cost_per_mtok_usd,omitempty"`
+	EffectiveMinusRealCostPerMTokUSD *float64                 `json:"effective_minus_real_cost_per_mtok_usd,omitempty"`
+	EffectiveVsRealPct               *float64                 `json:"effective_vs_real_pct,omitempty"`
+	Breakdown                        []costBreakdownEntryJSON `json:"breakdown"`
+	From                             string                   `json:"from"`
+	To                               string                   `json:"to"`
 }
 
 type costBreakdownEntryJSON struct {
-	Group               string  `json:"group"`
-	CostUSD             float64 `json:"cost_usd"`
-	InputTokens         int64   `json:"input_tokens"`
-	OutputTokens        int64   `json:"output_tokens"`
-	CacheCreationTokens int64   `json:"cache_creation_tokens"`
-	CacheReadTokens     int64   `json:"cache_read_tokens"`
-	Requests            int64   `json:"requests"`
+	Group                         string   `json:"group"`
+	CostUSD                       float64  `json:"cost_usd"`
+	InputTokens                   int64    `json:"input_tokens"`
+	OutputTokens                  int64    `json:"output_tokens"`
+	CacheCreationTokens           int64    `json:"cache_creation_tokens"`
+	CacheReadTokens               int64    `json:"cache_read_tokens"`
+	Requests                      int64    `json:"requests"`
+	MonthlySubscriptionCostUSD    *float64 `json:"monthly_subscription_cost_usd,omitempty"`
+	TokenMinusSubscriptionUSD     *float64 `json:"token_minus_subscription_usd,omitempty"`
+	TokenVsSubscriptionPct        *float64 `json:"token_vs_subscription_pct,omitempty"`
+	EffectiveTokenCostPerMTok     *float64 `json:"effective_token_cost_per_mtok_usd,omitempty"`
+	AverageRealTokenCostPerMTok   *float64 `json:"average_real_token_cost_per_mtok_usd,omitempty"`
+	EffectiveMinusRealCostPerMTok *float64 `json:"effective_minus_real_cost_per_mtok_usd,omitempty"`
+	EffectiveVsRealPct            *float64 `json:"effective_vs_real_pct,omitempty"`
 }
 
 type costTimeseriesResponse struct {
@@ -85,6 +101,41 @@ type pricedTimeseriesEntry struct {
 	Date     string
 	CostUSD  float64
 	Requests int64
+}
+
+func providerComparisonEffective(comparison *ProviderSpendComparison) *float64 {
+	if comparison == nil {
+		return nil
+	}
+	return comparison.EffectiveTokenCostPerMTok
+}
+
+func providerComparisonAverageReal(comparison *ProviderSpendComparison) *float64 {
+	if comparison == nil {
+		return nil
+	}
+	return comparison.AverageRealTokenCostPerMTok
+}
+
+func providerComparisonEffectiveMinusReal(comparison *ProviderSpendComparison) *float64 {
+	if comparison == nil {
+		return nil
+	}
+	return comparison.EffectiveMinusRealCostPerMTok
+}
+
+func providerComparisonTokenVsSubscriptionPct(comparison *ProviderSpendComparison) *float64 {
+	if comparison == nil {
+		return nil
+	}
+	return comparison.TokenVsSubscriptionPct
+}
+
+func providerComparisonEffectiveVsRealPct(comparison *ProviderSpendComparison) *float64 {
+	if comparison == nil {
+		return nil
+	}
+	return comparison.EffectiveVsRealPct
 }
 
 // --------------------------------------------------------------------------
@@ -214,17 +265,33 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 
 	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
 	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, params.GroupBy, h.providerNames)
+	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
 
 	bd := make([]costBreakdownEntryJSON, len(breakdown))
 	for i, e := range breakdown {
+		var monthlySubscriptionCostUSD *float64
+		var tokenMinusSubscriptionUSD *float64
+		if comparison, ok := providerComparisons[e.Group]; ok {
+			monthly := comparison.MonthlySubscriptionCost
+			delta := comparison.TokenMinusSubscriptionUSD
+			monthlySubscriptionCostUSD = &monthly
+			tokenMinusSubscriptionUSD = &delta
+		}
 		bd[i] = costBreakdownEntryJSON{
-			Group:               e.Group,
-			CostUSD:             breakdownCosts[e.Group],
-			InputTokens:         e.InputTokens,
-			OutputTokens:        e.OutputTokens,
-			CacheCreationTokens: e.CacheCreationTokens,
-			CacheReadTokens:     e.CacheReadTokens,
-			Requests:            e.Requests,
+			Group:                         e.Group,
+			CostUSD:                       breakdownCosts[e.Group],
+			InputTokens:                   e.InputTokens,
+			OutputTokens:                  e.OutputTokens,
+			CacheCreationTokens:           e.CacheCreationTokens,
+			CacheReadTokens:               e.CacheReadTokens,
+			Requests:                      e.Requests,
+			MonthlySubscriptionCostUSD:    monthlySubscriptionCostUSD,
+			TokenMinusSubscriptionUSD:     tokenMinusSubscriptionUSD,
+			TokenVsSubscriptionPct:        providerComparisonTokenVsSubscriptionPct(providerComparisons[e.Group]),
+			EffectiveTokenCostPerMTok:     providerComparisonEffective(providerComparisons[e.Group]),
+			AverageRealTokenCostPerMTok:   providerComparisonAverageReal(providerComparisons[e.Group]),
+			EffectiveMinusRealCostPerMTok: providerComparisonEffectiveMinusReal(providerComparisons[e.Group]),
+			EffectiveVsRealPct:            providerComparisonEffectiveVsRealPct(providerComparisons[e.Group]),
 		}
 	}
 
@@ -248,6 +315,17 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 		Breakdown:                bd,
 		From:                     fromDate,
 		To:                       toDate,
+	}
+	if params.GroupBy == "provider" && providerComparisonSummary.HasAnySubscription {
+		totalMonthly := providerComparisonSummary.TotalSubscriptionCost
+		totalDelta := providerComparisonSummary.TokenMinusSubscription
+		resp.TotalMonthlySubscriptionCostUSD = &totalMonthly
+		resp.TotalTokenMinusSubscriptionUSD = &totalDelta
+		resp.TotalTokenVsSubscriptionPct = providerComparisonSummary.TokenVsSubscriptionPct
+		resp.EffectiveTokenCostPerMTokUSD = providerComparisonSummary.EffectiveTokenCostPerMTok
+		resp.AverageRealTokenCostPerMTokUSD = providerComparisonSummary.AverageRealTokenCostPerMTok
+		resp.EffectiveMinusRealCostPerMTokUSD = providerComparisonSummary.EffectiveMinusRealCostPerMTok
+		resp.EffectiveVsRealPct = providerComparisonSummary.EffectiveVsRealPct
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -510,24 +588,27 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 
 	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
 	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
+	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
 
 	data := map[string]any{
-		"ActiveTab":            "costs",
-		"Title":                "Cost Dashboard",
-		"Summary":              summary,
-		"TokenCosts":           tokenCosts,
-		"Breakdown":            breakdown,
-		"BreakdownCosts":       breakdownCosts,
-		"Timeseries":           aggregatedTimeseries,
-		"MaxCost":              maxCost,
-		"MaxBreakdownRequests": float64(maxBreakdownRequests),
-		"HasIncompleteData":    hasIncompleteData,
-		"From":                 fromDate,
-		"To":                   toDate,
-		"GroupBy":              groupBy,
-		"GroupFilter":          groupFilter,
-		"TotalAllInputTokens":  summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
-		"ProviderNames":        h.providerNames,
+		"ActiveTab":                 "costs",
+		"Title":                     "Cost Dashboard",
+		"Summary":                   summary,
+		"TokenCosts":                tokenCosts,
+		"Breakdown":                 breakdown,
+		"BreakdownCosts":            breakdownCosts,
+		"ProviderComparisons":       providerComparisons,
+		"ProviderComparisonSummary": providerComparisonSummary,
+		"Timeseries":                aggregatedTimeseries,
+		"MaxCost":                   maxCost,
+		"MaxBreakdownRequests":      float64(maxBreakdownRequests),
+		"HasIncompleteData":         hasIncompleteData,
+		"From":                      fromDate,
+		"To":                        toDate,
+		"GroupBy":                   groupBy,
+		"GroupFilter":               groupFilter,
+		"TotalAllInputTokens":       summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
+		"ProviderNames":             h.providerNames,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -602,21 +683,24 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 		}
 	}
 
-	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
 	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
+	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
 
 	data := map[string]any{
-		"Summary":              summary,
-		"TokenCosts":           tokenCosts,
-		"Breakdown":            breakdown,
-		"BreakdownCosts":       breakdownCosts,
-		"Timeseries":           aggregatedTimeseries,
-		"MaxCost":              maxCost,
-		"MaxBreakdownRequests": float64(maxBreakdownRequests),
-		"HasIncompleteData":    hasIncompleteData,
-		"GroupBy":              groupBy,
-		"TotalAllInputTokens":  summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
-		"ProviderNames":        h.providerNames,
+		"Summary":                   summary,
+		"TokenCosts":                tokenCosts,
+		"Breakdown":                 breakdown,
+		"BreakdownCosts":            breakdownCosts,
+		"ProviderComparisons":       providerComparisons,
+		"ProviderComparisonSummary": providerComparisonSummary,
+		"Timeseries":                aggregatedTimeseries,
+		"MaxCost":                   maxCost,
+		"MaxBreakdownRequests":      float64(maxBreakdownRequests),
+		"HasIncompleteData":         hasIncompleteData,
+		"GroupBy":                   groupBy,
+		"TotalAllInputTokens":       summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
+		"ProviderNames":             h.providerNames,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

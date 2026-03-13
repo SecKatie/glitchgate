@@ -93,7 +93,7 @@
 {{define "content"}}
 <h2>Cost Dashboard</h2>
 
-<form class="filter-bar" hx-get="/ui/api/costs/fragment" hx-target="#cost-content" hx-swap="innerHTML">
+<form class="filter-bar" action="/ui/costs" method="get" hx-get="/ui/costs" hx-select="#cost-content" hx-target="#cost-content" hx-swap="outerHTML" hx-push-url="true">
     <div>
         <label for="from">From</label>
         <input type="date" id="from" name="from" value="{{.From}}">

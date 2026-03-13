@@ -81,14 +81,15 @@ func (c *Config) OIDCEnabled() bool {
 
 // ProviderConfig describes an upstream LLM provider endpoint.
 type ProviderConfig struct {
-	Name           string `mapstructure:"name"            yaml:"name"`
-	Type           string `mapstructure:"type"            yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses"
-	BaseURL        string `mapstructure:"base_url"        yaml:"base_url"`
-	AuthMode       string `mapstructure:"auth_mode"       yaml:"auth_mode"` // "proxy_key" or "forward"
-	APIKey         string `mapstructure:"api_key"         yaml:"api_key"`
-	DefaultVersion string `mapstructure:"default_version" yaml:"default_version"`
-	TokenDir       string `mapstructure:"token_dir"       yaml:"token_dir"`        // github_copilot: OAuth token storage directory
-	Stream         *bool  `mapstructure:"stream"          yaml:"stream,omitempty"` // nil = follow client; false = force non-streaming upstream
+	Name                    string   `mapstructure:"name"                      yaml:"name"`
+	Type                    string   `mapstructure:"type"                      yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses"
+	BaseURL                 string   `mapstructure:"base_url"                  yaml:"base_url"`
+	AuthMode                string   `mapstructure:"auth_mode"                 yaml:"auth_mode"` // "proxy_key" or "forward"
+	APIKey                  string   `mapstructure:"api_key"                   yaml:"api_key"`
+	DefaultVersion          string   `mapstructure:"default_version"           yaml:"default_version"`
+	TokenDir                string   `mapstructure:"token_dir"                 yaml:"token_dir"`                           // github_copilot: OAuth token storage directory
+	Stream                  *bool    `mapstructure:"stream"                    yaml:"stream,omitempty"`                    // nil = follow client; false = force non-streaming upstream
+	MonthlySubscriptionCost *float64 `mapstructure:"monthly_subscription_cost" yaml:"monthly_subscription_cost,omitempty"` // optional provider-level monthly spend baseline in USD
 }
 
 // ModelMetadata holds optional per-request pricing rates for a model entry.
