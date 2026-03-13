@@ -38,11 +38,6 @@ func seedCostData(t *testing.T, st *SQLiteStore) {
 	err = st.CreateProxyKey(ctx, "pk-2", "hash-2", "llmp_sk_bb22", "key-beta")
 	require.NoError(t, err)
 
-	cost1 := 0.015
-	cost2 := 0.030
-	cost3 := 0.010
-	cost4 := 0.025
-
 	logs := []RequestLogEntry{
 		{
 			ID: "log-1", ProxyKeyID: "pk-1",
@@ -52,7 +47,6 @@ func seedCostData(t *testing.T, st *SQLiteStore) {
 			InputTokens: 100, OutputTokens: 500,
 			LatencyMs: 1200, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost1,
 		},
 		{
 			ID: "log-2", ProxyKeyID: "pk-1",
@@ -62,7 +56,6 @@ func seedCostData(t *testing.T, st *SQLiteStore) {
 			InputTokens: 200, OutputTokens: 800,
 			LatencyMs: 2500, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost2,
 		},
 		{
 			ID: "log-3", ProxyKeyID: "pk-2",
@@ -72,7 +65,6 @@ func seedCostData(t *testing.T, st *SQLiteStore) {
 			InputTokens: 150, OutputTokens: 600,
 			LatencyMs: 1800, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost3,
 		},
 		{
 			ID: "log-4", ProxyKeyID: "pk-2",
@@ -82,7 +74,6 @@ func seedCostData(t *testing.T, st *SQLiteStore) {
 			InputTokens: 300, OutputTokens: 1000,
 			LatencyMs: 3000, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost4,
 		},
 	}
 
@@ -112,7 +103,6 @@ func TestGetCostSummary(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, summary)
 
-		require.InDelta(t, 0.080, summary.TotalCostUSD, 0.001)
 		require.Equal(t, int64(750), summary.TotalInputTokens)
 		require.Equal(t, int64(2900), summary.TotalOutputTokens)
 		require.Equal(t, int64(4), summary.TotalRequests)
@@ -127,7 +117,6 @@ func TestGetCostSummary(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, int64(3), summary.TotalRequests)
-		require.InDelta(t, 0.055, summary.TotalCostUSD, 0.001)
 	})
 
 	t.Run("filter by key prefix", func(t *testing.T) {
@@ -140,7 +129,6 @@ func TestGetCostSummary(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, int64(2), summary.TotalRequests)
-		require.InDelta(t, 0.045, summary.TotalCostUSD, 0.001)
 	})
 
 	t.Run("empty range", func(t *testing.T) {
@@ -152,7 +140,6 @@ func TestGetCostSummary(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, int64(0), summary.TotalRequests)
-		require.Equal(t, float64(0), summary.TotalCostUSD)
 	})
 }
 
@@ -176,13 +163,8 @@ func TestGetCostBreakdown(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, entries, 2)
 
-		// Ordered by cost DESC: opus (0.055) > sonnet (0.025).
-		require.Equal(t, "claude-opus", entries[0].Group)
-		require.InDelta(t, 0.055, entries[0].CostUSD, 0.001)
+		// Ordered by request count DESC: opus (2) = sonnet (2), then alphabetical.
 		require.Equal(t, int64(2), entries[0].Requests)
-
-		require.Equal(t, "claude-sonnet", entries[1].Group)
-		require.InDelta(t, 0.025, entries[1].CostUSD, 0.001)
 		require.Equal(t, int64(2), entries[1].Requests)
 	})
 
@@ -196,12 +178,8 @@ func TestGetCostBreakdown(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, entries, 2)
 
-		// Ordered by cost DESC: pk-1 (0.045) > pk-2 (0.035).
 		require.Contains(t, entries[0].Group, "key-alpha")
-		require.InDelta(t, 0.045, entries[0].CostUSD, 0.001)
-
 		require.Contains(t, entries[1].Group, "key-beta")
-		require.InDelta(t, 0.035, entries[1].CostUSD, 0.001)
 	})
 
 	t.Run("by provider", func(t *testing.T) {
@@ -214,20 +192,11 @@ func TestGetCostBreakdown(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, entries, 2)
 
-		// Ordered by cost DESC: anthropic (0.045) > openai (0.035).
-		require.Equal(t, "anthropic", entries[0].Group)
-		require.InDelta(t, 0.045, entries[0].CostUSD, 0.001)
 		require.Equal(t, int64(2), entries[0].Requests)
-
-		require.Equal(t, "openai", entries[1].Group)
-		require.InDelta(t, 0.035, entries[1].CostUSD, 0.001)
 		require.Equal(t, int64(2), entries[1].Requests)
 	})
 
 	t.Run("by provider preserves host-qualified provider keys", func(t *testing.T) {
-		cost5 := 0.040
-		cost6 := 0.020
-
 		err := st.InsertRequestLog(ctx, &RequestLogEntry{
 			ID: "log-5", ProxyKeyID: "pk-1",
 			Timestamp:    time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC),
@@ -236,7 +205,6 @@ func TestGetCostBreakdown(t *testing.T) {
 			InputTokens: 400, OutputTokens: 900,
 			LatencyMs: 900, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost5,
 		})
 		require.NoError(t, err)
 
@@ -248,7 +216,6 @@ func TestGetCostBreakdown(t *testing.T) {
 			InputTokens: 200, OutputTokens: 300,
 			LatencyMs: 850, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost6,
 		})
 		require.NoError(t, err)
 
@@ -262,19 +229,15 @@ func TestGetCostBreakdown(t *testing.T) {
 		require.Len(t, entries, 4)
 
 		require.Equal(t, "anthropic", entries[0].Group)
-		require.InDelta(t, 0.045, entries[0].CostUSD, 0.001)
 		require.Equal(t, int64(2), entries[0].Requests)
 
-		require.Equal(t, "openai_responses:chatgpt.com", entries[1].Group)
-		require.InDelta(t, 0.040, entries[1].CostUSD, 0.001)
-		require.Equal(t, int64(1), entries[1].Requests)
+		require.Equal(t, "openai", entries[1].Group)
+		require.Equal(t, int64(2), entries[1].Requests)
 
-		require.Equal(t, "openai", entries[2].Group)
-		require.InDelta(t, 0.035, entries[2].CostUSD, 0.001)
-		require.Equal(t, int64(2), entries[2].Requests)
+		require.Equal(t, "openai_responses:api.openai.com", entries[2].Group)
+		require.Equal(t, int64(1), entries[2].Requests)
 
-		require.Equal(t, "openai_responses:api.openai.com", entries[3].Group)
-		require.InDelta(t, 0.020, entries[3].CostUSD, 0.001)
+		require.Equal(t, "openai_responses:chatgpt.com", entries[3].Group)
 		require.Equal(t, int64(1), entries[3].Requests)
 	})
 
@@ -310,15 +273,12 @@ func TestGetCostTimeseries(t *testing.T) {
 		require.Len(t, entries, 3) // Mar 1, Mar 2, Mar 5
 
 		require.Equal(t, "2026-03-01", entries[0].Date)
-		require.InDelta(t, 0.015, entries[0].CostUSD, 0.001)
 		require.Equal(t, int64(1), entries[0].Requests)
 
 		require.Equal(t, "2026-03-02", entries[1].Date)
-		require.InDelta(t, 0.040, entries[1].CostUSD, 0.001)
 		require.Equal(t, int64(2), entries[1].Requests)
 
 		require.Equal(t, "2026-03-05", entries[2].Date)
-		require.InDelta(t, 0.025, entries[2].CostUSD, 0.001)
 		require.Equal(t, int64(1), entries[2].Requests)
 	})
 
@@ -333,10 +293,7 @@ func TestGetCostTimeseries(t *testing.T) {
 		require.Len(t, entries, 2) // Mar 2 (pk-2 only), Mar 5
 
 		require.Equal(t, "2026-03-02", entries[0].Date)
-		require.InDelta(t, 0.010, entries[0].CostUSD, 0.001)
-
 		require.Equal(t, "2026-03-05", entries[1].Date)
-		require.InDelta(t, 0.025, entries[1].CostUSD, 0.001)
 	})
 
 	t.Run("empty", func(t *testing.T) {
@@ -356,33 +313,29 @@ func TestGetCostTimeseries(t *testing.T) {
 		nyc, err := time.LoadLocation("America/New_York")
 		require.NoError(t, err)
 
-		costBefore := 0.01
-		costAfter := 0.02
 		require.NoError(t, dstStore.InsertRequestLog(ctx, &RequestLogEntry{
-			ID:               "dst-before",
-			ProxyKeyID:       "pk-dst",
-			Timestamp:        time.Date(2026, 3, 8, 4, 30, 0, 0, time.UTC),
-			SourceFormat:     "responses",
-			ProviderName:     "openai_responses",
-			ModelRequested:   "gpt-4o",
-			ModelUpstream:    "gpt-4o",
-			Status:           200,
-			RequestBody:      "{}",
-			ResponseBody:     "{}",
-			EstimatedCostUSD: &costBefore,
+			ID:             "dst-before",
+			ProxyKeyID:     "pk-dst",
+			Timestamp:      time.Date(2026, 3, 8, 4, 30, 0, 0, time.UTC),
+			SourceFormat:   "responses",
+			ProviderName:   "openai_responses",
+			ModelRequested: "gpt-4o",
+			ModelUpstream:  "gpt-4o",
+			Status:         200,
+			RequestBody:    "{}",
+			ResponseBody:   "{}",
 		}))
 		require.NoError(t, dstStore.InsertRequestLog(ctx, &RequestLogEntry{
-			ID:               "dst-after",
-			ProxyKeyID:       "pk-dst",
-			Timestamp:        time.Date(2026, 3, 8, 7, 30, 0, 0, time.UTC),
-			SourceFormat:     "responses",
-			ProviderName:     "openai_responses",
-			ModelRequested:   "gpt-4o",
-			ModelUpstream:    "gpt-4o",
-			Status:           200,
-			RequestBody:      "{}",
-			ResponseBody:     "{}",
-			EstimatedCostUSD: &costAfter,
+			ID:             "dst-after",
+			ProxyKeyID:     "pk-dst",
+			Timestamp:      time.Date(2026, 3, 8, 7, 30, 0, 0, time.UTC),
+			SourceFormat:   "responses",
+			ProviderName:   "openai_responses",
+			ModelRequested: "gpt-4o",
+			ModelUpstream:  "gpt-4o",
+			Status:         200,
+			RequestBody:    "{}",
+			ResponseBody:   "{}",
 		}))
 
 		entries, err := dstStore.GetCostTimeseries(ctx, CostParams{
@@ -393,9 +346,7 @@ func TestGetCostTimeseries(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, entries, 2)
 		require.Equal(t, "2026-03-07", entries[0].Date)
-		require.InDelta(t, 0.01, entries[0].CostUSD, 0.001)
 		require.Equal(t, "2026-03-08", entries[1].Date)
-		require.InDelta(t, 0.02, entries[1].CostUSD, 0.001)
 	})
 }
 
@@ -409,40 +360,35 @@ func TestProviderGroupFiltersApplyAcrossCostQueries(t *testing.T) {
 
 	ctx := context.Background()
 
-	cost5 := 0.040
-	cost6 := 0.020
-
 	err := st.InsertRequestLog(ctx, &RequestLogEntry{
 		ID: "log-5", ProxyKeyID: "pk-1",
-		Timestamp:        time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC),
-		SourceFormat:     "openai",
-		ProviderName:     "openai_responses:chatgpt.com",
-		ModelRequested:   "gpt-5",
-		ModelUpstream:    "gpt-5",
-		InputTokens:      400,
-		OutputTokens:     900,
-		LatencyMs:        900,
-		Status:           200,
-		RequestBody:      "{}",
-		ResponseBody:     "{}",
-		EstimatedCostUSD: &cost5,
+		Timestamp:      time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC),
+		SourceFormat:   "openai",
+		ProviderName:   "openai_responses:chatgpt.com",
+		ModelRequested: "gpt-5",
+		ModelUpstream:  "gpt-5",
+		InputTokens:    400,
+		OutputTokens:   900,
+		LatencyMs:      900,
+		Status:         200,
+		RequestBody:    "{}",
+		ResponseBody:   "{}",
 	})
 	require.NoError(t, err)
 
 	err = st.InsertRequestLog(ctx, &RequestLogEntry{
 		ID: "log-6", ProxyKeyID: "pk-2",
-		Timestamp:        time.Date(2026, 3, 7, 11, 0, 0, 0, time.UTC),
-		SourceFormat:     "openai",
-		ProviderName:     "openai_responses:api.openai.com",
-		ModelRequested:   "gpt-5-mini",
-		ModelUpstream:    "gpt-5-mini",
-		InputTokens:      200,
-		OutputTokens:     300,
-		LatencyMs:        850,
-		Status:           200,
-		RequestBody:      "{}",
-		ResponseBody:     "{}",
-		EstimatedCostUSD: &cost6,
+		Timestamp:      time.Date(2026, 3, 7, 11, 0, 0, 0, time.UTC),
+		SourceFormat:   "openai",
+		ProviderName:   "openai_responses:api.openai.com",
+		ModelRequested: "gpt-5-mini",
+		ModelUpstream:  "gpt-5-mini",
+		InputTokens:    200,
+		OutputTokens:   300,
+		LatencyMs:      850,
+		Status:         200,
+		RequestBody:    "{}",
+		ResponseBody:   "{}",
 	})
 	require.NoError(t, err)
 
@@ -456,15 +402,14 @@ func TestProviderGroupFiltersApplyAcrossCostQueries(t *testing.T) {
 
 	summary, err := st.GetCostSummary(ctx, params)
 	require.NoError(t, err)
-	require.InDelta(t, 0.095, summary.TotalCostUSD, 0.001)
 	require.Equal(t, int64(4), summary.TotalRequests)
 
 	breakdown, err := st.GetCostBreakdown(ctx, params)
 	require.NoError(t, err)
 	require.Len(t, breakdown, 3)
-	require.Equal(t, "openai_responses:chatgpt.com", breakdown[0].Group)
-	require.Equal(t, "openai", breakdown[1].Group)
-	require.Equal(t, "openai_responses:api.openai.com", breakdown[2].Group)
+	require.Equal(t, "openai", breakdown[0].Group)
+	require.Equal(t, "openai_responses:api.openai.com", breakdown[1].Group)
+	require.Equal(t, "openai_responses:chatgpt.com", breakdown[2].Group)
 
 	pricingGroups, err := st.GetCostPricingGroups(ctx, params)
 	require.NoError(t, err)
@@ -477,13 +422,9 @@ func TestProviderGroupFiltersApplyAcrossCostQueries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, timeseries, 4)
 	require.Equal(t, "2026-03-02", timeseries[0].Date)
-	require.InDelta(t, 0.010, timeseries[0].CostUSD, 0.001)
 	require.Equal(t, "2026-03-05", timeseries[1].Date)
-	require.InDelta(t, 0.025, timeseries[1].CostUSD, 0.001)
 	require.Equal(t, "2026-03-06", timeseries[2].Date)
-	require.InDelta(t, 0.040, timeseries[2].CostUSD, 0.001)
 	require.Equal(t, "2026-03-07", timeseries[3].Date)
-	require.InDelta(t, 0.020, timeseries[3].CostUSD, 0.001)
 }
 
 func TestCacheTokenRoundTrip(t *testing.T) {
@@ -497,7 +438,6 @@ func TestCacheTokenRoundTrip(t *testing.T) {
 	err := st.CreateProxyKey(ctx, "pk-cache", "hash-cache", "llmp_sk_cc33", "cache-key")
 	require.NoError(t, err)
 
-	cost := 0.05
 	entry := &RequestLogEntry{
 		ID:                       "log-cache",
 		ProxyKeyID:               "pk-cache",
@@ -514,7 +454,6 @@ func TestCacheTokenRoundTrip(t *testing.T) {
 		Status:                   200,
 		RequestBody:              "{}",
 		ResponseBody:             "{}",
-		EstimatedCostUSD:         &cost,
 	}
 	err = st.InsertRequestLog(ctx, entry)
 	require.NoError(t, err)

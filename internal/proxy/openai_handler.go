@@ -138,7 +138,7 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latency := time.Since(start).Milliseconds()
 			errMsg := err.Error()
 			h.logOpenAIRequest(proxyKeyID, provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel,
-				0, 0, 0, 0, 0, latency, http.StatusBadGateway, body, []byte(errMsg), nil, &errMsg, oaiReq.Stream, attemptCount)
+				0, 0, 0, 0, 0, latency, http.StatusBadGateway, body, []byte(errMsg), &errMsg, oaiReq.Stream, attemptCount)
 			writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
 			return
 		}
@@ -155,7 +155,7 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latency := time.Since(start).Milliseconds()
 			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
 			h.logOpenAIRequest(proxyKeyID, provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel,
-				0, 0, 0, 0, 0, latency, http.StatusServiceUnavailable, body, []byte(errMsg), nil, &errMsg, oaiReq.Stream, attemptCount)
+				0, 0, 0, 0, 0, latency, http.StatusServiceUnavailable, body, []byte(errMsg), &errMsg, oaiReq.Stream, attemptCount)
 			writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "All upstream providers failed")
 			return
 		}
@@ -193,7 +193,7 @@ func (h *OpenAIHandler) handleOpenAINonStreaming(w http.ResponseWriter, resp *pr
 
 		h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
 			resp.InputTokens, resp.OutputTokens, 0, 0, 0, latency, resp.StatusCode,
-			reqBody, resp.Body, nil, errDetails, false, attemptCount)
+			reqBody, resp.Body, errDetails, false, attemptCount)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (h *OpenAIHandler) handleOpenAINonStreaming(w http.ResponseWriter, resp *pr
 		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
 		h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
 			0, 0, 0, 0, 0, latency, http.StatusBadGateway,
-			reqBody, resp.Body, nil, errDetails, false, attemptCount)
+			reqBody, resp.Body, errDetails, false, attemptCount)
 		return
 	}
 
@@ -223,14 +223,11 @@ func (h *OpenAIHandler) handleOpenAINonStreaming(w http.ResponseWriter, resp *pr
 		slog.Warn("write OpenAI response", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens,
-		anthResp.Usage.CacheCreationInputTokens, anthResp.Usage.CacheReadInputTokens)
-
 	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
 		anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens,
 		anthResp.Usage.CacheCreationInputTokens, anthResp.Usage.CacheReadInputTokens,
 		0, latency, http.StatusOK,
-		reqBody, oaiBody, cost, nil, false, attemptCount)
+		reqBody, oaiBody, nil, false, attemptCount)
 }
 
 func (h *OpenAIHandler) handleOpenAIStreaming(w http.ResponseWriter, resp *provider.Response,
@@ -246,9 +243,6 @@ func (h *OpenAIHandler) handleOpenAIStreaming(w http.ResponseWriter, resp *provi
 		slog.Warn("stream relay error", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, result.InputTokens, result.OutputTokens,
-		result.CacheCreationInputTokens, result.CacheReadInputTokens)
-
 	status := resp.StatusCode
 	if status == 0 {
 		status = http.StatusOK
@@ -258,7 +252,7 @@ func (h *OpenAIHandler) handleOpenAIStreaming(w http.ResponseWriter, resp *provi
 		result.InputTokens, result.OutputTokens,
 		result.CacheCreationInputTokens, result.CacheReadInputTokens,
 		result.ReasoningTokens, latency, status,
-		reqBody, result.Body, cost, errDetails, true, attemptCount)
+		reqBody, result.Body, errDetails, true, attemptCount)
 }
 
 // serveOpenAINative handles requests to OpenAI-native providers (e.g. Copilot)
@@ -292,7 +286,7 @@ func (h *OpenAIHandler) serveOpenAINative(w http.ResponseWriter, r *http.Request
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
 		h.logOpenAIRequest(proxyKeyID, provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel,
-			0, 0, 0, 0, 0, latency, http.StatusBadGateway, rawBody, []byte(errMsg), nil, &errMsg, oaiReq.Stream, attemptCount)
+			0, 0, 0, 0, 0, latency, http.StatusBadGateway, rawBody, []byte(errMsg), &errMsg, oaiReq.Stream, attemptCount)
 		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
 		return
 	}
@@ -322,7 +316,7 @@ func (h *OpenAIHandler) handleOpenAINativeNonStreaming(w http.ResponseWriter, re
 
 		h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
 			resp.InputTokens, resp.OutputTokens, 0, 0, resp.ReasoningTokens, latency, resp.StatusCode,
-			reqBody, resp.Body, nil, errDetails, false, attemptCount)
+			reqBody, resp.Body, errDetails, false, attemptCount)
 		return
 	}
 
@@ -333,12 +327,10 @@ func (h *OpenAIHandler) handleOpenAINativeNonStreaming(w http.ResponseWriter, re
 		slog.Warn("write OpenAI native response", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, resp.InputTokens, resp.OutputTokens, 0, 0)
-
 	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		resp.InputTokens, resp.OutputTokens, 0, 0,
+		resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens,
 		resp.ReasoningTokens, latency, http.StatusOK,
-		reqBody, resp.Body, cost, nil, false, attemptCount)
+		reqBody, resp.Body, nil, false, attemptCount)
 }
 
 func (h *OpenAIHandler) handleOpenAINativeStreaming(w http.ResponseWriter, resp *provider.Response,
@@ -354,17 +346,13 @@ func (h *OpenAIHandler) handleOpenAINativeStreaming(w http.ResponseWriter, resp 
 		slog.Warn("stream relay error", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, result.InputTokens, result.OutputTokens, 0, 0)
-
 	status := resp.StatusCode
 	if status == 0 {
 		status = http.StatusOK
 	}
-
 	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		result.InputTokens, result.OutputTokens, 0, 0,
-		0, latency, status,
-		reqBody, result.Body, cost, errDetails, true, attemptCount)
+		result.InputTokens, result.OutputTokens, result.CacheCreationInputTokens, result.CacheReadInputTokens,
+		result.ReasoningTokens, latency, status, reqBody, result.Body, errDetails, true, attemptCount)
 }
 
 // serveOpenAIViaResponsesProvider handles CC requests that need to be sent
@@ -401,7 +389,7 @@ func (h *OpenAIHandler) serveOpenAIViaResponsesProvider(w http.ResponseWriter, r
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
 		h.logOpenAIRequest(proxyKeyID, provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel,
-			0, 0, 0, 0, 0, latency, http.StatusBadGateway, rawBody, []byte(errMsg), nil, &errMsg, oaiReq.Stream, attemptCount)
+			0, 0, 0, 0, 0, latency, http.StatusBadGateway, rawBody, []byte(errMsg), &errMsg, oaiReq.Stream, attemptCount)
 		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
 		return
 	}
@@ -426,7 +414,7 @@ func (h *OpenAIHandler) handleResponsesProviderNonStreamingToCC(w http.ResponseW
 		writeOpenAIError(w, resp.StatusCode, "api_error", s)
 		h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
 			resp.InputTokens, resp.OutputTokens, 0, 0, resp.ReasoningTokens, latency, resp.StatusCode,
-			reqBody, resp.Body, nil, errDetails, false, attemptCount)
+			reqBody, resp.Body, errDetails, false, attemptCount)
 		return
 	}
 
@@ -444,12 +432,10 @@ func (h *OpenAIHandler) handleResponsesProviderNonStreamingToCC(w http.ResponseW
 		slog.Warn("write OpenAI response", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens)
-
 	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens,
+		resp.InputTokens, resp.OutputTokens, 0, 0,
 		resp.ReasoningTokens, latency, http.StatusOK,
-		reqBody, ccBody, cost, nil, false, attemptCount)
+		reqBody, ccBody, nil, false, attemptCount)
 }
 
 func (h *OpenAIHandler) handleResponsesProviderStreamingToCC(w http.ResponseWriter, resp *provider.Response,
@@ -465,21 +451,18 @@ func (h *OpenAIHandler) handleResponsesProviderStreamingToCC(w http.ResponseWrit
 		slog.Warn("stream relay error", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, result.InputTokens, result.OutputTokens, 0, result.CacheReadInputTokens)
-
 	status := resp.StatusCode
 	if status == 0 {
 		status = http.StatusOK
 	}
-
 	h.logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		result.InputTokens, result.OutputTokens, 0, result.CacheReadInputTokens,
-		0, latency, status, reqBody, result.Body, cost, errDetails, true, attemptCount)
+		result.InputTokens, result.OutputTokens, result.CacheCreationInputTokens, result.CacheReadInputTokens,
+		result.ReasoningTokens, latency, status, reqBody, result.Body, errDetails, true, attemptCount)
 }
 
 func (h *OpenAIHandler) logOpenAIRequest(proxyKeyID, providerName, modelRequested, modelUpstream string,
 	inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens, latencyMs int64, status int,
-	requestBody, responseBody []byte, cost *float64, errDetails *string, isStreaming bool, attemptCount int64,
+	requestBody, responseBody []byte, errDetails *string, isStreaming bool, attemptCount int64,
 ) {
 	entry := &store.RequestLogEntry{
 		ID:                       uuid.New().String(),
@@ -498,7 +481,6 @@ func (h *OpenAIHandler) logOpenAIRequest(proxyKeyID, providerName, modelRequeste
 		Status:                   status,
 		RequestBody:              RedactRequestBody(requestBody),
 		ResponseBody:             string(responseBody),
-		EstimatedCostUSD:         cost,
 		ErrorDetails:             errDetails,
 		IsStreaming:              isStreaming,
 		FallbackAttempts:         attemptCount,

@@ -201,7 +201,7 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 	for i, e := range breakdown {
 		bd[i] = costBreakdownEntryJSON{
 			Group:               e.Group,
-			CostUSD:             e.CostUSD,
+			CostUSD:             0,
 			InputTokens:         e.InputTokens,
 			OutputTokens:        e.OutputTokens,
 			CacheCreationTokens: e.CacheCreationTokens,
@@ -221,7 +221,7 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	resp := costSummaryResponse{
-		TotalCostUSD:             summary.TotalCostUSD,
+		TotalCostUSD:             0,
 		TotalInputTokens:         summary.TotalInputTokens,
 		TotalOutputTokens:        summary.TotalOutputTokens,
 		TotalCacheCreationTokens: summary.TotalCacheCreationTokens,
@@ -266,7 +266,7 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 	for i, e := range aggregated {
 		data[i] = costTimeseriesEntryJSON{
 			Date:     e.Date,
-			CostUSD:  e.CostUSD,
+			CostUSD:  0,
 			Requests: e.Requests,
 		}
 	}
@@ -323,7 +323,6 @@ func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) [
 
 	type bucket struct {
 		key      string
-		costUSD  float64
 		requests int64
 	}
 
@@ -333,13 +332,11 @@ func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) [
 	for _, e := range entries {
 		bk := bucketKey(e.Date)
 		if idx, ok := seen[bk]; ok {
-			buckets[idx].costUSD += e.CostUSD
 			buckets[idx].requests += e.Requests
 		} else {
 			seen[bk] = len(buckets)
 			buckets = append(buckets, bucket{
 				key:      bk,
-				costUSD:  e.CostUSD,
 				requests: e.Requests,
 			})
 		}
@@ -349,7 +346,6 @@ func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) [
 	for i, b := range buckets {
 		result[i] = store.CostTimeseriesEntry{
 			Date:     b.key,
-			CostUSD:  b.costUSD,
 			Requests: b.requests,
 		}
 	}
@@ -370,7 +366,6 @@ func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerName
 
 		agg := combined[name]
 		agg.Group = name
-		agg.CostUSD += entry.CostUSD
 		agg.InputTokens += entry.InputTokens
 		agg.OutputTokens += entry.OutputTokens
 		agg.CacheCreationTokens += entry.CacheCreationTokens
@@ -386,9 +381,9 @@ func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerName
 
 	slices.SortFunc(result, func(a, b store.CostBreakdownEntry) int {
 		switch {
-		case a.CostUSD > b.CostUSD:
+		case a.Requests > b.Requests:
 			return -1
-		case a.CostUSD < b.CostUSD:
+		case a.Requests < b.Requests:
 			return 1
 		case a.Group < b.Group:
 			return -1
@@ -438,19 +433,16 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Determine max cost for bar chart scaling.
-	var maxCost float64
+	var maxRequests int64
 	for _, e := range timeseries {
-		if e.CostUSD > maxCost {
-			maxCost = e.CostUSD
+		if e.Requests > maxRequests {
+			maxRequests = e.Requests
 		}
 	}
-
-	// Determine max breakdown cost for bar chart scaling.
-	var maxBreakdownCost float64
+	var maxBreakdownRequests int64
 	for _, e := range breakdown {
-		if e.CostUSD > maxBreakdownCost {
-			maxBreakdownCost = e.CostUSD
+		if e.Requests > maxBreakdownRequests {
+			maxBreakdownRequests = e.Requests
 		}
 	}
 
@@ -484,21 +476,21 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
 
 	data := map[string]any{
-		"ActiveTab":           "costs",
-		"Title":               "Cost Dashboard",
-		"Summary":             summary,
-		"TokenCosts":          tokenCosts,
-		"Breakdown":           breakdown,
-		"Timeseries":          timeseries,
-		"MaxCost":             maxCost,
-		"MaxBreakdownCost":    maxBreakdownCost,
-		"HasIncompleteData":   hasIncompleteData,
-		"From":                fromDate,
-		"To":                  toDate,
-		"GroupBy":             groupBy,
-		"GroupFilter":         groupFilter,
-		"TotalAllInputTokens": summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
-		"ProviderNames":       h.providerNames,
+		"ActiveTab":            "costs",
+		"Title":                "Cost Dashboard",
+		"Summary":              summary,
+		"TokenCosts":           tokenCosts,
+		"Breakdown":            breakdown,
+		"Timeseries":           timeseries,
+		"MaxRequests":          float64(maxRequests),
+		"MaxBreakdownRequests": float64(maxBreakdownRequests),
+		"HasIncompleteData":    hasIncompleteData,
+		"From":                 fromDate,
+		"To":                   toDate,
+		"GroupBy":              groupBy,
+		"GroupFilter":          groupFilter,
+		"TotalAllInputTokens":  summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
+		"ProviderNames":        h.providerNames,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -544,17 +536,16 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	var maxCost float64
+	var maxRequests int64
 	for _, e := range timeseries {
-		if e.CostUSD > maxCost {
-			maxCost = e.CostUSD
+		if e.Requests > maxRequests {
+			maxRequests = e.Requests
 		}
 	}
-
-	var maxBreakdownCost float64
+	var maxBreakdownRequests int64
 	for _, e := range breakdown {
-		if e.CostUSD > maxBreakdownCost {
-			maxBreakdownCost = e.CostUSD
+		if e.Requests > maxBreakdownRequests {
+			maxBreakdownRequests = e.Requests
 		}
 	}
 
@@ -574,16 +565,16 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
 
 	data := map[string]any{
-		"Summary":             summary,
-		"TokenCosts":          tokenCosts,
-		"Breakdown":           breakdown,
-		"Timeseries":          timeseries,
-		"MaxCost":             maxCost,
-		"MaxBreakdownCost":    maxBreakdownCost,
-		"HasIncompleteData":   hasIncompleteData,
-		"GroupBy":             groupBy,
-		"TotalAllInputTokens": summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
-		"ProviderNames":       h.providerNames,
+		"Summary":              summary,
+		"TokenCosts":           tokenCosts,
+		"Breakdown":            breakdown,
+		"Timeseries":           timeseries,
+		"MaxRequests":          float64(maxRequests),
+		"MaxBreakdownRequests": float64(maxBreakdownRequests),
+		"HasIncompleteData":    hasIncompleteData,
+		"GroupBy":              groupBy,
+		"TotalAllInputTokens":  summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
+		"ProviderNames":        h.providerNames,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
