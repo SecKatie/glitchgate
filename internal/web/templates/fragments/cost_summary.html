@@ -83,13 +83,13 @@
 
 <!-- Daily cost chart -->
 {{if and .Timeseries (gt (len .Timeseries) 1)}}
-<h3>Daily Request Trend</h3>
+<h3>Daily Spend Trend</h3>
 <figure>
     <div class="bar-chart">
         {{range .Timeseries}}
-        <div class="bar-col" title="{{.Date}}: {{.Requests}} req">
-            <div class="bar-val">{{.Requests}}</div>
-            <div class="bar" style="height: {{if gt $.MaxRequests 0.0}}{{barPct (toFloat64 .Requests) $.MaxRequests}}%{{else}}2px{{end}};"></div>
+        <div class="bar-col" title="{{.Date}}: ${{printf "%.2f" .CostUSD}}">
+            <div class="bar-val">${{printf "%.2f" .CostUSD}}</div>
+            <div class="bar" style="height: {{if gt $.MaxCost 0.0}}{{barPct .CostUSD $.MaxCost}}%{{else}}2px{{end}};"></div>
         </div>
         {{end}}
     </div>
