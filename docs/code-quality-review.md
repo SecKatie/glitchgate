@@ -128,7 +128,9 @@ Status 2026-03-13: the cross-format fallback continuation bug is fixed in the An
 
 `runServe` is doing full application composition rather than acting as a thin CLI entrypoint. In one function it loads config, opens the DB, runs migrations, normalizes runtime settings, builds providers, seeds pricing, wires routes, and starts background jobs (`cmd/serve.go:46-180` and later). Provider identity is also recomputed in multiple loops for client creation, pricing keys, metadata overrides, and UI naming.
 
-Refactor target: add an `internal/app` or `internal/bootstrap` package that returns a composed runtime object, and add a `ProviderRegistry` that resolves canonical provider keys, default base URLs, pricing defaults, and instantiated clients once. This removes the current "change one provider concept in four places" problem.
+Refactor target: add an `internal/app` or `internal/bootstrap` package that returns a composed runtime object, and add a `ProviderRegistry` that resolves unique configured provider names, default base URLs, pricing defaults, and instantiated clients once. Provider identity should stay keyed to `ProviderConfig.Name`; type and host detection should only select default pricing tables or one-time legacy backfills. This removes the current "change one provider concept in four places" problem.
+
+Status 2026-03-13: provider identity and runtime cost attribution now use `ProviderConfig.Name`. Legacy canonical host/type keys are only retained for historical log normalization and default-rate selection.
 
 3. Centralize authorization policy and fix the current scope bug first.
 

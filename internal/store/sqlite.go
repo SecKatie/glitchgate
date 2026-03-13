@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite" // SQLite driver (pure Go, no CGO).
 )
@@ -63,6 +66,126 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+type providerNameRewrite struct {
+	oldName     string
+	newName     string
+	modelExact  string
+	modelPrefix string
+}
+
+// NormalizeLoggedProviderNames rewrites legacy canonical provider keys in
+// request_logs to the configured provider names used for runtime identity.
+func (s *SQLiteStore) NormalizeLoggedProviderNames(ctx context.Context, cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	rewrites, err := providerNameRewrites(cfg)
+	if err != nil {
+		return err
+	}
+	if len(rewrites) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin provider-name normalization: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	for _, rewrite := range rewrites {
+		query := `UPDATE request_logs SET provider_name = ? WHERE provider_name = ? AND model_requested = ?`
+		args := []any{rewrite.newName, rewrite.oldName, rewrite.modelExact}
+		if rewrite.modelPrefix != "" {
+			query = `UPDATE request_logs SET provider_name = ? WHERE provider_name = ? AND model_requested LIKE ?`
+			args = []any{rewrite.newName, rewrite.oldName, rewrite.modelPrefix + "%"}
+		}
+		if _, err = tx.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("normalize provider name %q -> %q: %w", rewrite.oldName, rewrite.newName, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit provider-name normalization: %w", err)
+	}
+	return nil
+}
+
+func providerNameRewrites(cfg *config.Config) ([]providerNameRewrite, error) {
+	exact := make([]providerNameRewrite, 0)
+	wildcards := make([]providerNameRewrite, 0)
+	seen := make(map[string]string)
+
+	for _, mm := range cfg.ModelList {
+		if mm.Provider == "" || len(mm.Fallbacks) > 0 {
+			continue
+		}
+
+		pc, err := cfg.FindProvider(mm.Provider)
+		if err != nil {
+			return nil, fmt.Errorf("find provider for model %q: %w", mm.ModelName, err)
+		}
+
+		oldName := legacyLoggedProviderName(*pc)
+		if oldName == "" || oldName == pc.Name {
+			continue
+		}
+
+		rewrite := providerNameRewrite{
+			oldName: oldName,
+			newName: pc.Name,
+		}
+		if strings.HasSuffix(mm.ModelName, "/*") {
+			rewrite.modelPrefix = strings.TrimSuffix(mm.ModelName, "*")
+		} else {
+			rewrite.modelExact = mm.ModelName
+		}
+
+		conflictKey := rewrite.oldName + "\x00" + rewrite.modelExact + "\x00" + rewrite.modelPrefix
+		if existing, ok := seen[conflictKey]; ok {
+			if existing != rewrite.newName {
+				return nil, fmt.Errorf(
+					"ambiguous provider-name normalization for %q and model pattern %q: %q vs %q",
+					rewrite.oldName,
+					rewritePattern(rewrite),
+					existing,
+					rewrite.newName,
+				)
+			}
+			continue
+		}
+		seen[conflictKey] = rewrite.newName
+
+		if rewrite.modelPrefix != "" {
+			wildcards = append(wildcards, rewrite)
+			continue
+		}
+		exact = append(exact, rewrite)
+	}
+
+	return append(exact, wildcards...), nil
+}
+
+func legacyLoggedProviderName(pc config.ProviderConfig) string {
+	baseURL := pc.BaseURL
+	if pc.Type == "github_copilot" && baseURL == "" {
+		baseURL = copilot.DefaultAPIURL
+	}
+	return pricing.ProviderKey(pc.Type, baseURL)
+}
+
+func rewritePattern(rewrite providerNameRewrite) string {
+	if rewrite.modelExact != "" {
+		return rewrite.modelExact
+	}
+	return rewrite.modelPrefix + "*"
 }
 
 // Close closes the underlying database connection.
@@ -1049,6 +1172,98 @@ func (s *SQLiteStore) GetCostTimeseries(ctx context.Context, params CostParams) 
 	return entries, nil
 }
 
+// GetCostTimeseriesPricingGroups returns daily token totals grouped by exact
+// provider/model pair so pricing can be computed accurately in the web layer.
+func (s *SQLiteStore) GetCostTimeseriesPricingGroups(ctx context.Context, params CostParams) ([]CostTimeseriesPricingGroup, error) {
+	needsKeyJoin := params.KeyPrefix != "" || params.ScopeType == "user" || params.ScopeType == "team"
+
+	if params.TzLocation != nil {
+		return s.getCostTimeseriesPricingGroupsWithLocation(ctx, params, needsKeyJoin)
+	}
+
+	// Shift the stored UTC timestamp to local time before bucketing by date.
+	// #nosec G201 -- offset is server-computed from IANA timezone, not user input
+	dateExpr := fmt.Sprintf("SUBSTR(datetime(SUBSTR(CAST(rl.timestamp AS TEXT), 1, 19), '%+d seconds'), 1, 10)", params.TzOffsetSeconds)
+	query := fmt.Sprintf(`SELECT
+		%s AS date,
+		rl.provider_name,
+		rl.model_upstream,
+		COALESCE(SUM(rl.input_tokens), 0),
+		COALESCE(SUM(rl.output_tokens), 0),
+		COALESCE(SUM(rl.cache_creation_input_tokens), 0),
+		COALESCE(SUM(rl.cache_read_input_tokens), 0),
+		COUNT(*)
+	FROM request_logs rl`, dateExpr) // #nosec G201
+
+	if needsKeyJoin {
+		query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+	}
+	query = addOwnerScopeJoins(query, params.ScopeType)
+
+	var conditions []string
+	var args []any
+
+	if params.From != "" {
+		conditions = append(conditions, "rl.timestamp >= ?")
+		args = append(args, params.From)
+	}
+	if params.To != "" {
+		conditions = append(conditions, "rl.timestamp <= ?")
+		args = append(args, params.To)
+	}
+	if params.KeyPrefix != "" {
+		conditions = append(conditions, "pk.key_prefix = ?")
+		args = append(args, params.KeyPrefix)
+	}
+	switch params.GroupBy {
+	case "provider":
+		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
+	default:
+		if params.GroupFilter != "" {
+			conditions = append(conditions, "rl.model_requested LIKE ?")
+			args = append(args, params.GroupFilter+"%")
+		}
+	}
+	conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions are hardcoded strings; user input is in parameterized args
+	}
+	query += " GROUP BY " + dateExpr + ", rl.provider_name, rl.model_upstream ORDER BY date, rl.provider_name, rl.model_upstream" // #nosec G201
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get cost timeseries pricing groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var groups []CostTimeseriesPricingGroup
+	for rows.Next() {
+		var group CostTimeseriesPricingGroup
+		if err := rows.Scan(
+			&group.Date,
+			&group.ProviderName,
+			&group.ModelUpstream,
+			&group.InputTokens,
+			&group.OutputTokens,
+			&group.CacheCreationTokens,
+			&group.CacheReadTokens,
+			&group.Requests,
+		); err != nil {
+			return nil, fmt.Errorf("scan cost timeseries pricing group: %w", err)
+		}
+		groups = append(groups, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cost timeseries pricing groups: %w", err)
+	}
+	if groups == nil {
+		groups = []CostTimeseriesPricingGroup{}
+	}
+
+	return groups, nil
+}
+
 func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params CostParams, needsKeyJoin bool) ([]CostTimeseriesEntry, error) {
 	query := `SELECT
 		rl.timestamp
@@ -1126,6 +1341,123 @@ func (s *SQLiteStore) getCostTimeseriesWithLocation(ctx context.Context, params 
 	}
 
 	return entries, nil
+}
+
+func (s *SQLiteStore) getCostTimeseriesPricingGroupsWithLocation(ctx context.Context, params CostParams, needsKeyJoin bool) ([]CostTimeseriesPricingGroup, error) {
+	query := `SELECT
+		rl.timestamp,
+		rl.provider_name,
+		rl.model_upstream,
+		rl.input_tokens,
+		rl.output_tokens,
+		rl.cache_creation_input_tokens,
+		rl.cache_read_input_tokens
+	FROM request_logs rl`
+
+	if needsKeyJoin {
+		query += " JOIN proxy_keys pk ON pk.id = rl.proxy_key_id"
+	}
+	query = addOwnerScopeJoins(query, params.ScopeType)
+
+	var conditions []string
+	var args []any
+
+	if params.From != "" {
+		conditions = append(conditions, "rl.timestamp >= ?")
+		args = append(args, params.From)
+	}
+	if params.To != "" {
+		conditions = append(conditions, "rl.timestamp <= ?")
+		args = append(args, params.To)
+	}
+	if params.KeyPrefix != "" {
+		conditions = append(conditions, "pk.key_prefix = ?")
+		args = append(args, params.KeyPrefix)
+	}
+	switch params.GroupBy {
+	case "provider":
+		conditions, args = appendProviderConditions(conditions, args, "rl.provider_name", params)
+	default:
+		if params.GroupFilter != "" {
+			conditions = append(conditions, "rl.model_requested LIKE ?")
+			args = append(args, params.GroupFilter+"%")
+		}
+	}
+	conditions, args = appendOwnerScopeConditions(conditions, args, params.ScopeType, params.ScopeUserID, params.ScopeTeamID)
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions are hardcoded strings; user input is in parameterized args
+	}
+	query += " ORDER BY rl.timestamp, rl.provider_name, rl.model_upstream"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get cost timeseries pricing groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type bucket struct {
+		group CostTimeseriesPricingGroup
+	}
+
+	orderedKeys := make([]string, 0)
+	buckets := make(map[string]*bucket)
+
+	for rows.Next() {
+		var (
+			timestamp           time.Time
+			providerName        string
+			modelUpstream       string
+			inputTokens         int64
+			outputTokens        int64
+			cacheCreationTokens int64
+			cacheReadTokens     int64
+		)
+		if err := rows.Scan(
+			&timestamp,
+			&providerName,
+			&modelUpstream,
+			&inputTokens,
+			&outputTokens,
+			&cacheCreationTokens,
+			&cacheReadTokens,
+		); err != nil {
+			return nil, fmt.Errorf("scan cost timeseries pricing group: %w", err)
+		}
+
+		date := timestamp.In(params.TzLocation).Format("2006-01-02")
+		key := date + "\x00" + providerName + "\x00" + modelUpstream
+		b, ok := buckets[key]
+		if !ok {
+			orderedKeys = append(orderedKeys, key)
+			b = &bucket{
+				group: CostTimeseriesPricingGroup{
+					Date:          date,
+					ProviderName:  providerName,
+					ModelUpstream: modelUpstream,
+				},
+			}
+			buckets[key] = b
+		}
+		b.group.InputTokens += inputTokens
+		b.group.OutputTokens += outputTokens
+		b.group.CacheCreationTokens += cacheCreationTokens
+		b.group.CacheReadTokens += cacheReadTokens
+		b.group.Requests++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cost timeseries pricing groups: %w", err)
+	}
+
+	groups := make([]CostTimeseriesPricingGroup, 0, len(orderedKeys))
+	for _, key := range orderedKeys {
+		groups = append(groups, buckets[key].group)
+	}
+	if groups == nil {
+		groups = []CostTimeseriesPricingGroup{}
+	}
+
+	return groups, nil
 }
 
 func appendProviderConditions(conditions []string, args []any, column string, params CostParams) ([]string, []any) {

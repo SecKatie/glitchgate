@@ -7,6 +7,48 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
+type tokenUsage struct {
+	InputTokens      int64
+	CacheWriteTokens int64
+	CacheReadTokens  int64
+	OutputTokens     int64
+	ReasoningTokens  int64
+}
+
+type pricedUsage struct {
+	InputCostUSD      float64
+	CacheWriteCostUSD float64
+	CacheReadCostUSD  float64
+	ReasoningCostUSD  float64
+	OutputCostUSD     float64
+	TotalInputCostUSD float64
+	TotalCostUSD      float64
+}
+
+func priceUsage(entry pricing.Entry, usage tokenUsage) pricedUsage {
+	priced := pricedUsage{
+		InputCostUSD:      float64(usage.InputTokens) * entry.InputPerMillion / 1_000_000,
+		CacheWriteCostUSD: float64(usage.CacheWriteTokens) * entry.CacheWritePerMillion / 1_000_000,
+		CacheReadCostUSD:  float64(usage.CacheReadTokens) * entry.CacheReadPerMillion / 1_000_000,
+		ReasoningCostUSD:  float64(usage.ReasoningTokens) * entry.OutputPerMillion / 1_000_000,
+		OutputCostUSD:     float64(usage.OutputTokens) * entry.OutputPerMillion / 1_000_000,
+	}
+	priced.TotalInputCostUSD = priced.InputCostUSD + priced.CacheWriteCostUSD + priced.CacheReadCostUSD
+	priced.TotalCostUSD = priced.TotalInputCostUSD + priced.OutputCostUSD
+	return priced
+}
+
+func lookupPricedUsage(calc *pricing.Calculator, providerName, modelUpstream string, usage tokenUsage) (pricedUsage, pricing.Entry, bool) {
+	if calc == nil {
+		return pricedUsage{}, pricing.Entry{}, false
+	}
+	entry, ok := calc.Lookup(providerName, modelUpstream)
+	if !ok {
+		return pricedUsage{}, pricing.Entry{}, false
+	}
+	return priceUsage(entry, usage), entry, true
+}
+
 // CostBreakdown holds per-category token counts and costs for a single request.
 // Passed to log_detail.html as .Cost.
 type CostBreakdown struct {
@@ -59,14 +101,15 @@ func enrichLogs(logs []store.RequestLogSummary, calc *pricing.Calculator) []LogR
 	rows := make([]LogRowWithCost, len(logs))
 	for i, log := range logs {
 		row := LogRowWithCost{RequestLogSummary: log}
-		if calc != nil {
-			if entry, ok := calc.Lookup(log.ProviderName, log.ModelUpstream); ok {
-				cost := float64(log.InputTokens)*entry.InputPerMillion/1_000_000 +
-					float64(log.CacheCreationInputTokens)*entry.CacheWritePerMillion/1_000_000 +
-					float64(log.CacheReadInputTokens)*entry.CacheReadPerMillion/1_000_000 +
-					float64(log.OutputTokens)*entry.OutputPerMillion/1_000_000
-				row.EstimatedCostUSD = &cost
-			}
+		priced, _, ok := lookupPricedUsage(calc, log.ProviderName, log.ModelUpstream, tokenUsage{
+			InputTokens:      log.InputTokens,
+			CacheWriteTokens: log.CacheCreationInputTokens,
+			CacheReadTokens:  log.CacheReadInputTokens,
+			OutputTokens:     log.OutputTokens,
+		})
+		if ok {
+			cost := priced.TotalCostUSD
+			row.EstimatedCostUSD = &cost
 		}
 		rows[i] = row
 	}
@@ -86,28 +129,26 @@ func computeCostBreakdown(log *store.RequestLogDetail, calc *pricing.Calculator)
 		ReasoningTokens:  log.ReasoningTokens,
 	}
 
-	entry, ok := calc.Lookup(log.ProviderName, log.ModelUpstream)
+	priced, entry, ok := lookupPricedUsage(calc, log.ProviderName, log.ModelUpstream, tokenUsage{
+		InputTokens:      log.InputTokens,
+		CacheWriteTokens: log.CacheCreationInputTokens,
+		CacheReadTokens:  log.CacheReadInputTokens,
+		OutputTokens:     log.OutputTokens,
+		ReasoningTokens:  log.ReasoningTokens,
+	})
 	if !ok {
 		return cb
 	}
 
 	cb.PricingKnown = true
 
-	inputCost := float64(log.InputTokens) * entry.InputPerMillion / 1_000_000
-	cacheWriteCost := float64(log.CacheCreationInputTokens) * entry.CacheWritePerMillion / 1_000_000
-	cacheReadCost := float64(log.CacheReadInputTokens) * entry.CacheReadPerMillion / 1_000_000
-	reasoningCost := float64(log.ReasoningTokens) * entry.OutputPerMillion / 1_000_000
-	outputCost := float64(log.OutputTokens) * entry.OutputPerMillion / 1_000_000
-	totalInputCost := inputCost + cacheWriteCost + cacheReadCost
-	total := inputCost + cacheWriteCost + cacheReadCost + outputCost
-
-	cb.TotalInputCostUSD = &totalInputCost
-	cb.InputCostUSD = &inputCost
-	cb.CacheWriteCostUSD = &cacheWriteCost
-	cb.CacheReadCostUSD = &cacheReadCost
-	cb.ReasoningCostUSD = &reasoningCost
-	cb.OutputCostUSD = &outputCost
-	cb.TotalCostUSD = &total
+	cb.TotalInputCostUSD = &priced.TotalInputCostUSD
+	cb.InputCostUSD = &priced.InputCostUSD
+	cb.CacheWriteCostUSD = &priced.CacheWriteCostUSD
+	cb.CacheReadCostUSD = &priced.CacheReadCostUSD
+	cb.ReasoningCostUSD = &priced.ReasoningCostUSD
+	cb.OutputCostUSD = &priced.OutputCostUSD
+	cb.TotalCostUSD = &priced.TotalCostUSD
 
 	cb.InputRatePerMillion = entry.InputPerMillion
 	cb.CacheWriteRatePerMillion = entry.CacheWritePerMillion
@@ -127,21 +168,22 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 	}
 	costs := make(map[string]float64)
 	for _, group := range groups {
-		entry, ok := calc.Lookup(group.ProviderName, group.ModelUpstream)
+		priced, _, ok := lookupPricedUsage(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+			InputTokens:      group.InputTokens,
+			CacheWriteTokens: group.CacheCreationTokens,
+			CacheReadTokens:  group.CacheReadTokens,
+			OutputTokens:     group.OutputTokens,
+		})
 		if !ok {
 			continue
 		}
-		cost := float64(group.InputTokens)*entry.InputPerMillion/1_000_000 +
-			float64(group.CacheCreationTokens)*entry.CacheWritePerMillion/1_000_000 +
-			float64(group.CacheReadTokens)*entry.CacheReadPerMillion/1_000_000 +
-			float64(group.OutputTokens)*entry.OutputPerMillion/1_000_000
 
 		var key string
 		switch groupBy {
 		case "provider":
 			key = group.ProviderName
 			if providerNames != nil {
-				if name, ok := providerNames[group.ProviderName]; ok && name != "" {
+				if name, ok := providerDisplayName(group.ProviderName, providerNames); ok {
 					key = name
 				}
 			}
@@ -153,7 +195,7 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 		if key == "" {
 			continue
 		}
-		costs[key] += cost
+		costs[key] += priced.TotalCostUSD
 	}
 	if len(costs) == 0 {
 		return nil
@@ -172,7 +214,12 @@ func computeAggregateCostBreakdown(groups []store.CostPricingGroup, calc *pricin
 
 	hasUnknownUsage := false
 	for _, group := range groups {
-		entry, ok := calc.Lookup(group.ProviderName, group.ModelUpstream)
+		priced, _, ok := lookupPricedUsage(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+			InputTokens:      group.InputTokens,
+			CacheWriteTokens: group.CacheCreationTokens,
+			CacheReadTokens:  group.CacheReadTokens,
+			OutputTokens:     group.OutputTokens,
+		})
 		if !ok {
 			if group.InputTokens > 0 || group.OutputTokens > 0 || group.CacheCreationTokens > 0 || group.CacheReadTokens > 0 {
 				hasUnknownUsage = true
@@ -180,10 +227,10 @@ func computeAggregateCostBreakdown(groups []store.CostPricingGroup, calc *pricin
 			continue
 		}
 
-		cb.InputCostUSD += float64(group.InputTokens) * entry.InputPerMillion / 1_000_000
-		cb.CacheWriteCostUSD += float64(group.CacheCreationTokens) * entry.CacheWritePerMillion / 1_000_000
-		cb.CacheReadCostUSD += float64(group.CacheReadTokens) * entry.CacheReadPerMillion / 1_000_000
-		cb.OutputCostUSD += float64(group.OutputTokens) * entry.OutputPerMillion / 1_000_000
+		cb.InputCostUSD += priced.InputCostUSD
+		cb.CacheWriteCostUSD += priced.CacheWriteCostUSD
+		cb.CacheReadCostUSD += priced.CacheReadCostUSD
+		cb.OutputCostUSD += priced.OutputCostUSD
 		cb.HasAnyPricing = true
 	}
 

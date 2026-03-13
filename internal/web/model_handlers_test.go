@@ -68,14 +68,14 @@ func testProviders() []config.ProviderConfig {
 // ---------------------------------------------------------------------------
 
 func TestBuildModelList(t *testing.T) {
-	provKey := "anthropic:api.anthropic.com"
+	providerName := "anthropic"
 	knownEntry := pricing.Entry{
 		InputPerMillion:      3.00,
 		OutputPerMillion:     15.00,
 		CacheWritePerMillion: 3.75,
 		CacheReadPerMillion:  0.30,
 	}
-	calc := makeTestCalc(provKey, "claude-sonnet-4-20250514", knownEntry)
+	calc := makeTestCalc(providerName, "claude-sonnet-4-20250514", knownEntry)
 	emptyCalc := pricing.NewCalculator(map[string]pricing.Entry{})
 	providers := testProviders()
 
@@ -144,7 +144,7 @@ func TestBuildModelList(t *testing.T) {
 			InputPerMillion:  1.00,
 			OutputPerMillion: 5.00,
 		}
-		overrideCalc := makeTestCalc(provKey, "claude-sonnet-4-20250514", overrideEntry)
+		overrideCalc := makeTestCalc(providerName, "claude-sonnet-4-20250514", overrideEntry)
 		models := []config.ModelMapping{
 			{
 				ModelName:     "claude-sonnet",
@@ -166,9 +166,9 @@ func TestBuildModelList(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestModelsPage(t *testing.T) {
-	provKey := "anthropic:api.anthropic.com"
+	providerName := "anthropic"
 	knownEntry := pricing.Entry{InputPerMillion: 3.00, OutputPerMillion: 15.00}
-	calc := makeTestCalc(provKey, "claude-sonnet-4-20250514", knownEntry)
+	calc := makeTestCalc(providerName, "claude-sonnet-4-20250514", knownEntry)
 	providers := testProviders()
 	templates := ParseTemplates(time.UTC)
 	stub := &stubModelStore{summary: &store.ModelUsageSummary{}}
@@ -252,9 +252,9 @@ func TestModelsPage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestModelDetailPage(t *testing.T) {
-	provKey := "anthropic:api.anthropic.com"
+	providerName := "anthropic"
 	knownEntry := pricing.Entry{InputPerMillion: 3.00, OutputPerMillion: 15.00}
-	calc := makeTestCalc(provKey, "claude-sonnet-4-20250514", knownEntry)
+	calc := makeTestCalc(providerName, "claude-sonnet-4-20250514", knownEntry)
 	providers := testProviders()
 	templates := ParseTemplates(time.UTC)
 	zeroUsage := &store.ModelUsageSummary{}

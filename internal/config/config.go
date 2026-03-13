@@ -194,6 +194,10 @@ func Load(configFile string) (*Config, error) {
 		return nil, errors.New("master_key is required (set in config file or GLITCHGATE_MASTER_KEY env var)")
 	}
 
+	if err := validateProviderNames(cfg.Providers); err != nil {
+		return nil, err
+	}
+
 	if err := validateCopilotProviders(cfg.Providers); err != nil {
 		return nil, err
 	}
@@ -367,6 +371,20 @@ func (c *Config) buildResolvedChains() error {
 	}
 
 	c.resolvedChains = chains
+	return nil
+}
+
+func validateProviderNames(providers []ProviderConfig) error {
+	seen := make(map[string]struct{}, len(providers))
+	for _, p := range providers {
+		if p.Name == "" {
+			return errors.New("provider name is required")
+		}
+		if _, exists := seen[p.Name]; exists {
+			return fmt.Errorf("duplicate provider name %q", p.Name)
+		}
+		seen[p.Name] = struct{}{}
+	}
 	return nil
 }
 
