@@ -3,6 +3,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -248,6 +249,9 @@ type responsesCacheDebugFields struct {
 }
 
 func logResponsesCacheDebug(body []byte, req *translate.ResponsesRequest) {
+	if !slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
 	var raw responsesCacheDebugFields
 	if err := json.Unmarshal(body, &raw); err != nil {
 		slog.Debug("responses handler: cache fields", "parse_error", err, "body_bytes", len(body))
