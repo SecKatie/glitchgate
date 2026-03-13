@@ -5,7 +5,6 @@ package translate
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
@@ -230,46 +229,10 @@ func responsesMessageToAnthropicMessage(item InputItem) (anthropic.Message, erro
 
 // responsesImageToAnthropicBlock converts a Responses API image input to an Anthropic image block.
 func responsesImageToAnthropicBlock(item InputItem) (anthropic.ContentBlock, error) {
-	url := item.ImageURL
-	if url == "" {
+	if item.ImageURL == "" {
 		return anthropic.ContentBlock{}, fmt.Errorf("input_image requires image_url")
 	}
-
-	// Check if it's a data URI (base64).
-	if strings.HasPrefix(url, "data:") {
-		// Parse data:media_type;base64,data
-		parts := strings.SplitN(url, ",", 2)
-		if len(parts) != 2 {
-			return anthropic.ContentBlock{}, fmt.Errorf("invalid data URI for image")
-		}
-		mediaInfo := strings.TrimPrefix(parts[0], "data:")
-		mediaInfo = strings.TrimSuffix(mediaInfo, ";base64")
-		return anthropic.ContentBlock{
-			Type: "image",
-			// Using a generic representation since Anthropic ContentBlock is simplified.
-			// The actual Anthropic API would need source.type=base64, source.media_type, source.data.
-			Input: map[string]interface{}{
-				"type": "image",
-				"source": map[string]interface{}{
-					"type":       "base64",
-					"media_type": mediaInfo,
-					"data":       parts[1],
-				},
-			},
-		}, nil
-	}
-
-	// URL-based image.
-	return anthropic.ContentBlock{
-		Type: "image",
-		Input: map[string]interface{}{
-			"type": "image",
-			"source": map[string]interface{}{
-				"type": "url",
-				"url":  url,
-			},
-		},
-	}, nil
+	return imageURLToAnthropicBlock(item.ImageURL)
 }
 
 // responsesToolChoiceToAnthropic converts Responses API tool_choice to Anthropic format.
