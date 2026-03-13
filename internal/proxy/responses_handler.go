@@ -191,7 +191,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latency := time.Since(start).Milliseconds()
 			errMsg := err.Error()
 			h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-				0, 0, 0, 0, 0, latency, http.StatusBadGateway, upstreamBody, []byte(errMsg), nil, &errMsg, isStreaming, attemptCount)
+				0, 0, 0, 0, 0, latency, http.StatusBadGateway, upstreamBody, []byte(errMsg), &errMsg, isStreaming, attemptCount)
 			writeResponsesError(w, http.StatusBadGateway, "server_error", "Failed to reach upstream provider")
 			return
 		}
@@ -206,7 +206,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latency := time.Since(start).Milliseconds()
 			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
 			h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-				0, 0, 0, 0, 0, latency, http.StatusServiceUnavailable, upstreamBody, []byte(errMsg), nil, &errMsg, isStreaming, attemptCount)
+				0, 0, 0, 0, 0, latency, http.StatusServiceUnavailable, upstreamBody, []byte(errMsg), &errMsg, isStreaming, attemptCount)
 			writeResponsesError(w, http.StatusServiceUnavailable, "server_error", "All upstream providers failed")
 			return
 		}
@@ -347,7 +347,7 @@ func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, re
 		}
 		h.logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
 			resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens, resp.ReasoningTokens, latency, resp.StatusCode,
-			reqBody, resp.Body, nil, errDetails, false, attemptCount)
+			reqBody, resp.Body, errDetails, false, attemptCount)
 		return
 	}
 
@@ -358,12 +358,9 @@ func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, re
 		slog.Warn("write Responses response", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens)
-
 	h.logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens,
-		resp.ReasoningTokens, latency, http.StatusOK,
-		reqBody, resp.Body, cost, nil, false, attemptCount)
+		resp.InputTokens, resp.OutputTokens, 0, resp.CacheReadInputTokens, resp.ReasoningTokens, latency, http.StatusOK,
+		reqBody, resp.Body, nil, false, attemptCount)
 }
 
 // handleResponsesStreaming relays a Responses API SSE stream.
@@ -380,17 +377,13 @@ func (h *ResponsesHandler) handleResponsesStreaming(w http.ResponseWriter, resp 
 		slog.Warn("stream relay error", "error", err)
 	}
 
-	cost := h.calculator.Calculate(providerName, modelUpstream, result.InputTokens, result.OutputTokens, 0, result.CacheReadInputTokens)
-
 	status := resp.StatusCode
 	if status == 0 {
 		status = http.StatusOK
 	}
-
 	h.logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream,
-		result.InputTokens, result.OutputTokens, 0, result.CacheReadInputTokens,
-		result.ReasoningTokens, latency, status,
-		reqBody, result.Body, cost, errDetails, true, attemptCount)
+		result.InputTokens, result.OutputTokens, result.CacheCreationInputTokens, result.CacheReadInputTokens,
+		result.ReasoningTokens, latency, status, reqBody, result.Body, errDetails, true, attemptCount)
 }
 
 func (h *ResponsesHandler) handleAnthropicProviderResponse(w http.ResponseWriter, provResp *provider.Response,
@@ -409,12 +402,9 @@ func (h *ResponsesHandler) handleAnthropicProviderResponse(w http.ResponseWriter
 			slog.Warn("stream relay error", "error", err)
 		}
 
-		cost := h.calculator.Calculate(provKey, mapping.UpstreamModel,
-			result.InputTokens, result.OutputTokens, result.CacheCreationInputTokens, result.CacheReadInputTokens)
-
 		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
 			result.InputTokens, result.OutputTokens, result.CacheCreationInputTokens, result.CacheReadInputTokens,
-			result.ReasoningTokens, latency, http.StatusOK, body, result.Body, cost, errDetails, true, attemptCount)
+			result.ReasoningTokens, latency, http.StatusOK, body, result.Body, errDetails, true, attemptCount)
 		return
 	}
 
@@ -423,7 +413,7 @@ func (h *ResponsesHandler) handleAnthropicProviderResponse(w http.ResponseWriter
 		latency := time.Since(start).Milliseconds()
 		s := string(provResp.Body)
 		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-			0, 0, 0, 0, 0, latency, provResp.StatusCode, body, provResp.Body, nil, &s, false, attemptCount)
+			0, 0, 0, 0, 0, latency, provResp.StatusCode, body, provResp.Body, &s, false, attemptCount)
 		writeResponsesError(w, provResp.StatusCode, "server_error", s)
 		return
 	}
@@ -458,14 +448,10 @@ func (h *ResponsesHandler) handleAnthropicProviderResponse(w http.ResponseWriter
 		slog.Warn("write Responses response", "error", err)
 	}
 
-	cost := h.calculator.Calculate(provKey, mapping.UpstreamModel,
-		anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens,
-		anthResp.Usage.CacheCreationInputTokens, anthResp.Usage.CacheReadInputTokens)
-
 	h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
 		anthResp.Usage.InputTokens, anthResp.Usage.OutputTokens,
 		anthResp.Usage.CacheCreationInputTokens, anthResp.Usage.CacheReadInputTokens,
-		0, latency, http.StatusOK, body, respBody, cost, nil, false, attemptCount)
+		0, latency, http.StatusOK, body, respBody, nil, false, attemptCount)
 }
 
 func (h *ResponsesHandler) handleOpenAICCProviderResponse(w http.ResponseWriter, provResp *provider.Response,
@@ -484,12 +470,9 @@ func (h *ResponsesHandler) handleOpenAICCProviderResponse(w http.ResponseWriter,
 			slog.Warn("stream relay error", "error", err)
 		}
 
-		cost := h.calculator.Calculate(provKey, mapping.UpstreamModel,
-			result.InputTokens, result.OutputTokens, 0, 0)
-
 		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
 			result.InputTokens, result.OutputTokens, 0, 0,
-			result.ReasoningTokens, latency, http.StatusOK, body, result.Body, cost, errDetails, true, attemptCount)
+			result.ReasoningTokens, latency, http.StatusOK, body, result.Body, errDetails, true, attemptCount)
 		return
 	}
 
@@ -498,7 +481,7 @@ func (h *ResponsesHandler) handleOpenAICCProviderResponse(w http.ResponseWriter,
 		latency := time.Since(start).Milliseconds()
 		s := string(provResp.Body)
 		h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
-			0, 0, 0, 0, 0, latency, provResp.StatusCode, body, provResp.Body, nil, &s, false, attemptCount)
+			0, 0, 0, 0, 0, latency, provResp.StatusCode, body, provResp.Body, &s, false, attemptCount)
 		writeResponsesError(w, provResp.StatusCode, "server_error", s)
 		return
 	}
@@ -517,17 +500,14 @@ func (h *ResponsesHandler) handleOpenAICCProviderResponse(w http.ResponseWriter,
 		slog.Warn("write Responses response", "error", err)
 	}
 
-	cost := h.calculator.Calculate(provKey, mapping.UpstreamModel,
-		provResp.InputTokens, provResp.OutputTokens, 0, 0)
-
 	h.logResponsesRequest(proxyKeyID, provKey, req.Model, mapping.UpstreamModel,
 		provResp.InputTokens, provResp.OutputTokens, 0, 0,
-		provResp.ReasoningTokens, latency, http.StatusOK, body, respBody, cost, nil, false, attemptCount)
+		provResp.ReasoningTokens, latency, http.StatusOK, body, respBody, nil, false, attemptCount)
 }
 
 func (h *ResponsesHandler) logResponsesRequest(proxyKeyID, providerName, modelRequested, modelUpstream string,
 	inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens, latencyMs int64, status int,
-	requestBody, responseBody []byte, cost *float64, errDetails *string, isStreaming bool, attemptCount int64,
+	requestBody, responseBody []byte, errDetails *string, isStreaming bool, attemptCount int64,
 ) {
 	entry := &store.RequestLogEntry{
 		ID:                       uuid.New().String(),
@@ -546,7 +526,6 @@ func (h *ResponsesHandler) logResponsesRequest(proxyKeyID, providerName, modelRe
 		Status:                   status,
 		RequestBody:              RedactRequestBody(requestBody),
 		ResponseBody:             string(responseBody),
-		EstimatedCostUSD:         cost,
 		ErrorDetails:             errDetails,
 		IsStreaming:              isStreaming,
 		FallbackAttempts:         attemptCount,

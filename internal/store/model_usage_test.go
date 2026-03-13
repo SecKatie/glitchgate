@@ -18,9 +18,6 @@ func TestGetModelUsageSummary(t *testing.T) {
 	err := st.CreateProxyKey(ctx, "pk-model-test", "hash-model", "llmp_sk_mm01", "model-test-key")
 	require.NoError(t, err)
 
-	cost1 := 0.010
-	cost2 := 0.020
-
 	logs := []RequestLogEntry{
 		{
 			ID: "ml-1", ProxyKeyID: "pk-model-test",
@@ -30,7 +27,6 @@ func TestGetModelUsageSummary(t *testing.T) {
 			InputTokens: 100, OutputTokens: 200,
 			LatencyMs: 500, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost1,
 		},
 		{
 			ID: "ml-2", ProxyKeyID: "pk-model-test",
@@ -40,7 +36,6 @@ func TestGetModelUsageSummary(t *testing.T) {
 			InputTokens: 300, OutputTokens: 400,
 			LatencyMs: 600, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: &cost2,
 		},
 		{
 			ID: "ml-3", ProxyKeyID: "pk-model-test",
@@ -50,7 +45,6 @@ func TestGetModelUsageSummary(t *testing.T) {
 			InputTokens: 50, OutputTokens: 75,
 			LatencyMs: 300, Status: 200,
 			RequestBody: "{}", ResponseBody: "{}",
-			EstimatedCostUSD: nil,
 		},
 	}
 	for _, l := range logs {
@@ -71,7 +65,7 @@ func TestGetModelUsageSummary(t *testing.T) {
 			wantCount: 2,
 			wantIn:    400,
 			wantOut:   600,
-			wantCost:  0.030,
+			wantCost:  0.0,
 		},
 		{
 			name:      "model with one nil-cost entry returns zero cost",
