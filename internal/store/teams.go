@@ -49,6 +49,42 @@ func (s *SQLiteStore) ListTeams(ctx context.Context) ([]Team, error) {
 	return teams, nil
 }
 
+// ListTeamsWithMemberCounts returns the team admin projection with member counts.
+func (s *SQLiteStore) ListTeamsWithMemberCounts(ctx context.Context) ([]TeamWithMemberCount, error) {
+	const q = `SELECT
+		t.id,
+		t.name,
+		COALESCE(t.description, ''),
+		t.created_at,
+		COUNT(tm.user_id) AS member_count
+	FROM teams t
+	LEFT JOIN team_memberships tm ON tm.team_id = t.id
+	GROUP BY t.id, t.name, t.description, t.created_at
+	ORDER BY t.name ASC`
+
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list teams with member counts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var teams []TeamWithMemberCount
+	for rows.Next() {
+		var t TeamWithMemberCount
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.CreatedAt, &t.MemberCount); err != nil {
+			return nil, fmt.Errorf("scan team with member count: %w", err)
+		}
+		teams = append(teams, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate teams with member counts: %w", err)
+	}
+	if teams == nil {
+		teams = []TeamWithMemberCount{}
+	}
+	return teams, nil
+}
+
 // GetTeamByID returns the team with the given ID.
 func (s *SQLiteStore) GetTeamByID(ctx context.Context, id string) (*Team, error) {
 	const q = `SELECT

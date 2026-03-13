@@ -31,7 +31,7 @@ func ContextWithProxyKey(ctx context.Context, pk *store.ProxyKey) context.Contex
 // AuthMiddleware validates the proxy API key on every request.
 // It checks x-api-key and x-proxy-api-key headers, verifies the key
 // against stored hashes, and injects the key into the request context.
-func AuthMiddleware(s store.Store) func(http.Handler) http.Handler {
+func AuthMiddleware(s store.ProxyKeyAuthStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := r.Header.Get("X-Api-Key")

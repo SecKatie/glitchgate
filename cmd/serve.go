@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -19,17 +18,11 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/spf13/cobra"
 
+	"codeberg.org/kglitchy/glitchgate/internal/app"
 	"codeberg.org/kglitchy/glitchgate/internal/auth"
 	"codeberg.org/kglitchy/glitchgate/internal/config"
-	oidcpkg "codeberg.org/kglitchy/glitchgate/internal/oidc"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
-	openaiprov "codeberg.org/kglitchy/glitchgate/internal/provider/openai"
 	"codeberg.org/kglitchy/glitchgate/internal/proxy"
 	"codeberg.org/kglitchy/glitchgate/internal/ratelimit"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
 	"codeberg.org/kglitchy/glitchgate/internal/web"
 )
 
@@ -58,136 +51,20 @@ func runServe(_ *cobra.Command, _ []string) error {
 	logDest := io.MultiWriter(logFile, os.Stdout)
 	slog.SetDefault(slog.New(slog.NewJSONHandler(logDest, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-	// Open database and run migrations.
-	st, err := store.NewSQLiteStore(cfg.DatabasePath)
+	runtime, err := app.Bootstrap(context.Background(), cfg)
 	if err != nil {
-		return fmt.Errorf("opening database: %w", err)
+		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = runtime.Close() }()
 
-	if err := st.Migrate(context.Background()); err != nil {
-		return fmt.Errorf("running migrations: %w", err)
-	}
-	if err := st.NormalizeLoggedProviderNames(context.Background(), cfg); err != nil {
-		return fmt.Errorf("normalizing logged provider names: %w", err)
-	}
-
-	requestTimeout := positiveDuration(cfg.UpstreamRequestTimeout, config.DefaultUpstreamRequestTimeout)
-	asyncLogBufferSize := positiveInt(cfg.AsyncLogBufferSize, config.DefaultAsyncLogBufferSize)
-	asyncLogWriteTimeout := positiveDuration(cfg.AsyncLogWriteTimeout, config.DefaultAsyncLogWriteTimeout)
-	requestLogBodyMaxBytes := positiveInt(cfg.RequestLogBodyMaxBytes, config.DefaultRequestLogBodyMaxBytes)
-
-	// Build provider map from config.
-	providers := make(map[string]provider.Provider)
-	for _, pc := range cfg.Providers {
-		switch pc.Type {
-		case "anthropic":
-			client := anthropic.NewClient(pc.Name, pc.BaseURL, pc.AuthMode, pc.APIKey, pc.DefaultVersion)
-			client.SetTimeouts(requestTimeout)
-			providers[pc.Name] = client
-		case "github_copilot":
-			tokenDir := pc.TokenDir
-			if tokenDir == "" {
-				tokenDir = copilot.DefaultTokenDir()
-			}
-			client := copilot.NewClient(pc.Name, tokenDir)
-			client.SetTimeouts(requestTimeout)
-			providers[pc.Name] = client
-		case "openai":
-			baseURL := pc.BaseURL
-			if baseURL == "" {
-				baseURL = "https://api.openai.com"
-			}
-			client := openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
-			client.SetTimeouts(requestTimeout)
-			providers[pc.Name] = client
-		case "openai_responses":
-			baseURL := pc.BaseURL
-			if baseURL == "" {
-				baseURL = "https://api.openai.com"
-			}
-			client := openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
-			client.SetTimeouts(requestTimeout)
-			providers[pc.Name] = client
-		default:
-			return fmt.Errorf("unsupported provider type %q for provider %q", pc.Type, pc.Name)
-		}
-	}
-
-	// Build pricing calculator.
-	// Pass 1: seed type-based defaults per configured provider.
-	pricingMap := make(map[string]pricing.Entry)
-	for _, pc := range cfg.Providers {
-		baseURL := pc.BaseURL
-		if pc.Type == "github_copilot" && baseURL == "" {
-			baseURL = copilot.DefaultAPIURL
-		}
-		switch pc.Type {
-		case "github_copilot":
-			for model, entry := range pricing.CopilotDefaults {
-				pricingMap[pc.Name+"/"+model] = entry
-			}
-		case "anthropic":
-			if pricing.IsOfficialAnthropicURL(baseURL) {
-				for model, entry := range pricing.AnthropicDefaults {
-					pricingMap[pc.Name+"/"+model] = entry
-				}
-			}
-		case "openai", "openai_responses":
-			if pricing.IsOfficialOpenAIURL(baseURL) {
-				for model, entry := range pricing.OpenAIDefaults {
-					pricingMap[pc.Name+"/"+model] = entry
-				}
-			} else if pricing.IsChutesURL(baseURL) {
-				for model, entry := range pricing.ChutesDefaults {
-					pricingMap[pc.Name+"/"+model] = entry
-				}
-			} else if pricing.IsSegmentURL(baseURL) {
-				for model, entry := range pricing.SegmentDefaults {
-					pricingMap[pc.Name+"/"+model] = entry
-				}
-			}
-		}
-	}
-	// Pass 2: model_list metadata entries override defaults.
-	for _, mm := range cfg.ModelList {
-		if strings.HasSuffix(mm.ModelName, "/*") || len(mm.Fallbacks) > 0 || mm.Metadata == nil {
-			continue
-		}
-		pc, err := cfg.FindProvider(mm.Provider)
-		if err != nil {
-			continue
-		}
-		pricingMap[pc.Name+"/"+mm.UpstreamModel] = pricing.Entry{
-			InputPerMillion:      mm.Metadata.InputTokenCost,
-			OutputPerMillion:     mm.Metadata.OutputTokenCost,
-			CacheReadPerMillion:  mm.Metadata.CacheReadCost,
-			CacheWritePerMillion: mm.Metadata.CacheWriteCost,
-		}
-	}
-	calc := pricing.NewCalculator(pricingMap)
-
-	// Create async logger.
-	asyncLogger := proxy.NewAsyncLoggerWithOptions(st, proxy.AsyncLoggerOptions{
-		BufferSize:      asyncLogBufferSize,
-		WriteTimeout:    asyncLogWriteTimeout,
-		EnqueueTimeout:  100 * time.Millisecond,
-		SummaryInterval: time.Minute,
-		BodyMaxBytes:    requestLogBodyMaxBytes,
-	})
-	defer asyncLogger.Close()
-
-	// Load display timezone (default UTC).
-	tz, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		slog.Warn("unknown timezone, falling back to UTC", "timezone", cfg.Timezone, "error", err)
-		tz = time.UTC
-	}
+	maintenanceCtx, maintenanceCancel := context.WithCancel(context.Background())
+	defer maintenanceCancel()
+	runtime.StartMaintenance(maintenanceCtx, cfg)
 
 	// Build the proxy handlers.
-	proxyHandler := proxy.NewHandler(cfg, providers, calc, asyncLogger)
-	openaiHandler := proxy.NewOpenAIHandler(cfg, providers, calc, asyncLogger)
-	responsesHandler := proxy.NewResponsesHandler(cfg, providers, calc, asyncLogger)
+	proxyHandler := proxy.NewHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger)
+	openaiHandler := proxy.NewOpenAIHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger)
+	responsesHandler := proxy.NewResponsesHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger)
 
 	// Build chi router.
 	r := chi.NewRouter()
@@ -215,7 +92,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// Proxy routes — authenticated with proxy API key.
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(proxy.IPRateLimitMiddleware(proxyIPRateLimiter))
-		r.Use(proxy.AuthMiddleware(st))
+		r.Use(proxy.AuthMiddleware(runtime.Store))
 		r.Use(proxy.KeyRateLimitMiddleware(proxyKeyRateLimiter))
 		r.Post("/messages", proxyHandler.ServeHTTP)
 		r.Post("/chat/completions", openaiHandler.ServeHTTP)
@@ -223,98 +100,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 	})
 
 	// Web UI.
-	sessions := auth.NewUISessionStore(st)
-	tmpl := web.ParseTemplates(tz)
+	sessions := auth.NewUISessionStore(runtime.Store)
+	tmpl := web.ParseTemplates(runtime.Timezone)
 
-	// Build OIDC provider (nil when not configured).
-	var oidcProvider *oidcpkg.Provider
-	if cfg.OIDCEnabled() {
-		var oidcErr error
-		oidcProvider, oidcErr = oidcpkg.NewProvider(context.Background(), cfg.OIDC)
-		if oidcErr != nil {
-			return fmt.Errorf("initialising OIDC provider: %w", oidcErr)
-		}
-		slog.Info("OIDC provider configured", "issuer_url", cfg.OIDC.IssuerURL)
-	}
-
-	providerNames := make(map[string]string, len(cfg.Providers)*2)
-	legacyProviderNames := make(map[string]string, len(cfg.Providers))
-	for _, p := range cfg.Providers {
-		providerNames[p.Name] = p.Name
-		baseURL := p.BaseURL
-		if p.Type == "github_copilot" && baseURL == "" {
-			baseURL = copilot.DefaultAPIURL
-		}
-		legacyName := pricing.ProviderKey(p.Type, baseURL)
-		if legacyName == "" || legacyName == p.Name {
-			continue
-		}
-		if existing, ok := legacyProviderNames[legacyName]; ok && existing != p.Name {
-			delete(providerNames, legacyName)
-			continue
-		}
-		legacyProviderNames[legacyName] = p.Name
-		providerNames[legacyName] = p.Name
-	}
-
-	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl, oidcProvider, cfg.ModelList, cfg.Providers)
-	authHandlers := web.NewAuthHandlers(st, sessions, oidcProvider)
-	costHandlers := web.NewCostHandlers(st, tmpl, tz, calc, providerNames)
-	userHandlers := web.NewUserHandlers(st, sessions, tmpl)
-	teamHandlers := web.NewTeamHandlers(st, sessions, tmpl)
-
-	// Start background cleanup goroutine for expired sessions and OIDC state.
-	go func() {
-		cleanupTicker := time.NewTicker(time.Hour)
-		defer cleanupTicker.Stop()
-
-		retention := cfg.RequestLogRetention
-		if retention < 0 {
-			retention = config.DefaultRequestLogRetention
-		}
-
-		pruneInterval := cfg.RequestLogPruneInterval
-		if retention > 0 {
-			pruneInterval = positiveDuration(pruneInterval, config.DefaultRequestLogPruneInterval)
-		}
-
-		var pruneTicker *time.Ticker
-		if retention > 0 {
-			pruneTicker = time.NewTicker(pruneInterval)
-			defer pruneTicker.Stop()
-		}
-
-		for {
-			select {
-			case <-cleanupTicker.C:
-				ctx := context.Background()
-				if err := st.CleanupExpiredSessions(ctx); err != nil {
-					slog.Warn("cleanup sessions", "error", err)
-				}
-				if err := st.CleanupExpiredOIDCState(ctx); err != nil {
-					slog.Warn("cleanup oidc state", "error", err)
-				}
-			case <-pruneTick(pruneTicker):
-				cutoff := time.Now().UTC().Add(-retention)
-				batchSize := positiveInt(cfg.RequestLogPruneBatchSize, config.DefaultRequestLogPruneBatchSize)
-				var total int64
-				for {
-					deleted, err := st.PruneRequestLogs(context.Background(), cutoff, batchSize)
-					if err != nil {
-						slog.Warn("prune request logs", "error", err)
-						break
-					}
-					total += deleted
-					if deleted < int64(batchSize) {
-						break
-					}
-				}
-				if total > 0 {
-					slog.Info("pruned request logs", "deleted", total, "cutoff", cutoff)
-				}
-			}
-		}
-	}()
+	webHandlers := web.NewHandlers(runtime.Store, sessions, cfg.MasterKey, runtime.Calculator, tmpl, runtime.OIDCProvider, cfg.ModelList, cfg.Providers)
+	authHandlers := web.NewAuthHandlers(runtime.Store, sessions, runtime.OIDCProvider)
+	costHandlers := web.NewCostHandlers(runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames)
+	userHandlers := web.NewUserHandlers(runtime.Store, sessions, tmpl)
+	teamHandlers := web.NewTeamHandlers(runtime.Store, sessions, tmpl)
 
 	// Serve embedded static assets (no session required).
 	staticFS, _ := fs.Sub(web.Static, "static")
@@ -330,7 +123,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	// Protected web routes.
 	r.Route("/ui", func(r chi.Router) {
-		r.Use(web.UISessionMiddleware(sessions, st))
+		r.Use(web.UISessionMiddleware(sessions, runtime.Store))
 		r.Post("/api/logout", webHandlers.LogoutHandler)
 
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -435,18 +228,4 @@ func positiveInt(value, fallback int) int {
 		return value
 	}
 	return fallback
-}
-
-func positiveDuration(value, fallback time.Duration) time.Duration {
-	if value > 0 {
-		return value
-	}
-	return fallback
-}
-
-func pruneTick(ticker *time.Ticker) <-chan time.Time {
-	if ticker == nil {
-		return nil
-	}
-	return ticker.C
 }

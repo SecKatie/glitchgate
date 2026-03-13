@@ -149,6 +149,58 @@ func (s *SQLiteStore) ListOIDCUsers(ctx context.Context) ([]OIDCUser, error) {
 	return users, nil
 }
 
+// ListUsersWithTeams returns the user admin projection with optional team info.
+func (s *SQLiteStore) ListUsersWithTeams(ctx context.Context) ([]UserWithTeam, error) {
+	const q = `SELECT
+		u.id, u.email, u.display_name, u.role, u.active, u.last_seen_at, u.created_at,
+		tm.team_id, t.name
+	FROM oidc_users u
+	LEFT JOIN team_memberships tm ON tm.user_id = u.id
+	LEFT JOIN teams t ON t.id = tm.team_id
+	ORDER BY u.created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list users with teams: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []UserWithTeam
+	for rows.Next() {
+		var u UserWithTeam
+		var activeInt int
+		var lastSeen sql.NullTime
+		var teamID sql.NullString
+		var teamName sql.NullString
+
+		if err := rows.Scan(
+			&u.ID, &u.Email, &u.DisplayName, &u.Role, &activeInt, &lastSeen, &u.CreatedAt,
+			&teamID, &teamName,
+		); err != nil {
+			return nil, fmt.Errorf("scan user with team: %w", err)
+		}
+
+		u.Active = activeInt == 1
+		if lastSeen.Valid {
+			u.LastSeenAt = &lastSeen.Time
+		}
+		if teamID.Valid {
+			u.TeamID = &teamID.String
+		}
+		if teamName.Valid {
+			u.TeamName = &teamName.String
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate users with teams: %w", err)
+	}
+	if users == nil {
+		users = []UserWithTeam{}
+	}
+	return users, nil
+}
+
 // CountGlobalAdmins returns the number of active global_admin users.
 func (s *SQLiteStore) CountGlobalAdmins(ctx context.Context) (int64, error) {
 	const q = `SELECT COUNT(*) FROM oidc_users WHERE role = 'global_admin' AND active = 1`

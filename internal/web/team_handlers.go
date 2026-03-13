@@ -16,13 +16,13 @@ import (
 
 // TeamHandlers handles team management pages and API.
 type TeamHandlers struct {
-	store     store.Store
+	store     store.TeamAdminStore
 	sessions  *auth.UISessionStore
 	templates *TemplateSet
 }
 
 // NewTeamHandlers creates team management handlers.
-func NewTeamHandlers(st store.Store, sessions *auth.UISessionStore, tmpl *TemplateSet) *TeamHandlers {
+func NewTeamHandlers(st store.TeamAdminStore, sessions *auth.UISessionStore, tmpl *TemplateSet) *TeamHandlers {
 	return &TeamHandlers{store: st, sessions: sessions, templates: tmpl}
 }
 
@@ -81,41 +81,35 @@ func (h *TeamHandlers) TeamsAPIHandler(w http.ResponseWriter, r *http.Request) {
 // listTeamsForSession returns teams visible to the current session.
 // GA sees all teams; TA sees only their own team.
 func (h *TeamHandlers) listTeamsForSession(r *http.Request, sc *auth.UISessionContext) ([]teamWithMembers, error) {
-	if sc != nil && !sc.IsMasterKey && sc.Role == "team_admin" && sc.TeamID != nil {
-		// TA: only their own team.
-		team, err := h.store.GetTeamByID(r.Context(), *sc.TeamID)
-		if err != nil || team == nil {
-			return nil, err
-		}
-		members, err := h.store.ListTeamMembers(r.Context(), team.ID)
-		if err != nil {
-			return nil, err
-		}
-		return []teamWithMembers{{
-			ID:          team.ID,
-			Name:        team.Name,
-			Description: team.Description,
-			MemberCount: len(members),
-			CreatedAt:   team.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		}}, nil
-	}
-
-	// GA / master key: all teams.
-	teams, err := h.store.ListTeams(r.Context())
+	teams, err := h.store.ListTeamsWithMemberCounts(r.Context())
 	if err != nil {
 		return nil, err
 	}
+
+	if sc != nil && !sc.IsMasterKey && sc.Role == "team_admin" && sc.TeamID != nil {
+		for _, team := range teams {
+			if team.ID != *sc.TeamID {
+				continue
+			}
+			return []teamWithMembers{{
+				ID:          team.ID,
+				Name:        team.Name,
+				Description: team.Description,
+				MemberCount: team.MemberCount,
+				CreatedAt:   team.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			}}, nil
+		}
+		return nil, nil
+	}
+
+	// GA / master key: all teams.
 	result := make([]teamWithMembers, 0, len(teams))
 	for _, t := range teams {
-		members, err := h.store.ListTeamMembers(r.Context(), t.ID)
-		if err != nil {
-			return nil, err
-		}
 		result = append(result, teamWithMembers{
 			ID:          t.ID,
 			Name:        t.Name,
 			Description: t.Description,
-			MemberCount: len(members),
+			MemberCount: t.MemberCount,
 			CreatedAt:   t.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}

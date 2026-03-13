@@ -15,13 +15,13 @@ import (
 
 // UserHandlers handles user management pages and API.
 type UserHandlers struct {
-	store     store.Store
+	store     store.UserAdminStore
 	sessions  *auth.UISessionStore
 	templates *TemplateSet
 }
 
 // NewUserHandlers creates user management handlers.
-func NewUserHandlers(st store.Store, sessions *auth.UISessionStore, tmpl *TemplateSet) *UserHandlers {
+func NewUserHandlers(st store.UserAdminStore, sessions *auth.UISessionStore, tmpl *TemplateSet) *UserHandlers {
 	return &UserHandlers{store: st, sessions: sessions, templates: tmpl}
 }
 
@@ -68,9 +68,9 @@ func (h *UserHandlers) UsersAPIHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// listUsersWithTeam fetches all users and enriches them with team membership.
+// listUsersWithTeam fetches the user admin projection from the store layer.
 func (h *UserHandlers) listUsersWithTeam(r *http.Request) ([]userWithTeam, error) {
-	users, err := h.store.ListOIDCUsers(r.Context())
+	users, err := h.store.ListUsersWithTeams(r.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -89,12 +89,8 @@ func (h *UserHandlers) listUsersWithTeam(r *http.Request) ([]userWithTeam, error
 			s := u.LastSeenAt.Format("2006-01-02T15:04:05Z")
 			ut.LastSeenAt = &s
 		}
-		if tm, err := h.store.GetTeamMembership(r.Context(), u.ID); err == nil && tm != nil {
-			ut.TeamID = &tm.TeamID
-			if team, err := h.store.GetTeamByID(r.Context(), tm.TeamID); err == nil {
-				ut.TeamName = &team.Name
-			}
-		}
+		ut.TeamID = u.TeamID
+		ut.TeamName = u.TeamName
 		result = append(result, ut)
 	}
 	return result, nil
