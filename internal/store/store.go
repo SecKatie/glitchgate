@@ -60,9 +60,65 @@ type RequestLogWriter interface {
 	InsertRequestLog(ctx context.Context, log *RequestLogEntry) error
 }
 
-// Store defines all data-access operations required by the proxy. It remains as
-// a compatibility aggregate while request-path consumers move to narrower
-// interfaces.
+// ProxyKeyStore contains full proxy key CRUD operations.
+type ProxyKeyStore interface {
+	CreateProxyKey(ctx context.Context, id, keyHash, keyPrefix, label string) error
+	CreateProxyKeyForUser(ctx context.Context, id, keyHash, keyPrefix, label, ownerUserID string) error
+	ListActiveProxyKeys(ctx context.Context) ([]ProxyKeySummary, error)
+	ListProxyKeysByOwner(ctx context.Context, ownerUserID string) ([]ProxyKeySummary, error)
+	ListProxyKeysByTeam(ctx context.Context, teamID string) ([]ProxyKeySummary, error)
+	RevokeProxyKey(ctx context.Context, prefix string) error
+	UpdateKeyLabel(ctx context.Context, prefix, label string) error
+}
+
+// RequestLogStore contains request log query operations.
+type RequestLogStore interface {
+	RequestLogWriter
+	ListRequestLogs(ctx context.Context, params ListLogsParams) ([]RequestLogSummary, int64, error)
+	GetRequestLog(ctx context.Context, id string) (*RequestLogDetail, error)
+	ListDistinctModels(ctx context.Context) ([]string, error)
+	ListDistinctStatuses(ctx context.Context) ([]int, error)
+	CountLogsSince(ctx context.Context, sinceID string, params ListLogsParams) (int64, error)
+}
+
+// CostQueryStore contains cost and billing analytics queries.
+type CostQueryStore interface {
+	GetCostSummary(ctx context.Context, params CostParams) (*CostSummary, error)
+	GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error)
+	GetCostPricingGroups(ctx context.Context, params CostParams) ([]CostPricingGroup, error)
+	GetCostTimeseriesPricingGroups(ctx context.Context, params CostParams) ([]CostTimeseriesPricingGroup, error)
+}
+
+// ModelUsageStore contains per-model usage statistics queries.
+type ModelUsageStore interface {
+	GetModelUsageSummary(ctx context.Context, modelName string) (*ModelUsageSummary, error)
+	GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error)
+	GetModelCostPricingGroups(ctx context.Context, modelName string) ([]CostPricingGroup, error)
+}
+
+// OIDCStateStore contains OIDC authentication state management (PKCE flow).
+type OIDCStateStore interface {
+	CreateOIDCState(ctx context.Context, state, pkceVerifier, redirectTo string, expiresAt time.Time) error
+	ConsumeOIDCState(ctx context.Context, state string) (*OIDCState, error)
+}
+
+// OIDCUserStore contains OIDC user CRUD operations.
+type OIDCUserStore interface {
+	UpsertOIDCUser(ctx context.Context, subject, email, displayName string) (*OIDCUser, error)
+	GetOIDCUserBySubject(ctx context.Context, subject string) (*OIDCUser, error)
+	UpdateOIDCUserLastSeen(ctx context.Context, id string) error
+}
+
+// MaintenanceStore contains periodic cleanup operations for the maintenance loop.
+type MaintenanceStore interface {
+	CleanupExpiredSessions(ctx context.Context) error
+	CleanupExpiredOIDCState(ctx context.Context) error
+	PruneRequestLogs(ctx context.Context, before time.Time, limit int) (int64, error)
+}
+
+// Store defines all data-access operations required by the proxy. It composes
+// narrow interfaces and retains a few methods not yet extracted. Prefer using
+// the narrower interfaces for new code.
 type Store interface {
 	UserAdminStore
 	TeamAdminStore
@@ -70,64 +126,19 @@ type Store interface {
 	SessionBackendStore
 	ProxyKeyAuthStore
 	RequestLogWriter
+	ProxyKeyStore
+	RequestLogStore
+	CostQueryStore
+	ModelUsageStore
+	OIDCStateStore
+	OIDCUserStore
+	MaintenanceStore
 
-	// Proxy keys.
-	CreateProxyKey(ctx context.Context, id, keyHash, keyPrefix, label string) error
-	ListActiveProxyKeys(ctx context.Context) ([]ProxyKeySummary, error)
-	RevokeProxyKey(ctx context.Context, prefix string) error
-	UpdateKeyLabel(ctx context.Context, prefix, label string) error
-
-	// Scoped proxy key queries.
-	ListProxyKeysByOwner(ctx context.Context, ownerUserID string) ([]ProxyKeySummary, error)
-	ListProxyKeysByTeam(ctx context.Context, teamID string) ([]ProxyKeySummary, error)
-	CreateProxyKeyForUser(ctx context.Context, id, keyHash, keyPrefix, label, ownerUserID string) error
-
-	// Audit and request logs.
+	// Not yet extracted into narrow interfaces:
 	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
-	InsertRequestLog(ctx context.Context, log *RequestLogEntry) error
-	ListRequestLogs(ctx context.Context, params ListLogsParams) ([]RequestLogSummary, int64, error)
-	GetRequestLog(ctx context.Context, id string) (*RequestLogDetail, error)
-	PruneRequestLogs(ctx context.Context, before time.Time, limit int) (int64, error)
-	// ListDistinctModels returns all distinct model_requested values from
-	// request_logs, ordered alphabetically.
-	ListDistinctModels(ctx context.Context) ([]string, error)
-	// ListDistinctStatuses returns all distinct response_status values from
-	// request_logs, ordered numerically.
-	ListDistinctStatuses(ctx context.Context) ([]int, error)
-	// CountLogsSince returns the number of request log entries created after the
-	// entry with the given ID that also match the active filter in params.
-	// Returns 0 if sinceID is empty or not found.
-	CountLogsSince(ctx context.Context, sinceID string, params ListLogsParams) (int64, error)
-
-	// Cost queries.
-	GetCostSummary(ctx context.Context, params CostParams) (*CostSummary, error)
-	GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error)
-	GetCostPricingGroups(ctx context.Context, params CostParams) ([]CostPricingGroup, error)
-	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
-	GetCostTimeseriesPricingGroups(ctx context.Context, params CostParams) ([]CostTimeseriesPricingGroup, error)
-
-	// OIDC users.
-	UpsertOIDCUser(ctx context.Context, subject, email, displayName string) (*OIDCUser, error)
-	GetOIDCUserBySubject(ctx context.Context, subject string) (*OIDCUser, error)
-	UpdateOIDCUserLastSeen(ctx context.Context, id string) error
-
-	// Teams.
 	ListTeams(ctx context.Context) ([]Team, error)
-
-	// Team memberships.
 	ListTeamMembers(ctx context.Context, teamID string) ([]OIDCUser, error)
-
-	// UI sessions.
-
-	// OIDC state (PKCE).
-	CreateOIDCState(ctx context.Context, state, pkceVerifier, redirectTo string, expiresAt time.Time) error
-	ConsumeOIDCState(ctx context.Context, state string) (*OIDCState, error)
-	CleanupExpiredOIDCState(ctx context.Context) error
-
-	// Model usage queries.
-	GetModelUsageSummary(ctx context.Context, modelName string) (*ModelUsageSummary, error)
-	GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error)
-	GetModelCostPricingGroups(ctx context.Context, modelName string) ([]CostPricingGroup, error)
+	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
 
 	Migrate(ctx context.Context) error
 	Close() error

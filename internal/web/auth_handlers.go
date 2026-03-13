@@ -3,6 +3,7 @@
 package web
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -12,15 +13,22 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
+// AuthFlowStore combines the store operations needed by the OIDC login flow.
+type AuthFlowStore interface {
+	store.OIDCStateStore
+	store.OIDCUserStore
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+}
+
 // AuthHandlers holds OIDC-specific HTTP handlers.
 type AuthHandlers struct {
-	store    store.Store
+	store    AuthFlowStore
 	sessions *auth.UISessionStore
 	provider *oidc.Provider
 }
 
 // NewAuthHandlers creates OIDC auth handlers.
-func NewAuthHandlers(st store.Store, sessions *auth.UISessionStore, provider *oidc.Provider) *AuthHandlers {
+func NewAuthHandlers(st AuthFlowStore, sessions *auth.UISessionStore, provider *oidc.Provider) *AuthHandlers {
 	return &AuthHandlers{
 		store:    st,
 		sessions: sessions,

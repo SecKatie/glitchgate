@@ -3,6 +3,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -50,9 +51,18 @@ func (ts *TemplateSet) ExecuteNamed(w http.ResponseWriter, name string, data any
 	return fmt.Errorf("template %q not found", name)
 }
 
+// HandlersStore combines the store operations needed by the main web handlers
+// (logs, keys, models, and audit events).
+type HandlersStore interface {
+	store.ProxyKeyStore
+	store.RequestLogStore
+	store.ModelUsageStore
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+}
+
 // Handlers groups the HTTP handlers for the web UI.
 type Handlers struct {
-	store     store.Store
+	store     HandlersStore
 	sessions  *auth.UISessionStore
 	masterKey string
 	templates *TemplateSet
@@ -69,7 +79,7 @@ type OIDCProvider interface {
 }
 
 // NewHandlers creates web UI handlers.
-func NewHandlers(s store.Store, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, modelList []config.ModelMapping, providers []config.ProviderConfig) *Handlers {
+func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, modelList []config.ModelMapping, providers []config.ProviderConfig) *Handlers {
 	return &Handlers{
 		store:     s,
 		sessions:  sessions,

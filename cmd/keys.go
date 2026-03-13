@@ -69,7 +69,15 @@ func init() {
 	rootCmd.AddCommand(keysCmd)
 }
 
-func openStore() (store.Store, error) {
+// keyStore combines the store operations needed by CLI key management commands.
+type keyStore interface {
+	store.ProxyKeyStore
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	Migrate(ctx context.Context) error
+	Close() error
+}
+
+func openStore() (keyStore, error) {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)

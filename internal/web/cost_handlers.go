@@ -19,7 +19,7 @@ import (
 
 // CostHandlers groups the HTTP handlers for cost dashboard endpoints.
 type CostHandlers struct {
-	store                        store.Store
+	store                        store.CostQueryStore
 	templates                    *TemplateSet
 	tz                           *time.Location
 	calc                         *pricing.Calculator
@@ -30,7 +30,7 @@ type CostHandlers struct {
 // NewCostHandlers creates a new CostHandlers with the given store, template set,
 // display timezone (pass nil or time.UTC for UTC), and provider name map
 // (provider name or legacy raw key → display name). Pass nil if no providers are configured.
-func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string, providerMonthlySubscriptions map[string]float64) *CostHandlers {
+func NewCostHandlers(s store.CostQueryStore, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string, providerMonthlySubscriptions map[string]float64) *CostHandlers {
 	if tz == nil {
 		tz = time.UTC
 	}
