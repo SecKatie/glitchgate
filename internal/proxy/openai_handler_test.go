@@ -20,6 +20,7 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	openaiprov "codeberg.org/kglitchy/glitchgate/internal/provider/openai"
 	"codeberg.org/kglitchy/glitchgate/internal/proxy"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 	"codeberg.org/kglitchy/glitchgate/internal/translate"
@@ -536,6 +537,135 @@ func TestOpenAIFallback_FallbackAttempts_Count(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts)
+}
+
+func buildOpenAICrossFormatFallbackHandler(t *testing.T, primaryURL, secondaryURL, primaryType string) (*proxy.OpenAIHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
+	t.Helper()
+	st, _ := setupFallbackStore(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	var primaryYAML string
+	if primaryType == "openai" || primaryType == "openai_responses" {
+		primaryYAML = fmt.Sprintf(`
+  - name: primary
+    type: %s
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1`, primaryType, primaryURL)
+	}
+
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+%s
+  - name: secondary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key2
+    default_version: "2023-06-01"
+model_list:
+  - model_name: virtual
+    fallbacks: [primary-model, secondary-model]
+  - model_name: primary-model
+    provider: primary
+    upstream_model: gpt-4o
+  - model_name: secondary-model
+    provider: secondary
+    upstream_model: claude-3
+`, primaryYAML, secondaryURL)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	var apiType string
+	switch primaryType {
+	case "openai_responses":
+		apiType = openaiprov.APITypeResponses
+	default:
+		apiType = openaiprov.APITypeChatCompletions
+	}
+
+	providers := map[string]provider.Provider{
+		"primary":   openaiprov.NewClient("primary", primaryURL, "proxy_key", "key1", apiType),
+		"secondary": anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01"),
+	}
+
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger)
+	return handler, st, logger
+}
+
+func TestOpenAIFallback_OpenAINativePrimaryRetriesToAnthropic(t *testing.T) {
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		require.Equal(t, "/v1/chat/completions", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondaryHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(anthropicSuccessResponse()))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildOpenAICrossFormatFallbackHandler(t, primary.URL, secondary.URL, "openai")
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, primaryHits)
+	require.Equal(t, 1, secondaryHits)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts)
+}
+
+func TestOpenAIFallback_ResponsesPrimaryRetriesToAnthropic(t *testing.T) {
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondaryHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(anthropicSuccessResponse()))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildOpenAICrossFormatFallbackHandler(t, primary.URL, secondary.URL, "openai_responses")
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, primaryHits)
+	require.Equal(t, 1, secondaryHits)
 
 	logger.Close()
 	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
