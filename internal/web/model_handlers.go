@@ -46,6 +46,7 @@ type ModelDetailView struct {
 	Fallbacks      []string
 	Pricing        *pricing.Entry
 	HasPricing     bool
+	HasCostData    bool // true when TotalCostUSD is computed (including virtual models)
 	Usage          *store.ModelUsageSummary
 	CurlExample    string
 }
@@ -215,6 +216,19 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 			float64(usage.CacheCreationInputTokens)*p.CacheWritePerMillion/1_000_000 +
 			float64(usage.CacheReadInputTokens)*p.CacheReadPerMillion/1_000_000 +
 			float64(usage.OutputTokens)*p.OutputPerMillion/1_000_000
+		view.HasCostData = true
+	} else if view.IsVirtual {
+		// Virtual models route across multiple upstream models — compute cost per pricing group.
+		groups, err := h.store.GetModelCostPricingGroups(r.Context(), modelName)
+		if err != nil {
+			slog.Error("get model cost pricing groups", "model", modelName, "error", err) // #nosec G706 -- slog key-value pairs are structured and safely escaped; no log injection vector
+		} else {
+			agg := computeAggregateCostBreakdown(groups, h.calc)
+			if agg.HasAnyPricing {
+				usage.TotalCostUSD = agg.TotalCostUSD
+				view.HasCostData = true
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

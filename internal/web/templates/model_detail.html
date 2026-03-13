@@ -177,7 +177,7 @@
     <div class="stat-label">Output Tokens</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{if .HasPricing}}${{printf "%.4f" .Usage.TotalCostUSD}}{{else}}<span class="cost-unknown">n/a</span>{{end}}</div>
+    <div class="stat-value">{{if or .HasPricing .HasCostData}}${{printf "%.4f" .Usage.TotalCostUSD}}{{else}}<span class="cost-unknown">n/a</span>{{end}}</div>
     <div class="stat-label">Total Spend</div>
   </div>
 </div>

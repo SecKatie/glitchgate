@@ -84,6 +84,7 @@ type Store interface {
 	// Model usage queries.
 	GetModelUsageSummary(ctx context.Context, modelName string) (*ModelUsageSummary, error)
 	GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error)
+	GetModelCostPricingGroups(ctx context.Context, modelName string) ([]CostPricingGroup, error)
 
 	Migrate(ctx context.Context) error
 	Close() error
@@ -128,6 +129,7 @@ type RequestLogEntry struct {
 	ProviderName             string
 	ModelRequested           string
 	ModelUpstream            string
+	ResolvedModelName        string // actual model used after fallback resolution
 	InputTokens              int64
 	OutputTokens             int64
 	CacheCreationInputTokens int64

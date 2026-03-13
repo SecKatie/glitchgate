@@ -206,8 +206,8 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		model_requested, model_upstream, input_tokens, output_tokens,
 		cache_creation_input_tokens, cache_read_input_tokens,
 		reasoning_tokens, latency_ms, status, request_body, response_body,
-		error_details, is_streaming, fallback_attempts
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		error_details, is_streaming, fallback_attempts, resolved_model_name
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	isStreaming := 0
 	if entry.IsStreaming {
@@ -217,6 +217,12 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 	fallbackAttempts := entry.FallbackAttempts
 	if fallbackAttempts < 1 {
 		fallbackAttempts = 1
+	}
+
+	// ResolvedModelName defaults to ModelRequested if not set (for backwards compatibility)
+	resolvedModelName := entry.ResolvedModelName
+	if resolvedModelName == "" {
+		resolvedModelName = entry.ModelRequested
 	}
 
 	_, err := s.db.ExecContext(ctx, query,
@@ -239,6 +245,7 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		entry.ErrorDetails,
 		isStreaming,
 		fallbackAttempts,
+		resolvedModelName,
 	)
 	if err != nil {
 		return fmt.Errorf("insert request log: %w", err)
@@ -533,10 +540,10 @@ func (s *SQLiteStore) GetModelUsageSummary(ctx context.Context, modelName string
 }
 
 // GetAllModelUsageSummaries returns aggregated usage stats for every model seen in request_logs,
-// keyed by model name. A single GROUP BY query replaces N per-model round-trips.
+// keyed by model name. Uses resolved_model_name to capture the actual model used after fallback resolution.
 func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error) {
 	const query = `SELECT
-		model_requested,
+		COALESCE(resolved_model_name, model_requested) AS model_name,
 		COUNT(*),
 		COALESCE(SUM(input_tokens), 0),
 		COALESCE(SUM(cache_creation_input_tokens), 0),
@@ -545,7 +552,7 @@ func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string
 		COALESCE(MAX(provider_name), ''),
 		COALESCE(MAX(model_upstream), '')
 	FROM request_logs
-	GROUP BY model_requested`
+	GROUP BY COALESCE(resolved_model_name, model_requested)`
 
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
@@ -566,6 +573,41 @@ func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string
 		return nil, fmt.Errorf("iterate model usage summaries: %w", err)
 	}
 	return result, nil
+}
+
+// GetModelCostPricingGroups returns token totals for a specific model_requested value,
+// grouped by provider/model pair so the web layer can apply pricing rates accurately.
+func (s *SQLiteStore) GetModelCostPricingGroups(ctx context.Context, modelName string) ([]CostPricingGroup, error) {
+	const query = `SELECT
+		model_requested,
+		COALESCE(provider_name, '') AS provider_name,
+		COALESCE(model_upstream, '') AS model_upstream,
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(cache_creation_input_tokens), 0),
+		COALESCE(SUM(cache_read_input_tokens), 0)
+	FROM request_logs
+	WHERE model_requested = ?
+	GROUP BY provider_name, model_upstream`
+
+	rows, err := s.db.QueryContext(ctx, query, modelName)
+	if err != nil {
+		return nil, fmt.Errorf("get model cost pricing groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var groups []CostPricingGroup
+	for rows.Next() {
+		var g CostPricingGroup
+		if err := rows.Scan(&g.ModelRequested, &g.ProviderName, &g.ModelUpstream, &g.InputTokens, &g.OutputTokens, &g.CacheCreationTokens, &g.CacheReadTokens); err != nil {
+			return nil, fmt.Errorf("scan model cost pricing group: %w", err)
+		}
+		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate model cost pricing groups: %w", err)
+	}
+	return groups, nil
 }
 
 // ListDistinctModels returns all distinct model_requested values from request_logs.
