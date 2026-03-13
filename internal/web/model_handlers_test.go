@@ -34,6 +34,10 @@ func (s *stubModelStore) GetModelUsageSummary(_ context.Context, _ string) (*sto
 	return s.summary, s.err
 }
 
+func (s *stubModelStore) GetModelCostPricingGroups(_ context.Context, _ string) ([]store.CostPricingGroup, error) {
+	return nil, nil
+}
+
 func (s *stubModelStore) GetAllModelUsageSummaries(_ context.Context) (map[string]*store.ModelUsageSummary, error) {
 	return map[string]*store.ModelUsageSummary{}, nil
 }
