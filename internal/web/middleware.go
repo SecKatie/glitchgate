@@ -14,7 +14,7 @@ import (
 // UISessionMiddleware validates the llmp_session cookie against the database,
 // loads the OIDC user (for oidc sessions), and injects a UISessionContext into
 // the request context. Unauthenticated requests are redirected to /ui/login.
-func UISessionMiddleware(sessions *auth.UISessionStore, st store.Store) func(http.Handler) http.Handler {
+func UISessionMiddleware(sessions *auth.UISessionStore, st store.SessionReaderStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := ""

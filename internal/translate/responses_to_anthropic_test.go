@@ -143,7 +143,7 @@ func TestResponsesToAnthropic_Tools(t *testing.T) {
 	require.Equal(t, "Get weather", result.Tools[0].Description)
 }
 
-func TestResponsesToAnthropic_UnsupportedToolType(t *testing.T) {
+func TestResponsesToAnthropic_UnsupportedToolTypeIsSkipped(t *testing.T) {
 	input, _ := json.Marshal("Hi")
 	req := &ResponsesRequest{
 		Model: "test-model",
@@ -153,9 +153,9 @@ func TestResponsesToAnthropic_UnsupportedToolType(t *testing.T) {
 		},
 	}
 
-	_, err := ResponsesToAnthropic(req, "claude-sonnet-4-20250514")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported for Anthropic upstream")
+	result, err := ResponsesToAnthropic(req, "claude-sonnet-4-20250514")
+	require.NoError(t, err)
+	require.Empty(t, result.Tools)
 }
 
 func TestResponsesToAnthropic_ToolChoice(t *testing.T) {

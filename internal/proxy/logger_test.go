@@ -13,7 +13,6 @@ import (
 )
 
 type capturingStore struct {
-	store.Store
 	delay   time.Duration
 	mu      sync.Mutex
 	entries []*store.RequestLogEntry

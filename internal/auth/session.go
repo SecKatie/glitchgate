@@ -21,11 +21,11 @@ const (
 
 // UISessionStore manages UI sessions backed by the database.
 type UISessionStore struct {
-	store store.Store
+	store store.SessionBackendStore
 }
 
 // NewUISessionStore creates a UISessionStore backed by the given store.
-func NewUISessionStore(s store.Store) *UISessionStore {
+func NewUISessionStore(s store.SessionBackendStore) *UISessionStore {
 	return &UISessionStore{store: s}
 }
 

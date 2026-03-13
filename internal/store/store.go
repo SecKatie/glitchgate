@@ -10,11 +10,69 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// Store defines all data-access operations required by the proxy.
+// UserAdminStore contains the user-management operations used by the admin UI.
+type UserAdminStore interface {
+	ListUsersWithTeams(ctx context.Context) ([]UserWithTeam, error)
+	GetOIDCUserByID(ctx context.Context, id string) (*OIDCUser, error)
+	GetTeamMembership(ctx context.Context, userID string) (*TeamMembership, error)
+	CountGlobalAdmins(ctx context.Context) (int64, error)
+	UpdateOIDCUserRole(ctx context.Context, id, role string) error
+	SetOIDCUserActive(ctx context.Context, id string, active bool) error
+	DeleteUISessionsByUserID(ctx context.Context, userID string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+}
+
+// TeamAdminStore contains the team-management operations used by the admin UI.
+type TeamAdminStore interface {
+	ListTeamsWithMemberCounts(ctx context.Context) ([]TeamWithMemberCount, error)
+	ListOIDCUsers(ctx context.Context) ([]OIDCUser, error)
+	GetTeamByID(ctx context.Context, id string) (*Team, error)
+	CreateTeam(ctx context.Context, id, name, description string) error
+	AssignUserToTeam(ctx context.Context, userID, teamID string) error
+	DeleteTeam(ctx context.Context, teamID string) error
+	GetTeamMembership(ctx context.Context, userID string) (*TeamMembership, error)
+	RemoveUserFromTeam(ctx context.Context, userID string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+}
+
+// SessionReaderStore contains the user lookups needed while validating UI sessions.
+type SessionReaderStore interface {
+	GetOIDCUserByID(ctx context.Context, id string) (*OIDCUser, error)
+	GetTeamMembership(ctx context.Context, userID string) (*TeamMembership, error)
+}
+
+// SessionBackendStore contains the persistence operations used by UISessionStore.
+type SessionBackendStore interface {
+	CreateUISession(ctx context.Context, id, token, sessionType, userID string, expiresAt time.Time) error
+	GetUISessionByToken(ctx context.Context, token string) (*UISession, error)
+	DeleteUISession(ctx context.Context, token string) error
+	DeleteUISessionsByUserID(ctx context.Context, userID string) error
+	CleanupExpiredSessions(ctx context.Context) error
+}
+
+// ProxyKeyAuthStore contains the proxy-key lookup needed by auth middleware.
+type ProxyKeyAuthStore interface {
+	GetActiveProxyKeyByPrefix(ctx context.Context, prefix string) (*ProxyKey, error)
+}
+
+// RequestLogWriter contains the single write operation needed by AsyncLogger.
+type RequestLogWriter interface {
+	InsertRequestLog(ctx context.Context, log *RequestLogEntry) error
+}
+
+// Store defines all data-access operations required by the proxy. It remains as
+// a compatibility aggregate while request-path consumers move to narrower
+// interfaces.
 type Store interface {
+	UserAdminStore
+	TeamAdminStore
+	SessionReaderStore
+	SessionBackendStore
+	ProxyKeyAuthStore
+	RequestLogWriter
+
 	// Proxy keys.
 	CreateProxyKey(ctx context.Context, id, keyHash, keyPrefix, label string) error
-	GetActiveProxyKeyByPrefix(ctx context.Context, prefix string) (*ProxyKey, error)
 	ListActiveProxyKeys(ctx context.Context) ([]ProxyKeySummary, error)
 	RevokeProxyKey(ctx context.Context, prefix string) error
 	UpdateKeyLabel(ctx context.Context, prefix, label string) error
@@ -50,32 +108,16 @@ type Store interface {
 
 	// OIDC users.
 	UpsertOIDCUser(ctx context.Context, subject, email, displayName string) (*OIDCUser, error)
-	GetOIDCUserByID(ctx context.Context, id string) (*OIDCUser, error)
 	GetOIDCUserBySubject(ctx context.Context, subject string) (*OIDCUser, error)
-	ListOIDCUsers(ctx context.Context) ([]OIDCUser, error)
-	CountGlobalAdmins(ctx context.Context) (int64, error)
-	UpdateOIDCUserRole(ctx context.Context, id, role string) error
-	SetOIDCUserActive(ctx context.Context, id string, active bool) error
 	UpdateOIDCUserLastSeen(ctx context.Context, id string) error
 
 	// Teams.
-	CreateTeam(ctx context.Context, id, name, description string) error
 	ListTeams(ctx context.Context) ([]Team, error)
-	GetTeamByID(ctx context.Context, id string) (*Team, error)
-	DeleteTeam(ctx context.Context, teamID string) error
 
 	// Team memberships.
-	AssignUserToTeam(ctx context.Context, userID, teamID string) error
-	RemoveUserFromTeam(ctx context.Context, userID string) error
-	GetTeamMembership(ctx context.Context, userID string) (*TeamMembership, error)
 	ListTeamMembers(ctx context.Context, teamID string) ([]OIDCUser, error)
 
 	// UI sessions.
-	CreateUISession(ctx context.Context, id, token, sessionType, userID string, expiresAt time.Time) error
-	GetUISessionByToken(ctx context.Context, token string) (*UISession, error)
-	DeleteUISession(ctx context.Context, token string) error
-	DeleteUISessionsByUserID(ctx context.Context, userID string) error
-	CleanupExpiredSessions(ctx context.Context) error
 
 	// OIDC state (PKCE).
 	CreateOIDCState(ctx context.Context, state, pkceVerifier, redirectTo string, expiresAt time.Time) error
@@ -289,6 +331,19 @@ type OIDCUser struct {
 	Budget      BudgetPolicy
 }
 
+// UserWithTeam is a store-level projection for the user admin page.
+type UserWithTeam struct {
+	ID          string
+	Email       string
+	DisplayName string
+	Role        string
+	Active      bool
+	LastSeenAt  *time.Time
+	CreatedAt   time.Time
+	TeamID      *string
+	TeamName    *string
+}
+
 // Team represents an organizational group.
 type Team struct {
 	ID          string
@@ -296,6 +351,15 @@ type Team struct {
 	Description string
 	CreatedAt   time.Time
 	Budget      BudgetPolicy
+}
+
+// TeamWithMemberCount is a store-level projection for the team admin page.
+type TeamWithMemberCount struct {
+	ID          string
+	Name        string
+	Description string
+	CreatedAt   time.Time
+	MemberCount int
 }
 
 // BudgetPolicy holds an optional spend limit for an entity.

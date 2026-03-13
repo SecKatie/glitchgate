@@ -34,7 +34,7 @@ type AsyncLoggerStats struct {
 // to avoid blocking the proxy path.
 type AsyncLogger struct {
 	ch              chan *store.RequestLogEntry
-	store           store.Store
+	store           store.RequestLogWriter
 	done            chan struct{}
 	writeTimeout    time.Duration
 	enqueueTimeout  time.Duration
@@ -50,7 +50,7 @@ type AsyncLogger struct {
 }
 
 // NewAsyncLogger creates and starts an async log writer.
-func NewAsyncLogger(s store.Store, bufSize int) *AsyncLogger {
+func NewAsyncLogger(s store.RequestLogWriter, bufSize int) *AsyncLogger {
 	return NewAsyncLoggerWithOptions(s, AsyncLoggerOptions{
 		BufferSize:      bufSize,
 		WriteTimeout:    config.DefaultAsyncLogWriteTimeout,
@@ -61,7 +61,7 @@ func NewAsyncLogger(s store.Store, bufSize int) *AsyncLogger {
 }
 
 // NewAsyncLoggerWithOptions creates and starts an async log writer with explicit options.
-func NewAsyncLoggerWithOptions(s store.Store, opts AsyncLoggerOptions) *AsyncLogger {
+func NewAsyncLoggerWithOptions(s store.RequestLogWriter, opts AsyncLoggerOptions) *AsyncLogger {
 	if opts.BufferSize <= 0 {
 		opts.BufferSize = config.DefaultAsyncLogBufferSize
 	}

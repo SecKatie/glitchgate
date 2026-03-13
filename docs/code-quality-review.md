@@ -130,7 +130,7 @@ Status 2026-03-13: completed. The three proxy entrypoints now execute through on
 
 Refactor target: add an `internal/app` or `internal/bootstrap` package that returns a composed runtime object, and add a `ProviderRegistry` that resolves unique configured provider names, default base URLs, pricing defaults, and instantiated clients once. Provider identity should stay keyed to `ProviderConfig.Name`; type and host detection should only select default pricing tables or one-time legacy backfills. This removes the current "change one provider concept in four places" problem.
 
-Status 2026-03-13: provider identity and runtime cost attribution now use `ProviderConfig.Name`. Legacy canonical host/type keys are only retained for historical log normalization and default-rate selection.
+Status 2026-03-13: provider identity and runtime cost attribution now use `ProviderConfig.Name`. Legacy canonical host/type keys are only retained for historical log normalization and default-rate selection. `cmd/serve.go` now delegates store startup, migrations, provider compilation, pricing/default alias assembly, timezone/OIDC initialization, async logger creation, and maintenance jobs to `internal/app`. Route binding and HTTP server wiring still live in `cmd/serve.go`, so the bootstrap extraction is meaningfully underway but not fully complete.
 
 3. Centralize authorization policy and fix the current scope bug first.
 
@@ -173,6 +173,6 @@ Refactor target: build one shared SSE engine with pluggable event translators, a
 2. Completed 2026-03-13: repair cost API semantics by routing all cost views through one pricing presenter.
 3. Completed 2026-03-13: repair cross-format fallback continuation in the Anthropic and OpenAI proxy entrypoints.
 4. Completed 2026-03-13: collapse proxy orchestration into one fallback-aware pipeline.
-5. Next: extract bootstrap/provider compilation from `cmd/serve.go`.
-6. Split `store.Store` and add joined projection queries for admin pages.
+5. In progress 2026-03-13: extract bootstrap/provider compilation from `cmd/serve.go`.
+6. Next: split `store.Store` and add joined projection queries for admin pages.
 7. Unify SSE and transport helpers.
