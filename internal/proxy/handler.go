@@ -152,7 +152,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latency := time.Since(start).Milliseconds()
 			errMsg := err.Error()
 			provKey := provKeyFor(h.cfg, prov)
-			h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel,
+			h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
 				latency, upstreamBody, attemptCount, handlerResult{
 					Status: http.StatusBadGateway, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -173,7 +173,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			latency := time.Since(start).Milliseconds()
 			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
 			provKey := provKeyFor(h.cfg, prov)
-			h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel,
+			h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
 				latency, upstreamBody, attemptCount, handlerResult{
 					Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -191,7 +191,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			result = h.handleNonStreaming(w, provResp)
 		}
 		latency := time.Since(start).Milliseconds()
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel,
+		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
 			latency, upstreamBody, attemptCount, result)
 		return
 	}
@@ -312,7 +312,7 @@ func (h *Handler) serveViaOpenAIProvider(w http.ResponseWriter, r *http.Request,
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
 		provKey := provKeyFor(h.cfg, prov)
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel,
+		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
 			latency, body, attemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -332,7 +332,7 @@ func (h *Handler) serveViaOpenAIProvider(w http.ResponseWriter, r *http.Request,
 		result = h.handleOpenAIProviderNonStreaming(w, provResp, reqBody.Model)
 	}
 	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel,
+	h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
 		latency, body, attemptCount, result)
 }
 
@@ -510,7 +510,7 @@ func (h *Handler) serveViaResponsesProvider(w http.ResponseWriter, r *http.Reque
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
 		provKey := provKeyFor(h.cfg, prov)
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel,
+		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
 			latency, body, attemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -527,7 +527,7 @@ func (h *Handler) serveViaResponsesProvider(w http.ResponseWriter, r *http.Reque
 		result = h.handleResponsesProviderNonStreaming(w, provResp, reqBody.Model)
 	}
 	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel,
+	h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
 		latency, body, attemptCount, result)
 }
 

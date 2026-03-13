@@ -136,6 +136,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 				for model, entry := range pricing.OpenAIDefaults {
 					pricingMap[provKey+"/"+model] = entry
 				}
+			} else if pricing.IsChutesURL(baseURL) {
+				for model, entry := range pricing.ChutesDefaults {
+					pricingMap[provKey+"/"+model] = entry
+				}
+			} else if pricing.IsSegmentURL(baseURL) {
+				for model, entry := range pricing.SegmentDefaults {
+					pricingMap[provKey+"/"+model] = entry
+				}
 			}
 		}
 	}

@@ -266,4 +266,111 @@ func TestParseConversation(t *testing.T) {
 		require.NotNil(t, cd.LatestPrompt)
 		require.Equal(t, "Real prompt", cd.LatestPrompt.Blocks[0].Text)
 	})
+
+	// OpenAI Chat Completions format tests
+	t.Run("openai simple user message is parsed", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.NotNil(t, cd.LatestPrompt)
+		require.Equal(t, "user", cd.LatestPrompt.Role)
+		require.Len(t, cd.LatestPrompt.Blocks, 1)
+		require.Equal(t, "Hello", cd.LatestPrompt.Blocks[0].Text)
+	})
+
+	t.Run("openai system message is parsed", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[{"role":"system","content":"Be helpful"},{"role":"user","content":"Hi"}]}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.True(t, cd.HasSystem)
+		require.Equal(t, "Be helpful", cd.SystemPrompt)
+		require.Equal(t, "Hi", cd.LatestPrompt.Blocks[0].Text)
+	})
+
+	t.Run("openai developer replaces system role", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[{"role":"developer","content":"Developer prompt"},{"role":"user","content":"Hi"}]}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.True(t, cd.HasSystem)
+		require.Equal(t, "Developer prompt", cd.SystemPrompt)
+	})
+
+	t.Run("openai multi-turn conversation builds history", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[
+			{"role":"user","content":"First question"},
+			{"role":"assistant","content":"First answer"},
+			{"role":"user","content":"Second question"}
+		]}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.Len(t, cd.History, 2)
+		require.Equal(t, "user", cd.History[0].Role)
+		require.Equal(t, "assistant", cd.History[1].Role)
+		require.Equal(t, "Second question", cd.LatestPrompt.Blocks[0].Text)
+	})
+
+	t.Run("openai non-streaming response is parsed", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[{"role":"user","content":"Hi"}]}`
+		resp := `{"id":"chatcmpl-123","object":"chat.completion","created":1234567890,"model":"gpt-4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello there!"},"finish_reason":"stop"}]}`
+		cd := parseConversation(req, resp)
+		require.False(t, cd.ParseFailed)
+		require.NotNil(t, cd.Response)
+		require.Equal(t, "assistant", cd.Response.Role)
+		require.Len(t, cd.Response.Blocks, 1)
+		require.Equal(t, "Hello there!", cd.Response.Blocks[0].Text)
+	})
+
+	t.Run("openai streaming response is parsed", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[{"role":"user","content":"Hi"}]}`
+		sseBody := "data: {\"id\":\"chatcmpl-123\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello from\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-123\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" stream\"}}]}\n\n" +
+			"data: [DONE]\n\n"
+		cd := parseConversation(req, sseBody)
+		require.False(t, cd.ParseFailed)
+		require.NotNil(t, cd.Response)
+		require.Len(t, cd.Response.Blocks, 1)
+		require.Equal(t, "Hello from stream", cd.Response.Blocks[0].Text)
+	})
+
+	t.Run("openai tool use and tool results are parsed", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[
+			{"role":"user","content":"What is the weather?"},
+			{"role":"assistant","content":"","tool_calls":[{"id":"call_123","type":"function","function":{"name":"get_weather","arguments":"{\"location\":\"NYC\"}"}}]},
+			{"role":"tool","tool_call_id":"call_123","content":"Sunny, 72°F"}
+		]}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		// History: user question + assistant with tool call (2 items)
+		require.Len(t, cd.History, 2)
+		require.Equal(t, "user", cd.History[0].Role)
+		require.Equal(t, "assistant", cd.History[1].Role)
+		// Latest prompt: tool result
+		require.NotNil(t, cd.LatestPrompt)
+		require.Len(t, cd.LatestPrompt.Blocks, 1)
+		require.Equal(t, "tool_result", cd.LatestPrompt.Blocks[0].Type)
+		require.Equal(t, "get_weather", cd.LatestPrompt.Blocks[0].ToolName)
+	})
+
+	t.Run("openai streaming tool calls are parsed", func(t *testing.T) {
+		req := `{"model":"gpt-4","messages":[{"role":"user","content":"Get the weather"}]}`
+		sseBody := "data: {\"id\":\"chatcmpl-123\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_123\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-123\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\\\"\"}}]}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-123\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"Boston\\\"}\"}}]}}]}\n\n" +
+			"data: [DONE]\n\n"
+		cd := parseConversation(req, sseBody)
+		require.False(t, cd.ParseFailed)
+		require.NotNil(t, cd.Response)
+		require.Len(t, cd.Response.Blocks, 1)
+		require.Equal(t, "tool_use", cd.Response.Blocks[0].Type)
+		require.Equal(t, "get_weather", cd.Response.Blocks[0].ToolName)
+	})
+
+	t.Run("openai image content shows image label", func(t *testing.T) {
+		req := `{"model":"gpt-4o","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,abc123"}}]}]}`
+		cd := parseConversation(req, "")
+		require.False(t, cd.ParseFailed)
+		require.Len(t, cd.LatestPrompt.Blocks, 1)
+		require.Equal(t, "image", cd.LatestPrompt.Blocks[0].Type)
+		require.Contains(t, cd.LatestPrompt.Blocks[0].MediaLabel, "image")
+	})
 }

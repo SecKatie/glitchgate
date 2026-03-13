@@ -68,7 +68,7 @@ proxy_ip_rate_limit_burst: 60
 request_log_retention: 720h
 request_log_prune_interval: 1h
 request_log_prune_batch_size: 1000
-request_log_body_max_bytes: 65536
+request_log_body_max_bytes: 4194304
 
 providers:
   - name: "anthropic"
@@ -229,7 +229,7 @@ Tokens are stored in `token_dir` with `0600` permissions. The short-lived Copilo
 | `request_log_retention` | `720h` | Age cutoff for pruning `request_logs`; `0` disables pruning |
 | `request_log_prune_interval` | `1h` | How often the background pruning job runs |
 | `request_log_prune_batch_size` | `1000` | Maximum rows deleted per prune batch |
-| `request_log_body_max_bytes` | `65536` | Maximum bytes retained for stored request/response bodies after redaction |
+| `request_log_body_max_bytes` | `4194304` | Maximum bytes retained for stored request/response bodies after redaction |
 
 ## Model List
 

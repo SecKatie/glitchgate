@@ -23,9 +23,10 @@ type ConversationData struct {
 	Response     *ConvTurn  // parsed from ResponseBody; nil if parse failed
 	History      []ConvTurn // all turns before LatestPrompt, oldest first
 
-	ParseFailed bool   // true if RequestBody could not be parsed as a supported request format
-	RawRequest  string // pretty-printed RequestBody (always populated)
-	RawResponse string // pretty-printed ResponseBody (always populated)
+	ParseFailed      bool   // true if RequestBody could not be parsed as a supported request format
+	TruncatedRequest bool   // true if the stored request body was truncated before being logged
+	RawRequest       string // pretty-printed RequestBody (always populated)
+	RawResponse      string // pretty-printed ResponseBody (always populated)
 }
 
 // ConvTurn is a single conversation turn for template rendering.
@@ -88,28 +89,197 @@ func truncateRunes(s string) (short string, full string, truncated bool) {
 	return string(r[:truncateAt]), s, true
 }
 
+// truncationMarker is the prefix of the suffix appended by truncateLoggedBody.
+const truncationMarker = "\n[TRUNCATED original_bytes="
+
+// stripTruncation removes the truncation suffix added by the proxy logger and
+// reports whether the body was truncated.
+func stripTruncation(body string) (string, bool) {
+	if idx := strings.Index(body, truncationMarker); idx >= 0 {
+		return body[:idx], true
+	}
+	return body, false
+}
+
 // parseConversation parses the stored request and response bodies into a
 // ConversationData view model. It never returns nil; on any parse failure the
 // ParseFailed flag is set and raw pretty-printed bodies are still populated.
-func parseConversation(requestBody, responseBody string) *ConversationData {
+//
+// sourceFormat is the logged source_format value ("anthropic", "openai",
+// "responses", or "" for auto-detect).
+func parseConversation(requestBody, responseBody string, sourceFormat ...string) *ConversationData {
 	cd := &ConversationData{}
 
 	// Always populate pretty-printed raw bodies.
 	cd.RawRequest = prettyJSON(requestBody)
 	cd.RawResponse = prettyJSON(responseBody)
 
-	var req anthropic.MessagesRequest
-	if err := json.Unmarshal([]byte(requestBody), &req); err == nil && len(req.Messages) > 0 {
-		return parseAnthropicConversation(cd, &req, responseBody)
+	// Strip any truncation suffix added by the proxy logger before attempting
+	// to parse. The suffix makes the stored string invalid JSON.
+	reqBody, truncated := stripTruncation(requestBody)
+	cd.TruncatedRequest = truncated
+
+	format := ""
+	if len(sourceFormat) > 0 {
+		format = sourceFormat[0]
+	}
+
+	// When source format is explicitly known, route directly.
+	if format == "openai" {
+		var openaiReq translate.ChatCompletionRequest
+		if err := json.Unmarshal([]byte(reqBody), &openaiReq); err == nil && len(openaiReq.Messages) > 0 {
+			return parseOpenAIConversation(cd, &openaiReq, responseBody)
+		}
+		cd.ParseFailed = true
+		return cd
+	}
+	if format == "responses" {
+		var responsesReq translate.ResponsesRequest
+		if err := json.Unmarshal([]byte(reqBody), &responsesReq); err == nil && isResponsesRequest(&responsesReq) {
+			return parseResponsesConversation(cd, &responsesReq, responseBody)
+		}
+		cd.ParseFailed = true
+		return cd
+	}
+
+	// Auto-detect: try formats in order. Anthropic is checked first, but only
+	// when message roles and content types are Anthropic-compatible. If Anthropic
+	// parsing produces no response and the response body looks like OpenAI format,
+	// we fall through to the OpenAI parser.
+	var anthReq anthropic.MessagesRequest
+	if tryPartialAnthropicDecode(reqBody, &anthReq) &&
+		len(anthReq.Messages) > 0 &&
+		isAnthropicRoles(anthReq.Messages) &&
+		!hasOpenAIContentType(anthReq.Messages) {
+		result := parseAnthropicConversation(cd, &anthReq, responseBody)
+		// If the response parsed successfully (or there was no response body),
+		// accept this as an Anthropic conversation.
+		if result.Response != nil || !looksLikeOpenAIResponse(responseBody) {
+			return result
+		}
+		// Response body looks like OpenAI format even though the request matched
+		// Anthropic structure — reset and try OpenAI.
+		cd = &ConversationData{
+			RawRequest:       result.RawRequest,
+			RawResponse:      result.RawResponse,
+			TruncatedRequest: result.TruncatedRequest,
+		}
 	}
 
 	var responsesReq translate.ResponsesRequest
-	if err := json.Unmarshal([]byte(requestBody), &responsesReq); err == nil && isResponsesRequest(&responsesReq) {
+	if err := json.Unmarshal([]byte(reqBody), &responsesReq); err == nil && isResponsesRequest(&responsesReq) {
 		return parseResponsesConversation(cd, &responsesReq, responseBody)
+	}
+
+	var openaiReq translate.ChatCompletionRequest
+	if err := json.Unmarshal([]byte(reqBody), &openaiReq); err == nil && len(openaiReq.Messages) > 0 {
+		return parseOpenAIConversation(cd, &openaiReq, responseBody)
 	}
 
 	cd.ParseFailed = true
 	return cd
+}
+
+// isAnthropicRoles reports whether all message roles are Anthropic-valid
+// (only "user" and "assistant"). OpenAI requests include "system", "developer",
+// and "tool" roles which are not valid Anthropic roles.
+func isAnthropicRoles(msgs []anthropic.Message) bool {
+	for _, msg := range msgs {
+		switch msg.Role {
+		case "user", "assistant":
+			// valid Anthropic roles
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// hasOpenAIContentType reports whether any message contains an OpenAI-specific
+// content block type such as "image_url".
+func hasOpenAIContentType(msgs []anthropic.Message) bool {
+	for _, msg := range msgs {
+		blocks, ok := msg.Content.([]interface{})
+		if !ok {
+			continue
+		}
+		for _, item := range blocks {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if t, _ := m["type"].(string); t == "image_url" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// looksLikeOpenAIResponse reports whether responseBody appears to be an OpenAI
+// Chat Completions response (streaming or non-streaming).
+func looksLikeOpenAIResponse(body string) bool {
+	return strings.Contains(body, `"choices"`) ||
+		strings.Contains(body, `"chat.completion"`) ||
+		strings.Contains(body, `"chat.completion.chunk"`)
+}
+
+// tryPartialAnthropicDecode attempts to decode an Anthropic MessagesRequest
+// from body, which may be truncated mid-JSON. It reads the top-level object
+// field-by-field so that complete messages already in the buffer are captured
+// even if the body is cut off inside a later field.
+func tryPartialAnthropicDecode(body string, req *anthropic.MessagesRequest) bool {
+	dec := json.NewDecoder(strings.NewReader(body))
+
+	// Expect opening '{'.
+	t, err := dec.Token()
+	if err != nil {
+		return false
+	}
+	if delim, ok := t.(json.Delim); !ok || delim != '{' {
+		return false
+	}
+
+	for dec.More() {
+		keyToken, err := dec.Token()
+		if err != nil {
+			break
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			break
+		}
+
+		switch key {
+		case "model":
+			_ = dec.Decode(&req.Model)
+		case "system":
+			_ = dec.Decode(&req.System)
+		case "messages":
+			// Read the array opening '[' then decode each message individually
+			// so we capture every complete message before a truncation point.
+			t2, err2 := dec.Token()
+			if err2 != nil {
+				break
+			}
+			if delim, ok := t2.(json.Delim); !ok || delim != '[' {
+				break
+			}
+			for dec.More() {
+				var msg anthropic.Message
+				if err := dec.Decode(&msg); err != nil {
+					break // truncated mid-message; stop here
+				}
+				req.Messages = append(req.Messages, msg)
+			}
+		default:
+			// Skip unknown or unneeded fields.
+			var skip json.RawMessage
+			_ = dec.Decode(&skip)
+		}
+	}
+
+	return true
 }
 
 func parseAnthropicConversation(cd *ConversationData, req *anthropic.MessagesRequest, responseBody string) *ConversationData {
@@ -194,6 +364,344 @@ func parseResponsesConversation(cd *ConversationData, req *translate.ResponsesRe
 	}
 
 	return cd
+}
+
+// parseOpenAIConversation parses OpenAI Chat Completions format into
+// ConversationData.
+func parseOpenAIConversation(cd *ConversationData, req *translate.ChatCompletionRequest, responseBody string) *ConversationData {
+	// Extract system message if present as first message.
+	if len(req.Messages) > 0 && (req.Messages[0].Role == "system" || req.Messages[0].Role == "developer") {
+		cd.SystemPrompt = normalizeOpenAIContent(req.Messages[0].Content)
+		cd.HasSystem = cd.SystemPrompt != ""
+		cd.SystemPromptLen = len([]rune(cd.SystemPrompt))
+	}
+
+	// Build tool name map from assistant messages with tool calls.
+	toolNameMap := make(map[string]string)
+	for _, msg := range req.Messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" && tc.Function.Name != "" {
+					toolNameMap[tc.ID] = tc.Function.Name
+				}
+			}
+		}
+	}
+
+	// Find last user-side message (role "user" or "tool" — both represent input
+	// from the user side in the OpenAI message format).
+	lastUserIdx := -1
+	startIdx := 0
+	if cd.HasSystem {
+		startIdx = 1
+	}
+	for i := startIdx; i < len(req.Messages); i++ {
+		if req.Messages[i].Role == "user" || req.Messages[i].Role == "tool" {
+			lastUserIdx = i
+		}
+	}
+
+	// Build history and latest prompt.
+	for i := startIdx; i < len(req.Messages); i++ {
+		msg := req.Messages[i]
+		turn := openAIMessageToTurn(msg, toolNameMap)
+		if i == lastUserIdx {
+			cd.LatestPrompt = &turn
+		} else {
+			cd.History = append(cd.History, turn)
+		}
+	}
+
+	// Parse response.
+	cd.Response = parseOpenAIResponseBody(responseBody, toolNameMap)
+
+	return cd
+}
+
+// normalizeOpenAIContent extracts text from OpenAI message content which can
+// be a string or array of content parts.
+func normalizeOpenAIContent(content interface{}) string {
+	if content == nil {
+		return ""
+	}
+
+	switch v := content.(type) {
+	case string:
+		return v
+	case []interface{}:
+		var parts []string
+		for _, item := range v {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			switch m["type"] {
+			case "text":
+				if text, ok := m["text"].(string); ok {
+					parts = append(parts, text)
+				}
+			case "image_url":
+				parts = append(parts, "[image]")
+			default:
+				if t, ok := m["type"].(string); ok {
+					parts = append(parts, "["+t+"]")
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		if s, ok := content.(string); ok {
+			return s
+		}
+		return ""
+	}
+}
+
+// openAIMessageToTurn converts an OpenAI ChatMessage to a ConvTurn.
+func openAIMessageToTurn(msg translate.ChatMessage, toolNameMap map[string]string) ConvTurn {
+	turn := ConvTurn{Role: msg.Role}
+
+	// Handle content - can be string or array of content parts.
+	// For "tool" role messages, skip the content here — it's captured in the
+	// tool_result block below to avoid duplicating the result text.
+	if msg.Role != "tool" {
+		switch content := msg.Content.(type) {
+		case string:
+			if content != "" {
+				short, full, trunc := truncateRunes(content)
+				turn.Blocks = append(turn.Blocks, ConvBlock{
+					Type:      "text",
+					Text:      short,
+					Truncated: trunc,
+					FullText:  full,
+				})
+			}
+		case []interface{}:
+			for _, item := range content {
+				if m, ok := item.(map[string]interface{}); ok {
+					block := openAIContentPartToBlock(m)
+					turn.Blocks = append(turn.Blocks, block)
+				}
+			}
+		}
+	}
+
+	// Handle tool calls for assistant messages.
+	for _, tc := range msg.ToolCalls {
+		if tc.Type != "function" {
+			continue
+		}
+		toolBlock := ConvBlock{
+			Type:      "tool_use",
+			ToolName:  tc.Function.Name,
+			ToolID:    tc.ID,
+			ToolInput: prettyJSON(tc.Function.Arguments),
+		}
+		if parsed, err := parseJSONToInterface(tc.Function.Arguments); err == nil {
+			toolBlock.ToolArgs = parseToolArgs(parsed)
+		}
+		turn.Blocks = append(turn.Blocks, toolBlock)
+	}
+
+	// Handle tool call results for tool messages.
+	if msg.Role == "tool" && msg.ToolCallID != "" {
+		toolName := toolNameMap[msg.ToolCallID]
+		content := ""
+		if s, ok := msg.Content.(string); ok {
+			content = s
+		}
+		short, full, trunc := truncateRunes(content)
+		turn.Blocks = append(turn.Blocks, ConvBlock{
+			Type:          "tool_result",
+			ToolUseID:     msg.ToolCallID,
+			ToolName:      toolName,
+			ResultContent: short,
+			ResultTrunc:   trunc,
+			FullText:      full,
+		})
+	}
+
+	return turn
+}
+
+// openAIContentPartToBlock converts an OpenAI content part map to ConvBlock.
+func openAIContentPartToBlock(m map[string]interface{}) ConvBlock {
+	partType, _ := m["type"].(string)
+
+	switch partType {
+	case "text":
+		if text, ok := m["text"].(string); ok {
+			short, full, trunc := truncateRunes(text)
+			return ConvBlock{
+				Type:      "text",
+				Text:      short,
+				Truncated: trunc,
+				FullText:  full,
+			}
+		}
+	case "image_url":
+		if urlData, ok := m["image_url"].(map[string]interface{}); ok {
+			if url, ok := urlData["url"].(string); ok {
+				label := "[image]"
+				if len(url) > 30 {
+					label = "[image: " + url[:27] + "...]"
+				} else if url != "" {
+					label = "[image: " + url + "]"
+				}
+				return ConvBlock{Type: "image", MediaLabel: label}
+			}
+		}
+		return ConvBlock{Type: "image", MediaLabel: "[image]"}
+	}
+
+	return ConvBlock{Type: "unknown", Text: "[" + partType + "]"}
+}
+
+// parseOpenAIResponseBody parses an OpenAI Chat Completions response body
+// (either streaming SSE or non-streaming JSON) into a ConvTurn.
+func parseOpenAIResponseBody(body string, toolNameMap map[string]string) *ConvTurn {
+	if body == "" {
+		return nil
+	}
+
+	// Try non-streaming response first.
+	var resp translate.ChatCompletionResponse
+	if err := json.Unmarshal([]byte(body), &resp); err == nil && len(resp.Choices) > 0 {
+		return openAIChoiceToTurn(&resp.Choices[0], toolNameMap)
+	}
+
+	// Try streaming SSE format.
+	return parseOpenAISSEResponse(body, toolNameMap)
+}
+
+// openAIChoiceToTurn converts an OpenAI choice to a ConvTurn.
+func openAIChoiceToTurn(choice *translate.Choice, toolNameMap map[string]string) *ConvTurn {
+	if choice == nil {
+		return nil
+	}
+
+	var turn ConvTurn
+	if choice.Message != nil {
+		turn = openAIMessageToTurn(*choice.Message, toolNameMap)
+	} else {
+		turn = ConvTurn{Role: "assistant"}
+	}
+
+	return &turn
+}
+
+// parseOpenAISSEResponse reconstructs a response from OpenAI SSE streaming format.
+func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
+	if !strings.Contains(body, "data:") {
+		return nil
+	}
+
+	// Accumulate text and tool calls across deltas.
+	textBuf := strings.Builder{}
+	toolCalls := make(map[int]*translate.ToolCall)
+	var toolCallOrder []int
+
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := line[6:]
+		if data == "[DONE]" {
+			continue
+		}
+
+		var chunk translate.ChatCompletionResponse
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		delta := chunk.Choices[0].Delta
+		if delta == nil {
+			continue
+		}
+
+		// Accumulate text.
+		if delta.Content != nil {
+			if s, ok := delta.Content.(string); ok {
+				textBuf.WriteString(s)
+			}
+		}
+
+		// Accumulate tool calls.
+		for _, tc := range delta.ToolCalls {
+			if tc.Index == nil {
+				continue
+			}
+			idx := *tc.Index
+			if existing, ok := toolCalls[idx]; ok {
+				// Append to existing.
+				if tc.ID != "" {
+					existing.ID = tc.ID
+				}
+				if tc.Function.Name != "" {
+					existing.Function.Name = tc.Function.Name
+				}
+				if tc.Function.Arguments != "" {
+					existing.Function.Arguments += tc.Function.Arguments
+				}
+			} else {
+				// New tool call.
+				toolCalls[idx] = &tc
+				toolCallOrder = append(toolCallOrder, idx)
+			}
+		}
+	}
+
+	// Build the turn.
+	turn := ConvTurn{Role: "assistant"}
+
+	// Add accumulated text if present.
+	if text := textBuf.String(); text != "" {
+		short, full, trunc := truncateRunes(text)
+		turn.Blocks = append(turn.Blocks, ConvBlock{
+			Type:      "text",
+			Text:      short,
+			Truncated: trunc,
+			FullText:  full,
+		})
+	}
+
+	// Add tool calls.
+	sort.Ints(toolCallOrder)
+	for _, idx := range toolCallOrder {
+		if tc, ok := toolCalls[idx]; ok {
+			toolBlock := ConvBlock{
+				Type:      "tool_use",
+				ToolName:  tc.Function.Name,
+				ToolID:    tc.ID,
+				ToolInput: prettyJSON(tc.Function.Arguments),
+			}
+			if parsed, err := parseJSONToInterface(tc.Function.Arguments); err == nil {
+				toolBlock.ToolArgs = parseToolArgs(parsed)
+			}
+			turn.Blocks = append(turn.Blocks, toolBlock)
+		}
+	}
+
+	if len(turn.Blocks) == 0 {
+		return nil
+	}
+	return &turn
+}
+
+// parseJSONToInterface attempts to parse a JSON string into an interface{}.
+func parseJSONToInterface(s string) (interface{}, error) {
+	var v interface{}
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func isResponsesRequest(req *translate.ResponsesRequest) bool {

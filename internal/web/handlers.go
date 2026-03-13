@@ -504,7 +504,7 @@ func (h *Handlers) LogDetailPage(w http.ResponseWriter, r *http.Request, id stri
 		}
 	}
 
-	conv := parseConversation(logEntry.RequestBody, logEntry.ResponseBody)
+	conv := parseConversation(logEntry.RequestBody, logEntry.ResponseBody, logEntry.SourceFormat)
 	costBreakdown := computeCostBreakdown(logEntry, h.calc)
 
 	data := LogDetailData{

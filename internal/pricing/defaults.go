@@ -121,10 +121,64 @@ var OpenAIDefaults = map[string]Entry{
 	},
 }
 
+// ChutesDefaults holds pricing for models accessed via the Chutes AI inference platform.
+// Applied for providers with type "openai" whose base_url targets llm.chutes.ai.
+// Values are USD per million tokens.
+var ChutesDefaults = map[string]Entry{
+	"zai-org/GLM-5-TEE": {
+		InputPerMillion:  0.95,
+		OutputPerMillion: 3.15,
+	},
+	"moonshotai/Kimi-K2.5-TEE": {
+		InputPerMillion:  0.45,
+		OutputPerMillion: 2.20,
+	},
+	"MiniMaxAI/MiniMax-M2.5-TEE": {
+		InputPerMillion:  0.30,
+		OutputPerMillion: 1.10,
+	},
+	"deepseek-ai/DeepSeek-V3.2-TEE": {
+		InputPerMillion:  0.28,
+		OutputPerMillion: 0.42,
+	},
+	"deepseek-ai/DeepSeek-R1-0528-TEE": {
+		InputPerMillion:  0.45,
+		OutputPerMillion: 2.15,
+	},
+	"Qwen/Qwen3-Coder-Next-TEE": {
+		InputPerMillion:  0.12,
+		OutputPerMillion: 0.75,
+	},
+}
+
+// SegmentDefaults holds pricing for models accessed via the Synthetic.new Segment platform.
+// Applied for providers with type "openai" whose base_url targets api.synthetic.new.
+// Values are USD per million tokens.
+var SegmentDefaults = map[string]Entry{
+	"hf:MiniMaxAI/MiniMax-M2.5": {
+		InputPerMillion:  0.60,
+		OutputPerMillion: 3.00,
+	},
+	"hf:moonshotai/Kimi-K2.5": {
+		InputPerMillion:  0.60,
+		OutputPerMillion: 3.00,
+	},
+	"hf:zai-org/GLM-4.7": {
+		InputPerMillion:  0.55,
+		OutputPerMillion: 2.19,
+	},
+	"hf:zai-org/GLM-4.7-Flash": {
+		InputPerMillion:  0.06,
+		OutputPerMillion: 0.40,
+	},
+}
+
 const (
 	officialOpenAIHost      = "api.openai.com"
 	officialChatGPTHost     = "chatgpt.com"
 	officialCodexPathPrefix = "/backend-api/codex"
+	chutesHost              = "llm.chutes.ai"
+	segmentHost             = "api.synthetic.new"
 )
 
 // IsOfficialOpenAIURL reports whether baseURL targets an official OpenAI-priced endpoint.
@@ -153,6 +207,16 @@ const officialAnthropicHost = "api.anthropic.com"
 // IsOfficialAnthropicURL reports whether baseURL targets the official Anthropic API.
 func IsOfficialAnthropicURL(baseURL string) bool {
 	return hostnameOf(baseURL) == officialAnthropicHost
+}
+
+// IsChutesURL reports whether baseURL targets the Chutes AI inference platform.
+func IsChutesURL(baseURL string) bool {
+	return hostnameOf(baseURL) == chutesHost
+}
+
+// IsSegmentURL reports whether baseURL targets the Synthetic.new Segment platform.
+func IsSegmentURL(baseURL string) bool {
+	return hostnameOf(baseURL) == segmentHost
 }
 
 // ProviderKey returns the canonical provider identifier used as the key prefix

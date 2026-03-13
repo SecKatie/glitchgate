@@ -28,9 +28,18 @@ type handlerResult struct {
 // logEntry records one request/response cycle to the database.
 // This is the single log call site; individual handle* functions never call it directly.
 func (l *AsyncLogger) logEntry(
-	proxyKeyID, sourceFormat, providerName, modelRequested, modelUpstream string,
+	proxyKeyID, sourceFormat, providerName, modelRequested, modelUpstream, resolvedModelName string,
 	latencyMs int64, requestBody []byte, attemptCount int64, r handlerResult,
 ) {
+	// If resolvedModelName not provided, default to modelUpstream if fallback happened, else modelRequested
+	if resolvedModelName == "" {
+		if attemptCount > 1 && modelUpstream != "" {
+			resolvedModelName = modelUpstream
+		} else {
+			resolvedModelName = modelRequested
+		}
+	}
+
 	l.Log(&store.RequestLogEntry{
 		ID:                       uuid.New().String(),
 		ProxyKeyID:               proxyKeyID,
@@ -39,6 +48,7 @@ func (l *AsyncLogger) logEntry(
 		ProviderName:             providerName,
 		ModelRequested:           modelRequested,
 		ModelUpstream:            modelUpstream,
+		ResolvedModelName:        resolvedModelName,
 		InputTokens:              r.InputTokens,
 		OutputTokens:             r.OutputTokens,
 		CacheCreationInputTokens: r.CacheCreationInputTokens,

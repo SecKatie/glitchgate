@@ -62,7 +62,7 @@ const (
 	DefaultRequestLogRetention       = 30 * 24 * time.Hour
 	DefaultRequestLogPruneInterval   = time.Hour
 	DefaultRequestLogPruneBatchSize  = 1000
-	DefaultRequestLogBodyMaxBytes    = 64 << 10
+	DefaultRequestLogBodyMaxBytes    = DefaultProxyMaxBodyBytes
 )
 
 // OIDCConfig holds the OIDC provider configuration.

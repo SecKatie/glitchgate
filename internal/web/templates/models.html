@@ -76,7 +76,7 @@
     >
       <td>
         <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>
-        {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span> <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, {{.ModelName | printf "%q"}})">⎘</button>{{else if not .IsWildcard}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, {{.ModelName | printf "%q"}})">⎘</button>{{end}}
+        {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span> <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">⎘</button>{{else if not .IsWildcard}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">⎘</button>{{end}}
       </td>
       <td>
         {{if .IsVirtual}}Virtual{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}—{{end}}

@@ -185,7 +185,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			latency := time.Since(start).Milliseconds()
 			errMsg := err.Error()
-			h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel,
+			h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel, "",
 				latency, body, attemptCount, handlerResult{
 					Status: http.StatusBadGateway, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: isStreaming,
@@ -203,7 +203,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			latency := time.Since(start).Milliseconds()
 			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-			h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel,
+			h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel, "",
 				latency, body, attemptCount, handlerResult{
 					Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: isStreaming,
@@ -234,7 +234,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		latency := time.Since(start).Milliseconds()
-		h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel,
+		h.logger.logEntry(proxyKeyID, "responses", provKey, req.Model, mapping.UpstreamModel, "",
 			latency, body, attemptCount, result)
 		return
 	}
