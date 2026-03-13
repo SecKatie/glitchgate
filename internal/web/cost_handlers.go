@@ -362,6 +362,9 @@ func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerName
 		name := entry.Group
 		if mapped, ok := providerNames[entry.Group]; ok && mapped != "" {
 			name = mapped
+		} else if strings.Contains(entry.Group, ":") {
+			// Unmapped pricing key from a removed/renamed provider — show as "unknown".
+			name = "unknown"
 		}
 
 		agg := combined[name]
