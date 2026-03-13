@@ -23,6 +23,7 @@ func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 			TotalCacheCreationTokens: 30,
 			TotalCacheReadTokens:     60,
 			TotalOutputTokens:        20,
+			TotalCostUSD:             14,
 		},
 		"TotalAllInputTokens": int64(100),
 		"TokenCosts": &AggregateCostBreakdown{
@@ -40,11 +41,11 @@ func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 	require.NoError(t, err)
 	body := rec.Body.String()
 
-	require.Contains(t, body, "$10.000000 <span class=\"token-detail-note\">(100%)</span>")
+	require.Contains(t, body, "$10.000000 <span class=\"token-detail-note\">(71.4%)</span>")
 	require.Contains(t, body, "$1.000000 <span class=\"token-detail-note\">(10.0%)</span>")
 	require.Contains(t, body, "$3.000000 <span class=\"token-detail-note\">(30.0%)</span>")
 	require.Contains(t, body, "$6.000000 <span class=\"token-detail-note\">(60.0%)</span>")
-	require.Contains(t, body, "$4.000000 <span class=\"token-detail-note\">(100%)</span>")
+	require.Contains(t, body, "$4.000000 <span class=\"token-detail-note\">(28.6%)</span>")
 	require.Contains(t, body, "Per-category costs are partial because some models in this filtered result set do not have pricing configured.")
 	require.False(t, strings.Contains(body, "(partial)</span>"))
 }
