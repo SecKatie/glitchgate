@@ -112,7 +112,7 @@ func RelayOpenAISSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*Strea
 	w.WriteHeader(http.StatusOK)
 
 	var captured bytes.Buffer
-	var inputTokens, outputTokens int64
+	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
 
 	scanner := newSSEScanner(upstream)
 	for scanner.Scan() {
@@ -124,16 +124,18 @@ func RelayOpenAISSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*Strea
 		if strings.HasPrefix(line, "data: ") {
 			data := line[6:]
 			if data != "[DONE]" {
-				extractOpenAITokens(data, &inputTokens, &outputTokens)
+				extractOpenAITokens(data, &inputTokens, &outputTokens, &cacheReadTokens, &reasoningTokens)
 			}
 		}
 
 		// Write the line to the client.
 		if _, err := w.Write([]byte(line + "\n")); err != nil {
 			return &StreamResult{
-				Body:         captured.Bytes(),
-				InputTokens:  inputTokens,
-				OutputTokens: outputTokens,
+				Body:                 captured.Bytes(),
+				InputTokens:          inputTokens,
+				OutputTokens:         outputTokens,
+				CacheReadInputTokens: cacheReadTokens,
+				ReasoningTokens:      reasoningTokens,
 			}, err
 		}
 
@@ -141,18 +143,22 @@ func RelayOpenAISSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*Strea
 		if line == "" {
 			if err := rc.Flush(); err != nil {
 				return &StreamResult{
-					Body:         captured.Bytes(),
-					InputTokens:  inputTokens,
-					OutputTokens: outputTokens,
+					Body:                 captured.Bytes(),
+					InputTokens:          inputTokens,
+					OutputTokens:         outputTokens,
+					CacheReadInputTokens: cacheReadTokens,
+					ReasoningTokens:      reasoningTokens,
 				}, err
 			}
 		}
 	}
 
 	return &StreamResult{
-		Body:         captured.Bytes(),
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
+		Body:                 captured.Bytes(),
+		InputTokens:          inputTokens,
+		OutputTokens:         outputTokens,
+		CacheReadInputTokens: cacheReadTokens,
+		ReasoningTokens:      reasoningTokens,
 	}, scanner.Err()
 }
 
@@ -397,15 +403,23 @@ func extractResponsesTokens(data string, inputTokens, outputTokens, cacheReadTok
 
 // extractOpenAITokens parses an OpenAI SSE data payload for token usage.
 // OpenAI includes usage in a final chunk with a "usage" field.
-func extractOpenAITokens(data string, inputTokens, outputTokens *int64) {
+// completion_tokens already includes reasoning_tokens (sub-breakdown, not additive).
+// cached_tokens is a sub-breakdown of prompt_tokens and is subtracted to get net input.
+func extractOpenAITokens(data string, inputTokens, outputTokens, cacheReadTokens, reasoningTokens *int64) {
 	if !strings.Contains(data, "\"usage\"") {
 		return
 	}
 
 	var chunk struct {
 		Usage *struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
+			PromptTokens        int64 `json:"prompt_tokens"`
+			CompletionTokens    int64 `json:"completion_tokens"`
+			PromptTokensDetails *struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+			CompletionTokensDetails *struct {
+				ReasoningTokens int64 `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
 
@@ -415,6 +429,16 @@ func extractOpenAITokens(data string, inputTokens, outputTokens *int64) {
 	if chunk.Usage != nil {
 		*inputTokens = chunk.Usage.PromptTokens
 		*outputTokens = chunk.Usage.CompletionTokens
+		if chunk.Usage.PromptTokensDetails != nil {
+			*cacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			*inputTokens -= *cacheReadTokens
+			if *inputTokens < 0 {
+				*inputTokens = 0
+			}
+		}
+		if chunk.Usage.CompletionTokensDetails != nil {
+			*reasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
+		}
 	}
 }
 
