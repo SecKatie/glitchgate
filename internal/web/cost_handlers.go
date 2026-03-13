@@ -23,12 +23,12 @@ type CostHandlers struct {
 	templates     *TemplateSet
 	tz            *time.Location
 	calc          *pricing.Calculator
-	providerNames map[string]string // configured provider name → display name
+	providerNames map[string]string // provider name or legacy raw key → display name
 }
 
 // NewCostHandlers creates a new CostHandlers with the given store, template set,
 // display timezone (pass nil or time.UTC for UTC), and provider name map
-// (configured provider name → display name). Pass nil if no providers are configured.
+// (provider name or legacy raw key → display name). Pass nil if no providers are configured.
 func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string) *CostHandlers {
 	if tz == nil {
 		tz = time.UTC
@@ -212,7 +212,7 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
 	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, params.GroupBy, h.providerNames)
 
 	bd := make([]costBreakdownEntryJSON, len(breakdown))
@@ -277,7 +277,7 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	aggregated := aggregatePricedTimeseries(priceTimeseriesGroups(pricingGroups, h.calc), interval)
+	aggregated := aggregatePricedTimeseries(priceTimeseriesGroups(pricingGroups, h.calc, h.providerNames), interval)
 
 	data := make([]costTimeseriesEntryJSON, len(aggregated))
 	for i, e := range aggregated {
@@ -306,7 +306,7 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func priceTimeseriesGroups(groups []store.CostTimeseriesPricingGroup, calc *pricing.Calculator) []pricedTimeseriesEntry {
+func priceTimeseriesGroups(groups []store.CostTimeseriesPricingGroup, calc *pricing.Calculator, providerNames map[string]string) []pricedTimeseriesEntry {
 	if len(groups) == 0 {
 		return []pricedTimeseriesEntry{}
 	}
@@ -314,12 +314,12 @@ func priceTimeseriesGroups(groups []store.CostTimeseriesPricingGroup, calc *pric
 	entries := make([]pricedTimeseriesEntry, 0, len(groups))
 	for _, group := range groups {
 		cost := 0.0
-		if priced, _, ok := lookupPricedUsage(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+		if priced, _, ok := lookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
 			InputTokens:      group.InputTokens,
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
 			OutputTokens:     group.OutputTokens,
-		}); ok {
+		}, providerNames); ok {
 			cost = priced.TotalCostUSD
 		}
 		entries = append(entries, pricedTimeseriesEntry{
@@ -505,7 +505,7 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
 	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
 
 	data := map[string]any{

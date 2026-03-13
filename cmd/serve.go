@@ -237,9 +237,24 @@ func runServe(_ *cobra.Command, _ []string) error {
 		slog.Info("OIDC provider configured", "issuer_url", cfg.OIDC.IssuerURL)
 	}
 
-	providerNames := make(map[string]string, len(cfg.Providers))
+	providerNames := make(map[string]string, len(cfg.Providers)*2)
+	legacyProviderNames := make(map[string]string, len(cfg.Providers))
 	for _, p := range cfg.Providers {
 		providerNames[p.Name] = p.Name
+		baseURL := p.BaseURL
+		if p.Type == "github_copilot" && baseURL == "" {
+			baseURL = copilot.DefaultAPIURL
+		}
+		legacyName := pricing.ProviderKey(p.Type, baseURL)
+		if legacyName == "" || legacyName == p.Name {
+			continue
+		}
+		if existing, ok := legacyProviderNames[legacyName]; ok && existing != p.Name {
+			delete(providerNames, legacyName)
+			continue
+		}
+		legacyProviderNames[legacyName] = p.Name
+		providerNames[legacyName] = p.Name
 	}
 
 	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl, oidcProvider, cfg.ModelList, cfg.Providers)
