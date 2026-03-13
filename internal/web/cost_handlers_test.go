@@ -3,13 +3,40 @@
 package web
 
 import (
+	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 	"github.com/stretchr/testify/require"
 )
+
+type stubCostAPIStore struct {
+	store.Store
+	summary               *store.CostSummary
+	breakdown             []store.CostBreakdownEntry
+	pricingGroups         []store.CostPricingGroup
+	timeseriesPricingData []store.CostTimeseriesPricingGroup
+}
+
+func (s *stubCostAPIStore) GetCostSummary(context.Context, store.CostParams) (*store.CostSummary, error) {
+	return s.summary, nil
+}
+
+func (s *stubCostAPIStore) GetCostBreakdown(context.Context, store.CostParams) ([]store.CostBreakdownEntry, error) {
+	return s.breakdown, nil
+}
+
+func (s *stubCostAPIStore) GetCostPricingGroups(context.Context, store.CostParams) ([]store.CostPricingGroup, error) {
+	return s.pricingGroups, nil
+}
+
+func (s *stubCostAPIStore) GetCostTimeseriesPricingGroups(context.Context, store.CostParams) ([]store.CostTimeseriesPricingGroup, error) {
+	return s.timeseriesPricingData, nil
+}
 
 func TestParseCostParamsUsesSingleGroupingFilter(t *testing.T) {
 	tz := time.FixedZone("EST", -5*60*60)
@@ -74,7 +101,7 @@ func TestParseCostParamsUsesDSTAwareDayBounds(t *testing.T) {
 func TestAggregateProviderBreakdown(t *testing.T) {
 	entries := []store.CostBreakdownEntry{
 		{
-			Group:               "anthropic:api.anthropic.com",
+			Group:               "claude-max",
 			InputTokens:         100,
 			OutputTokens:        50,
 			CacheCreationTokens: 5,
@@ -82,7 +109,7 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 			Requests:            2,
 		},
 		{
-			Group:               "anthropic:vertex",
+			Group:               "chatgpt-pro",
 			InputTokens:         120,
 			OutputTokens:        70,
 			CacheCreationTokens: 3,
@@ -90,7 +117,7 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 			Requests:            1,
 		},
 		{
-			Group:               "openai",
+			Group:               "copilot",
 			InputTokens:         90,
 			OutputTokens:        20,
 			CacheCreationTokens: 1,
@@ -100,30 +127,54 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 	}
 
 	result := aggregateProviderBreakdown(entries, map[string]string{
-		"anthropic:api.anthropic.com": "claude-max",
-		"anthropic:vertex":            "claude-max",
-		"openai":                      "chatgpt-pro",
+		"claude-max":  "Claude Max",
+		"chatgpt-pro": "ChatGPT Pro",
+		"copilot":     "Copilot",
 	})
 
-	require.Len(t, result, 2)
-	// Both groups have 3 requests; alphabetical tiebreaker puts "chatgpt-pro" before "claude-max".
-	require.Equal(t, "chatgpt-pro", result[0].Group)
+	require.Len(t, result, 3)
+	require.Equal(t, "Copilot", result[0].Group)
 	require.Equal(t, int64(3), result[0].Requests)
 
-	require.Equal(t, "claude-max", result[1].Group)
-	require.Equal(t, int64(220), result[1].InputTokens)
-	require.Equal(t, int64(120), result[1].OutputTokens)
-	require.Equal(t, int64(8), result[1].CacheCreationTokens)
-	require.Equal(t, int64(11), result[1].CacheReadTokens)
-	require.Equal(t, int64(3), result[1].Requests)
+	require.Equal(t, "Claude Max", result[1].Group)
+	require.Equal(t, int64(100), result[1].InputTokens)
+	require.Equal(t, int64(50), result[1].OutputTokens)
+	require.Equal(t, int64(2), result[1].Requests)
+
+	require.Equal(t, "ChatGPT Pro", result[2].Group)
+	require.Equal(t, int64(120), result[2].InputTokens)
+	require.Equal(t, int64(70), result[2].OutputTokens)
+	require.Equal(t, int64(1), result[2].Requests)
+}
+
+func TestAggregateProviderBreakdownFallsBackToStoredProviderName(t *testing.T) {
+	entries := []store.CostBreakdownEntry{
+		{
+			Group:               "claude-max",
+			InputTokens:         220,
+			OutputTokens:        120,
+			CacheCreationTokens: 8,
+			CacheReadTokens:     11,
+			Requests:            3,
+		},
+	}
+
+	result := aggregateProviderBreakdown(entries, nil)
+
+	require.Len(t, result, 1)
+	require.Equal(t, "claude-max", result[0].Group)
+	require.Equal(t, int64(220), result[0].InputTokens)
+	require.Equal(t, int64(120), result[0].OutputTokens)
+	require.Equal(t, int64(8), result[0].CacheCreationTokens)
+	require.Equal(t, int64(11), result[0].CacheReadTokens)
+	require.Equal(t, int64(3), result[0].Requests)
 }
 
 func TestApplyProviderFilterMatchesDisplayNames(t *testing.T) {
 	h := &CostHandlers{
 		providerNames: map[string]string{
-			"openai":                       "chatgpt-pro",
-			"openai_responses:chatgpt.com": "chatgpt-pro",
-			"anthropic:api.anthropic.com":  "claude-max",
+			"chatgpt-pro": "ChatGPT Pro",
+			"claude-max":  "Claude Max",
 		},
 	}
 
@@ -134,5 +185,134 @@ func TestApplyProviderFilterMatchesDisplayNames(t *testing.T) {
 
 	h.applyProviderFilter(&params)
 
-	require.Equal(t, []string{"openai", "openai_responses:chatgpt.com"}, params.ProviderGroups)
+	require.Equal(t, []string{"chatgpt-pro"}, params.ProviderGroups)
+}
+
+func TestCostSummaryHandlerIncludesComputedDollars(t *testing.T) {
+	calc := pricing.NewCalculator(map[string]pricing.Entry{
+		"anthropic/claude-sonnet-4-20250514": {
+			InputPerMillion:  3,
+			OutputPerMillion: 15,
+		},
+	})
+	h := &CostHandlers{
+		store: &stubCostAPIStore{
+			summary: &store.CostSummary{
+				TotalInputTokens:  100,
+				TotalOutputTokens: 50,
+				TotalRequests:     2,
+			},
+			breakdown: []store.CostBreakdownEntry{
+				{
+					Group:        "claude-sonnet",
+					InputTokens:  100,
+					OutputTokens: 50,
+					Requests:     2,
+				},
+			},
+			pricingGroups: []store.CostPricingGroup{
+				{
+					ModelRequested: "claude-sonnet",
+					ProviderName:   "anthropic",
+					ModelUpstream:  "claude-sonnet-4-20250514",
+					InputTokens:    100,
+					OutputTokens:   50,
+				},
+			},
+		},
+		tz:   time.UTC,
+		calc: calc,
+	}
+
+	req := httptest.NewRequest("GET", "/ui/api/costs?from=2026-03-01&to=2026-03-31&group_by=model", nil)
+	rec := httptest.NewRecorder()
+
+	h.CostSummaryHandler(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	var resp costSummaryResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.InDelta(t, 0.00105, resp.TotalCostUSD, 1e-9)
+	require.Len(t, resp.Breakdown, 1)
+	require.Equal(t, "claude-sonnet", resp.Breakdown[0].Group)
+	require.InDelta(t, 0.00105, resp.Breakdown[0].CostUSD, 1e-9)
+}
+
+func TestCostSummaryHandlerAggregatesProviderDisplayCosts(t *testing.T) {
+	calc := pricing.NewCalculator(map[string]pricing.Entry{
+		"claude-max/claude-sonnet-4-20250514": {
+			InputPerMillion:  3,
+			OutputPerMillion: 15,
+		},
+		"claude-max/claude-opus-4-20250514": {
+			InputPerMillion:  15,
+			OutputPerMillion: 75,
+		},
+	})
+	h := &CostHandlers{
+		store: &stubCostAPIStore{
+			summary: &store.CostSummary{TotalRequests: 2},
+			breakdown: []store.CostBreakdownEntry{
+				{Group: "claude-max", InputTokens: 120, OutputTokens: 60, Requests: 2},
+			},
+			pricingGroups: []store.CostPricingGroup{
+				{ProviderName: "claude-max", ModelUpstream: "claude-sonnet-4-20250514", InputTokens: 100, OutputTokens: 50},
+				{ProviderName: "claude-max", ModelUpstream: "claude-opus-4-20250514", InputTokens: 20, OutputTokens: 10},
+			},
+		},
+		tz:   time.UTC,
+		calc: calc,
+		providerNames: map[string]string{
+			"claude-max": "Claude Max",
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/ui/api/costs?from=2026-03-01&to=2026-03-31&group_by=provider", nil)
+	rec := httptest.NewRecorder()
+
+	h.CostSummaryHandler(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	var resp costSummaryResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Breakdown, 1)
+	require.Equal(t, "Claude Max", resp.Breakdown[0].Group)
+	require.InDelta(t, 0.00210, resp.Breakdown[0].CostUSD, 1e-9)
+	require.InDelta(t, 0.00210, resp.TotalCostUSD, 1e-9)
+}
+
+func TestCostTimeseriesHandlerIncludesComputedDollars(t *testing.T) {
+	calc := pricing.NewCalculator(map[string]pricing.Entry{
+		"anthropic/claude-sonnet-4-20250514": {
+			InputPerMillion:  3,
+			OutputPerMillion: 15,
+		},
+		"openai/gpt-4o": {
+			InputPerMillion:  2.5,
+			OutputPerMillion: 10,
+		},
+	})
+	h := &CostHandlers{
+		store: &stubCostAPIStore{
+			timeseriesPricingData: []store.CostTimeseriesPricingGroup{
+				{Date: "2026-03-03", ProviderName: "anthropic", ModelUpstream: "claude-sonnet-4-20250514", InputTokens: 100, OutputTokens: 50, Requests: 1},
+				{Date: "2026-03-04", ProviderName: "openai", ModelUpstream: "gpt-4o", InputTokens: 200, OutputTokens: 100, Requests: 2},
+			},
+		},
+		tz:   time.UTC,
+		calc: calc,
+	}
+
+	req := httptest.NewRequest("GET", "/ui/api/costs/timeseries?from=2026-03-01&to=2026-03-31&interval=week", nil)
+	rec := httptest.NewRecorder()
+
+	h.CostTimeseriesHandler(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	var resp costTimeseriesResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "2026-03-02", resp.Data[0].Date)
+	require.Equal(t, int64(3), resp.Data[0].Requests)
+	require.InDelta(t, 0.00255, resp.Data[0].CostUSD, 1e-9)
 }

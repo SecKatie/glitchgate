@@ -46,6 +46,7 @@ type Store interface {
 	GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error)
 	GetCostPricingGroups(ctx context.Context, params CostParams) ([]CostPricingGroup, error)
 	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
+	GetCostTimeseriesPricingGroups(ctx context.Context, params CostParams) ([]CostTimeseriesPricingGroup, error)
 
 	// OIDC users.
 	UpsertOIDCUser(ctx context.Context, subject, email, displayName string) (*OIDCUser, error)
@@ -98,7 +99,7 @@ type ModelUsageSummary struct {
 	CacheReadInputTokens     int64
 	OutputTokens             int64
 	TotalCostUSD             float64
-	ProviderName             string // most-recently-seen provider_name from logs (may be empty)
+	ProviderName             string // most-recently-seen configured provider name from logs (may be empty)
 	UpstreamModel            string // most-recently-seen model_upstream from logs (may be empty)
 }
 
@@ -197,8 +198,8 @@ type CostParams struct {
 	KeyPrefix   string // Optional filter by proxy key prefix when grouping by key
 	GroupFilter string // Optional prefix filter on the current group dimension (model or provider)
 	// ProviderGroups is an optional set of exact provider_name values to include
-	// when GroupBy == "provider". This lets the web layer translate a displayed
-	// provider name back to one or more raw provider keys used in logs.
+	// when GroupBy == "provider". These should normally be configured provider
+	// names after startup normalization has rewritten legacy raw keys.
 	ProviderGroups []string
 	ScopeType      string // "all" | "team" | "user"
 	ScopeUserID    string
@@ -249,6 +250,19 @@ type CostPricingGroup struct {
 type CostTimeseriesEntry struct {
 	Date     string
 	Requests int64
+}
+
+// CostTimeseriesPricingGroup holds token totals grouped by local date and exact
+// provider/model pair so the web layer can compute truthful timeseries costs.
+type CostTimeseriesPricingGroup struct {
+	Date                string
+	ProviderName        string
+	ModelUpstream       string
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
+	Requests            int64
 }
 
 // AuditEvent records an administrative action for the audit trail.

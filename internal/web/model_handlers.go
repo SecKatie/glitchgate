@@ -13,7 +13,6 @@ import (
 
 	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
@@ -61,12 +60,7 @@ func resolveModelPricing(providers []config.ProviderConfig, calc *pricing.Calcul
 		name = pc.Name
 		provType = pc.Type
 
-		baseURL := pc.BaseURL
-		if pc.Type == "github_copilot" && baseURL == "" {
-			baseURL = copilot.DefaultAPIURL
-		}
-		provKey := pricing.ProviderKey(pc.Type, baseURL)
-		if e, ok := calc.Lookup(provKey, upstreamModel); ok {
+		if e, ok := calc.Lookup(pc.Name, upstreamModel); ok {
 			entry = &e
 			hasPricing = true
 		}
@@ -138,11 +132,12 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if items[i].HasPricing && items[i].Pricing != nil {
-			p := items[i].Pricing
-			items[i].TotalSpendUSD = float64(u.InputTokens)*p.InputPerMillion/1_000_000 +
-				float64(u.CacheCreationInputTokens)*p.CacheWritePerMillion/1_000_000 +
-				float64(u.CacheReadInputTokens)*p.CacheReadPerMillion/1_000_000 +
-				float64(u.OutputTokens)*p.OutputPerMillion/1_000_000
+			items[i].TotalSpendUSD = priceUsage(*items[i].Pricing, tokenUsage{
+				InputTokens:      u.InputTokens,
+				CacheWriteTokens: u.CacheCreationInputTokens,
+				CacheReadTokens:  u.CacheReadInputTokens,
+				OutputTokens:     u.OutputTokens,
+			}).TotalCostUSD
 		}
 	}
 
@@ -211,11 +206,12 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if view.HasPricing && view.Pricing != nil {
-		p := view.Pricing
-		usage.TotalCostUSD = float64(usage.InputTokens)*p.InputPerMillion/1_000_000 +
-			float64(usage.CacheCreationInputTokens)*p.CacheWritePerMillion/1_000_000 +
-			float64(usage.CacheReadInputTokens)*p.CacheReadPerMillion/1_000_000 +
-			float64(usage.OutputTokens)*p.OutputPerMillion/1_000_000
+		usage.TotalCostUSD = priceUsage(*view.Pricing, tokenUsage{
+			InputTokens:      usage.InputTokens,
+			CacheWriteTokens: usage.CacheCreationInputTokens,
+			CacheReadTokens:  usage.CacheReadInputTokens,
+			OutputTokens:     usage.OutputTokens,
+		}).TotalCostUSD
 		view.HasCostData = true
 	} else if view.IsVirtual {
 		// Virtual models route across multiple upstream models — compute cost per pricing group.

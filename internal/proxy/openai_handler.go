@@ -135,7 +135,8 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			latency := time.Since(start).Milliseconds()
 			errMsg := err.Error()
-			h.logger.logEntry(proxyKeyID, "openai", provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel, "",
+			providerName := providerNameFor(prov)
+			h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 				latency, body, attemptCount, handlerResult{
 					Status: http.StatusBadGateway, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
@@ -155,7 +156,8 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// All entries exhausted.
 			latency := time.Since(start).Milliseconds()
 			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-			h.logger.logEntry(proxyKeyID, "openai", provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel, "",
+			providerName := providerNameFor(prov)
+			h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 				latency, body, attemptCount, handlerResult{
 					Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
@@ -165,7 +167,7 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Success.
-		provKey := provKeyFor(h.cfg, prov)
+		providerName := providerNameFor(prov)
 		var result handlerResult
 		if oaiReq.Stream {
 			result = h.handleOpenAIStreaming(w, provResp, mapping.ModelName)
@@ -173,7 +175,7 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			result = h.handleOpenAINonStreaming(w, provResp, mapping.ModelName)
 		}
 		latency := time.Since(start).Milliseconds()
-		h.logger.logEntry(proxyKeyID, "openai", provKey, mapping.ModelName, mapping.UpstreamModel, "",
+		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 			latency, body, attemptCount, result)
 		return
 	}
@@ -299,7 +301,8 @@ func (h *OpenAIHandler) serveOpenAINative(w http.ResponseWriter, r *http.Request
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
-		h.logger.logEntry(proxyKeyID, "openai", provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 			latency, rawBody, attemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
@@ -317,7 +320,8 @@ func (h *OpenAIHandler) serveOpenAINative(w http.ResponseWriter, r *http.Request
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-		h.logger.logEntry(proxyKeyID, "openai", provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 			latency, rawBody, attemptCount, handlerResult{
 				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
@@ -326,7 +330,7 @@ func (h *OpenAIHandler) serveOpenAINative(w http.ResponseWriter, r *http.Request
 		return true
 	}
 
-	provKey := provKeyFor(h.cfg, prov)
+	providerName := providerNameFor(prov)
 	var result handlerResult
 	if oaiReq.Stream {
 		result = h.handleOpenAINativeStreaming(w, provResp)
@@ -334,7 +338,7 @@ func (h *OpenAIHandler) serveOpenAINative(w http.ResponseWriter, r *http.Request
 		result = h.handleOpenAINativeNonStreaming(w, provResp)
 	}
 	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "openai", provKey, mapping.ModelName, mapping.UpstreamModel, "",
+	h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 		latency, rawBody, attemptCount, result)
 	return true
 }
@@ -439,7 +443,8 @@ func (h *OpenAIHandler) serveOpenAIViaResponsesProvider(w http.ResponseWriter, r
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
-		h.logger.logEntry(proxyKeyID, "openai", provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 			latency, rawBody, attemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
@@ -457,7 +462,8 @@ func (h *OpenAIHandler) serveOpenAIViaResponsesProvider(w http.ResponseWriter, r
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-		h.logger.logEntry(proxyKeyID, "openai", provKeyFor(h.cfg, prov), mapping.ModelName, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 			latency, rawBody, attemptCount, handlerResult{
 				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: oaiReq.Stream,
@@ -466,7 +472,7 @@ func (h *OpenAIHandler) serveOpenAIViaResponsesProvider(w http.ResponseWriter, r
 		return true
 	}
 
-	provKey := provKeyFor(h.cfg, prov)
+	providerName := providerNameFor(prov)
 	var result handlerResult
 	if oaiReq.Stream {
 		result = h.handleResponsesProviderStreamingToCC(w, provResp, mapping.ModelName)
@@ -474,7 +480,7 @@ func (h *OpenAIHandler) serveOpenAIViaResponsesProvider(w http.ResponseWriter, r
 		result = h.handleResponsesProviderNonStreamingToCC(w, provResp, mapping.ModelName)
 	}
 	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "openai", provKey, mapping.ModelName, mapping.UpstreamModel, "",
+	h.logger.logEntry(proxyKeyID, "openai", providerName, mapping.ModelName, mapping.UpstreamModel, "",
 		latency, rawBody, attemptCount, result)
 	return true
 }

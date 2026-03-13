@@ -68,6 +68,9 @@ func runServe(_ *cobra.Command, _ []string) error {
 	if err := st.Migrate(context.Background()); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
+	if err := st.NormalizeLoggedProviderNames(context.Background(), cfg); err != nil {
+		return fmt.Errorf("normalizing logged provider names: %w", err)
+	}
 
 	requestTimeout := positiveDuration(cfg.UpstreamRequestTimeout, config.DefaultUpstreamRequestTimeout)
 	asyncLogBufferSize := positiveInt(cfg.AsyncLogBufferSize, config.DefaultAsyncLogBufferSize)
@@ -119,30 +122,29 @@ func runServe(_ *cobra.Command, _ []string) error {
 		if pc.Type == "github_copilot" && baseURL == "" {
 			baseURL = copilot.DefaultAPIURL
 		}
-		provKey := pricing.ProviderKey(pc.Type, baseURL)
 		switch pc.Type {
 		case "github_copilot":
 			for model, entry := range pricing.CopilotDefaults {
-				pricingMap[provKey+"/"+model] = entry
+				pricingMap[pc.Name+"/"+model] = entry
 			}
 		case "anthropic":
 			if pricing.IsOfficialAnthropicURL(baseURL) {
 				for model, entry := range pricing.AnthropicDefaults {
-					pricingMap[provKey+"/"+model] = entry
+					pricingMap[pc.Name+"/"+model] = entry
 				}
 			}
 		case "openai", "openai_responses":
 			if pricing.IsOfficialOpenAIURL(baseURL) {
 				for model, entry := range pricing.OpenAIDefaults {
-					pricingMap[provKey+"/"+model] = entry
+					pricingMap[pc.Name+"/"+model] = entry
 				}
 			} else if pricing.IsChutesURL(baseURL) {
 				for model, entry := range pricing.ChutesDefaults {
-					pricingMap[provKey+"/"+model] = entry
+					pricingMap[pc.Name+"/"+model] = entry
 				}
 			} else if pricing.IsSegmentURL(baseURL) {
 				for model, entry := range pricing.SegmentDefaults {
-					pricingMap[provKey+"/"+model] = entry
+					pricingMap[pc.Name+"/"+model] = entry
 				}
 			}
 		}
@@ -156,12 +158,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			continue
 		}
-		baseURL := pc.BaseURL
-		if pc.Type == "github_copilot" && baseURL == "" {
-			baseURL = copilot.DefaultAPIURL
-		}
-		provKey := pricing.ProviderKey(pc.Type, baseURL)
-		pricingMap[provKey+"/"+mm.UpstreamModel] = pricing.Entry{
+		pricingMap[pc.Name+"/"+mm.UpstreamModel] = pricing.Entry{
 			InputPerMillion:      mm.Metadata.InputTokenCost,
 			OutputPerMillion:     mm.Metadata.OutputTokenCost,
 			CacheReadPerMillion:  mm.Metadata.CacheReadCost,
@@ -242,11 +239,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	providerNames := make(map[string]string, len(cfg.Providers))
 	for _, p := range cfg.Providers {
-		baseURL := p.BaseURL
-		if p.Type == "github_copilot" && baseURL == "" {
-			baseURL = copilot.DefaultAPIURL
-		}
-		providerNames[pricing.ProviderKey(p.Type, baseURL)] = p.Name
+		providerNames[p.Name] = p.Name
 	}
 
 	webHandlers := web.NewHandlers(st, sessions, cfg.MasterKey, calc, tmpl, oidcProvider, cfg.ModelList, cfg.Providers)

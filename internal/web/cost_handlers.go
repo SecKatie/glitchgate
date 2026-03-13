@@ -23,12 +23,12 @@ type CostHandlers struct {
 	templates     *TemplateSet
 	tz            *time.Location
 	calc          *pricing.Calculator
-	providerNames map[string]string // pricing key → human-readable name from config
+	providerNames map[string]string // configured provider name → display name
 }
 
 // NewCostHandlers creates a new CostHandlers with the given store, template set,
 // display timezone (pass nil or time.UTC for UTC), and provider name map
-// (pricing key → config Name). Pass nil if no providers are configured.
+// (configured provider name → display name). Pass nil if no providers are configured.
 func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string) *CostHandlers {
 	if tz == nil {
 		tz = time.UTC
@@ -79,6 +79,12 @@ type costTimeseriesEntryJSON struct {
 	Date     string  `json:"date"`
 	CostUSD  float64 `json:"cost_usd"`
 	Requests int64   `json:"requests"`
+}
+
+type pricedTimeseriesEntry struct {
+	Date     string
+	CostUSD  float64
+	Requests int64
 }
 
 // --------------------------------------------------------------------------
@@ -161,9 +167,9 @@ func (h *CostHandlers) applyProviderFilter(params *store.CostParams) {
 
 	filter := strings.ToLower(params.GroupFilter)
 	providerGroups := make([]string, 0, len(h.providerNames))
-	for rawKey, displayName := range h.providerNames {
-		if strings.HasPrefix(strings.ToLower(rawKey), filter) || strings.HasPrefix(strings.ToLower(displayName), filter) {
-			providerGroups = append(providerGroups, rawKey)
+	for providerName, displayName := range h.providerNames {
+		if strings.HasPrefix(strings.ToLower(providerName), filter) || strings.HasPrefix(strings.ToLower(displayName), filter) {
+			providerGroups = append(providerGroups, providerName)
 		}
 	}
 
@@ -196,12 +202,24 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
+	if params.GroupBy == "provider" {
+		breakdown = aggregateProviderBreakdown(breakdown, h.providerNames)
+	}
+
+	pricingGroups, err := h.store.GetCostPricingGroups(r.Context(), params)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, params.GroupBy, h.providerNames)
 
 	bd := make([]costBreakdownEntryJSON, len(breakdown))
 	for i, e := range breakdown {
 		bd[i] = costBreakdownEntryJSON{
 			Group:               e.Group,
-			CostUSD:             0,
+			CostUSD:             breakdownCosts[e.Group],
 			InputTokens:         e.InputTokens,
 			OutputTokens:        e.OutputTokens,
 			CacheCreationTokens: e.CacheCreationTokens,
@@ -221,7 +239,7 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	resp := costSummaryResponse{
-		TotalCostUSD:             0,
+		TotalCostUSD:             tokenCosts.TotalCostUSD,
 		TotalInputTokens:         summary.TotalInputTokens,
 		TotalOutputTokens:        summary.TotalOutputTokens,
 		TotalCacheCreationTokens: summary.TotalCacheCreationTokens,
@@ -253,22 +271,17 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 		interval = "day"
 	}
 
-	entries, err := h.store.GetCostTimeseries(r.Context(), params)
+	pricingGroups, err := h.store.GetCostTimeseriesPricingGroups(r.Context(), params)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
-	// For week/month intervals, aggregate the daily data into larger buckets.
-	aggregated := aggregateTimeseries(entries, interval)
+	aggregated := aggregatePricedTimeseries(priceTimeseriesGroups(pricingGroups, h.calc), interval)
 
 	data := make([]costTimeseriesEntryJSON, len(aggregated))
 	for i, e := range aggregated {
-		data[i] = costTimeseriesEntryJSON{
-			Date:     e.Date,
-			CostUSD:  0,
-			Requests: e.Requests,
-		}
+		data[i] = costTimeseriesEntryJSON(e)
 	}
 
 	fromDate := r.URL.Query().Get("from")
@@ -293,9 +306,32 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// aggregateTimeseries groups daily entries into week or month buckets.
-// For "day" interval, entries are returned as-is.
-func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) []store.CostTimeseriesEntry {
+func priceTimeseriesGroups(groups []store.CostTimeseriesPricingGroup, calc *pricing.Calculator) []pricedTimeseriesEntry {
+	if len(groups) == 0 {
+		return []pricedTimeseriesEntry{}
+	}
+
+	entries := make([]pricedTimeseriesEntry, 0, len(groups))
+	for _, group := range groups {
+		cost := 0.0
+		if priced, _, ok := lookupPricedUsage(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+			InputTokens:      group.InputTokens,
+			CacheWriteTokens: group.CacheCreationTokens,
+			CacheReadTokens:  group.CacheReadTokens,
+			OutputTokens:     group.OutputTokens,
+		}); ok {
+			cost = priced.TotalCostUSD
+		}
+		entries = append(entries, pricedTimeseriesEntry{
+			Date:     group.Date,
+			CostUSD:  cost,
+			Requests: group.Requests,
+		})
+	}
+	return entries
+}
+
+func aggregatePricedTimeseries(entries []pricedTimeseriesEntry, interval string) []pricedTimeseriesEntry {
 	if interval == "day" || len(entries) == 0 {
 		return entries
 	}
@@ -307,7 +343,6 @@ func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) [
 		}
 		switch interval {
 		case "week":
-			// ISO week: start on Monday.
 			weekday := int(t.Weekday())
 			if weekday == 0 {
 				weekday = 7
@@ -321,35 +356,25 @@ func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) [
 		}
 	}
 
-	type bucket struct {
-		key      string
-		requests int64
-	}
+	var buckets []pricedTimeseriesEntry
+	seen := map[string]int{}
 
-	var buckets []bucket
-	seen := map[string]int{} // key -> index in buckets
-
-	for _, e := range entries {
-		bk := bucketKey(e.Date)
+	for _, entry := range entries {
+		bk := bucketKey(entry.Date)
 		if idx, ok := seen[bk]; ok {
-			buckets[idx].requests += e.Requests
-		} else {
-			seen[bk] = len(buckets)
-			buckets = append(buckets, bucket{
-				key:      bk,
-				requests: e.Requests,
-			})
+			buckets[idx].CostUSD += entry.CostUSD
+			buckets[idx].Requests += entry.Requests
+			continue
 		}
+		seen[bk] = len(buckets)
+		buckets = append(buckets, pricedTimeseriesEntry{
+			Date:     bk,
+			CostUSD:  entry.CostUSD,
+			Requests: entry.Requests,
+		})
 	}
 
-	result := make([]store.CostTimeseriesEntry, len(buckets))
-	for i, b := range buckets {
-		result[i] = store.CostTimeseriesEntry{
-			Date:     b.key,
-			Requests: b.requests,
-		}
-	}
-	return result
+	return buckets
 }
 
 func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerNames map[string]string) []store.CostBreakdownEntry {
@@ -359,13 +384,7 @@ func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerName
 
 	combined := make(map[string]store.CostBreakdownEntry, len(entries))
 	for _, entry := range entries {
-		name := entry.Group
-		if mapped, ok := providerNames[entry.Group]; ok && mapped != "" {
-			name = mapped
-		} else if strings.Contains(entry.Group, ":") {
-			// Unmapped pricing key from a removed/renamed provider — show as "unknown".
-			name = "unknown"
-		}
+		name, _ := providerDisplayName(entry.Group, providerNames)
 
 		agg := combined[name]
 		agg.Group = name
@@ -398,6 +417,16 @@ func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerName
 	})
 
 	return result
+}
+
+func providerDisplayName(rawKey string, providerNames map[string]string) (string, bool) {
+	if providerNames == nil {
+		return rawKey, false
+	}
+	if mapped, ok := providerNames[rawKey]; ok && mapped != "" {
+		return mapped, true
+	}
+	return rawKey, false
 }
 
 // --------------------------------------------------------------------------

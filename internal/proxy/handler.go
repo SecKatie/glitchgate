@@ -13,22 +13,13 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 	anthropic "codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
 	"codeberg.org/kglitchy/glitchgate/internal/translate"
 )
 
-// provKeyFor returns the pricing.ProviderKey for the given provider, looking up
-// its type and base URL from config. Falls back to the provider name on error.
-func provKeyFor(cfg *config.Config, prov provider.Provider) string {
-	pc, err := cfg.FindProvider(prov.Name())
-	if err != nil {
-		return prov.Name()
-	}
-	baseURL := pc.BaseURL
-	if pc.Type == "github_copilot" && baseURL == "" {
-		baseURL = copilot.DefaultAPIURL
-	}
-	return pricing.ProviderKey(pc.Type, baseURL)
+// providerNameFor returns the configured provider name used for runtime
+// identity, logging, and pricing attribution.
+func providerNameFor(prov provider.Provider) string {
+	return prov.Name()
 }
 
 // Handler is the core proxy HTTP handler for Anthropic-compatible requests.
@@ -155,8 +146,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			latency := time.Since(start).Milliseconds()
 			errMsg := err.Error()
-			provKey := provKeyFor(h.cfg, prov)
-			h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+			providerName := providerNameFor(prov)
+			h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 				latency, upstreamBody, attemptCount, handlerResult{
 					Status: http.StatusBadGateway, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -176,8 +167,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// All entries exhausted — return the last error response.
 			latency := time.Since(start).Milliseconds()
 			errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-			provKey := provKeyFor(h.cfg, prov)
-			h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+			providerName := providerNameFor(prov)
+			h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 				latency, upstreamBody, attemptCount, handlerResult{
 					Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 					ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -187,7 +178,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Success — dispatch to streaming or non-streaming handler.
-		provKey := provKeyFor(h.cfg, prov)
+		providerName := providerNameFor(prov)
 		var result handlerResult
 		if reqBody.Stream {
 			result = h.handleStreaming(w, provResp)
@@ -195,7 +186,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			result = h.handleNonStreaming(w, provResp)
 		}
 		latency := time.Since(start).Milliseconds()
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+		h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 			latency, upstreamBody, attemptCount, result)
 		return
 	}
@@ -319,8 +310,8 @@ func (h *Handler) serveViaOpenAIProvider(w http.ResponseWriter, r *http.Request,
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
-		provKey := provKeyFor(h.cfg, prov)
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 			latency, body, attemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -338,8 +329,8 @@ func (h *Handler) serveViaOpenAIProvider(w http.ResponseWriter, r *http.Request,
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-		provKey := provKeyFor(h.cfg, prov)
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 			latency, body, attemptCount, handlerResult{
 				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -348,7 +339,7 @@ func (h *Handler) serveViaOpenAIProvider(w http.ResponseWriter, r *http.Request,
 		return true
 	}
 
-	provKey := provKeyFor(h.cfg, prov)
+	providerName := providerNameFor(prov)
 	var result handlerResult
 	switch {
 	case reqBody.Stream && forceNonStream:
@@ -359,7 +350,7 @@ func (h *Handler) serveViaOpenAIProvider(w http.ResponseWriter, r *http.Request,
 		result = h.handleOpenAIProviderNonStreaming(w, provResp, reqBody.Model)
 	}
 	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+	h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 		latency, body, attemptCount, result)
 	return true
 }
@@ -541,8 +532,8 @@ func (h *Handler) serveViaResponsesProvider(w http.ResponseWriter, r *http.Reque
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := err.Error()
-		provKey := provKeyFor(h.cfg, prov)
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 			latency, body, attemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -560,8 +551,8 @@ func (h *Handler) serveViaResponsesProvider(w http.ResponseWriter, r *http.Reque
 		}
 		latency := time.Since(start).Milliseconds()
 		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attemptCount, provResp.StatusCode)
-		provKey := provKeyFor(h.cfg, prov)
-		h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+		providerName := providerNameFor(prov)
+		h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 			latency, body, attemptCount, handlerResult{
 				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: reqBody.Stream,
@@ -570,7 +561,7 @@ func (h *Handler) serveViaResponsesProvider(w http.ResponseWriter, r *http.Reque
 		return true
 	}
 
-	provKey := provKeyFor(h.cfg, prov)
+	providerName := providerNameFor(prov)
 	var result handlerResult
 	if reqBody.Stream {
 		result = h.handleResponsesProviderStreaming(w, provResp, reqBody.Model)
@@ -578,7 +569,7 @@ func (h *Handler) serveViaResponsesProvider(w http.ResponseWriter, r *http.Reque
 		result = h.handleResponsesProviderNonStreaming(w, provResp, reqBody.Model)
 	}
 	latency := time.Since(start).Milliseconds()
-	h.logger.logEntry(proxyKeyID, "anthropic", provKey, reqBody.Model, mapping.UpstreamModel, "",
+	h.logger.logEntry(proxyKeyID, "anthropic", providerName, reqBody.Model, mapping.UpstreamModel, "",
 		latency, body, attemptCount, result)
 	return true
 }

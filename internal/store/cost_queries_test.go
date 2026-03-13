@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,6 +82,79 @@ func seedCostData(t *testing.T, st *SQLiteStore) {
 		err := st.InsertRequestLog(ctx, &logs[i])
 		require.NoError(t, err)
 	}
+}
+
+func TestNormalizeLoggedProviderNames(t *testing.T) {
+	if os.Getenv("SKIP_DB_TESTS") != "" {
+		t.Skip("skipping database tests")
+	}
+
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	err := st.CreateProxyKey(ctx, "pk-1", "hash-1", "llmp_sk_aa11", "key-alpha")
+	require.NoError(t, err)
+
+	logs := []RequestLogEntry{
+		{
+			ID: "legacy-wildcard", ProxyKeyID: "pk-1",
+			Timestamp:    time.Date(2026, 3, 12, 5, 0, 0, 0, time.UTC),
+			SourceFormat: "anthropic", ProviderName: "anthropic:api.anthropic.com",
+			ModelRequested: "cm/claude-sonnet-4-6", ModelUpstream: "claude-sonnet-4-6",
+			InputTokens: 100, OutputTokens: 50,
+			LatencyMs: 1000, Status: 200,
+			RequestBody: "{}", ResponseBody: "{}",
+		},
+		{
+			ID: "legacy-exact", ProxyKeyID: "pk-1",
+			Timestamp:    time.Date(2026, 3, 12, 5, 1, 0, 0, time.UTC),
+			SourceFormat: "openai", ProviderName: "openai",
+			ModelRequested: "chatgpt-5", ModelUpstream: "gpt-5",
+			InputTokens: 200, OutputTokens: 80,
+			LatencyMs: 1200, Status: 200,
+			RequestBody: "{}", ResponseBody: "{}",
+		},
+		{
+			ID: "untouched", ProxyKeyID: "pk-1",
+			Timestamp:    time.Date(2026, 3, 12, 5, 2, 0, 0, time.UTC),
+			SourceFormat: "anthropic", ProviderName: "anthropic:api.anthropic.com",
+			ModelRequested: "other/provider", ModelUpstream: "claude-opus-4-6",
+			InputTokens: 10, OutputTokens: 5,
+			LatencyMs: 800, Status: 200,
+			RequestBody: "{}", ResponseBody: "{}",
+		},
+	}
+
+	for i := range logs {
+		err := st.InsertRequestLog(ctx, &logs[i])
+		require.NoError(t, err)
+	}
+
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{
+			{Name: "claude-max", Type: "anthropic", BaseURL: "https://api.anthropic.com"},
+			{Name: "chatgpt-pro", Type: "openai"},
+		},
+		ModelList: []config.ModelMapping{
+			{ModelName: "cm/*", Provider: "claude-max"},
+			{ModelName: "chatgpt-5", Provider: "chatgpt-pro", UpstreamModel: "gpt-5"},
+		},
+	}
+
+	err = st.NormalizeLoggedProviderNames(ctx, cfg)
+	require.NoError(t, err)
+
+	wildcardLog, err := st.GetRequestLog(ctx, "legacy-wildcard")
+	require.NoError(t, err)
+	require.Equal(t, "claude-max", wildcardLog.ProviderName)
+
+	exactLog, err := st.GetRequestLog(ctx, "legacy-exact")
+	require.NoError(t, err)
+	require.Equal(t, "chatgpt-pro", exactLog.ProviderName)
+
+	untouchedLog, err := st.GetRequestLog(ctx, "untouched")
+	require.NoError(t, err)
+	require.Equal(t, "anthropic:api.anthropic.com", untouchedLog.ProviderName)
 }
 
 func TestGetCostSummary(t *testing.T) {
@@ -347,6 +421,61 @@ func TestGetCostTimeseries(t *testing.T) {
 		require.Len(t, entries, 2)
 		require.Equal(t, "2026-03-07", entries[0].Date)
 		require.Equal(t, "2026-03-08", entries[1].Date)
+	})
+}
+
+func TestGetCostTimeseriesPricingGroups(t *testing.T) {
+	if os.Getenv("SKIP_DB_TESTS") != "" {
+		t.Skip("skipping database tests")
+	}
+
+	st := newTestStore(t)
+	seedCostData(t, st)
+
+	ctx := context.Background()
+
+	t.Run("daily pricing groups", func(t *testing.T) {
+		params := CostParams{
+			From: "2026-03-01",
+			To:   "2026-03-10 23:59:59",
+		}
+		groups, err := st.GetCostTimeseriesPricingGroups(ctx, params)
+		require.NoError(t, err)
+		require.Len(t, groups, 4)
+
+		require.Equal(t, "2026-03-01", groups[0].Date)
+		require.Equal(t, "anthropic", groups[0].ProviderName)
+		require.Equal(t, "claude-sonnet-4-20250514", groups[0].ModelUpstream)
+		require.Equal(t, int64(100), groups[0].InputTokens)
+		require.Equal(t, int64(500), groups[0].OutputTokens)
+		require.Equal(t, int64(1), groups[0].Requests)
+
+		require.Equal(t, "2026-03-02", groups[1].Date)
+		require.Equal(t, "anthropic", groups[1].ProviderName)
+		require.Equal(t, "claude-opus-4-20250514", groups[1].ModelUpstream)
+
+		require.Equal(t, "2026-03-02", groups[2].Date)
+		require.Equal(t, "openai", groups[2].ProviderName)
+		require.Equal(t, "claude-sonnet-4-20250514", groups[2].ModelUpstream)
+
+		require.Equal(t, "2026-03-05", groups[3].Date)
+		require.Equal(t, "openai", groups[3].ProviderName)
+		require.Equal(t, "claude-opus-4-20250514", groups[3].ModelUpstream)
+	})
+
+	t.Run("provider-group filters apply", func(t *testing.T) {
+		params := CostParams{
+			From:           "2026-03-01",
+			To:             "2026-03-10 23:59:59",
+			GroupBy:        "provider",
+			GroupFilter:    "openai",
+			ProviderGroups: []string{"openai"},
+		}
+		groups, err := st.GetCostTimeseriesPricingGroups(ctx, params)
+		require.NoError(t, err)
+		require.Len(t, groups, 2)
+		require.Equal(t, "openai", groups[0].ProviderName)
+		require.Equal(t, "openai", groups[1].ProviderName)
 	})
 }
 

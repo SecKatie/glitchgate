@@ -179,6 +179,30 @@ providers:
 	require.Equal(t, "anthropic", cfg.Providers[1].Type, "explicit type should be preserved")
 }
 
+func TestProviderNamesMustBeUnique(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+master_key: "test"
+providers:
+  - name: "dup"
+    type: "anthropic"
+    base_url: "https://api.anthropic.com"
+    auth_mode: "proxy_key"
+    api_key: "sk-test"
+  - name: "dup"
+    type: "openai"
+    base_url: "https://api.openai.com"
+    auth_mode: "proxy_key"
+    api_key: "sk-test"
+`), 0o600))
+
+	_, err := Load(cfgPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `duplicate provider name "dup"`)
+}
+
 // --- Virtual model / fallback chain tests (T012) ---
 
 func TestModelMappingValidation_MutualExclusivity(t *testing.T) {
