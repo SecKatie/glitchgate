@@ -11,7 +11,7 @@ WHERE timestamp >= ? AND timestamp <= ?;
 
 -- name: GetCostByModel :many
 SELECT
-    model_upstream AS group_name,
+    model_requested AS group_name,
     COALESCE(SUM(estimated_cost_usd), 0) AS cost_usd,
     COALESCE(SUM(input_tokens), 0) AS input_tokens,
     COALESCE(SUM(output_tokens), 0) AS output_tokens,
@@ -20,7 +20,7 @@ SELECT
     COUNT(*) AS requests
 FROM request_logs
 WHERE timestamp >= ? AND timestamp <= ?
-GROUP BY model_upstream
+GROUP BY model_requested
 ORDER BY cost_usd DESC;
 
 -- name: GetCostByKey :many

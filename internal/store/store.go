@@ -80,8 +80,22 @@ type Store interface {
 	ConsumeOIDCState(ctx context.Context, state string) (*OIDCState, error)
 	CleanupExpiredOIDCState(ctx context.Context) error
 
+	// Model usage queries.
+	GetModelUsageSummary(ctx context.Context, modelName string) (*ModelUsageSummary, error)
+	GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error)
+
 	Migrate(ctx context.Context) error
 	Close() error
+}
+
+// ModelUsageSummary holds aggregated usage statistics for a single model name.
+type ModelUsageSummary struct {
+	RequestCount  int64
+	InputTokens   int64
+	OutputTokens  int64
+	TotalCostUSD  float64
+	ProviderName  string // most-recently-seen provider_name from logs (may be empty)
+	UpstreamModel string // most-recently-seen model_upstream from logs (may be empty)
 }
 
 // ProxyKey represents a full proxy-key row, including the hash.

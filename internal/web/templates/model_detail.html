@@ -1,0 +1,234 @@
+{{template "layout.html" .}}
+
+{{define "title"}}{{.ModelName}} — Models - glitchgate{{end}}
+
+{{define "head"}}
+<style>
+  .model-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.25rem;
+  }
+  .model-header h2 {
+    margin: 0;
+  }
+  .model-meta {
+    color: var(--pico-muted-color);
+    font-size: 0.9em;
+    margin-bottom: 1.5rem;
+  }
+  .badge-virtual  { background: color-mix(in srgb, var(--pico-primary) 15%, transparent); color: var(--pico-primary); }
+  .badge-wildcard { background: color-mix(in srgb, var(--pico-color) 12%, transparent);   color: var(--pico-muted-color); }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .stat-card {
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.85rem 1rem;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 1.6em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .stat-label {
+    font-size: 0.72em;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pico-muted-color);
+    margin-top: 0.25rem;
+  }
+  .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 2rem;
+  }
+  .pricing-card {
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.75rem 1rem;
+  }
+  .pricing-card-label {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pico-muted-color);
+    margin-bottom: 0.3rem;
+  }
+  .pricing-card-value {
+    font-size: 1.25em;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .pricing-card-unit {
+    font-size: 0.75em;
+    color: var(--pico-muted-color);
+  }
+  .section-label {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--pico-muted-color);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    margin-top: 1.75rem;
+  }
+  .provider-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 2rem;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.9em;
+  }
+  .provider-type {
+    color: var(--pico-muted-color);
+    font-size: 0.85em;
+  }
+  .fallback-chain {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-bottom: 2rem;
+  }
+  .fallback-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95em;
+  }
+  .fallback-item::before {
+    content: "↓";
+    color: var(--pico-muted-color);
+    font-size: 0.8em;
+  }
+  .fallback-item:first-child::before {
+    content: "①";
+    color: var(--pico-primary);
+  }
+  .fallback-item:nth-child(2)::before { content: "②"; color: var(--pico-muted-color); }
+  .fallback-item:nth-child(3)::before { content: "③"; color: var(--pico-muted-color); }
+  .fallback-item:nth-child(4)::before { content: "④"; color: var(--pico-muted-color); }
+  .fallback-item:nth-child(5)::before { content: "⑤"; color: var(--pico-muted-color); }
+  .example-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.4rem;
+  }
+  pre.curl-block {
+    margin: 0;
+    border-radius: var(--pico-border-radius);
+    font-size: 0.82em;
+  }
+  .no-pricing {
+    color: var(--pico-muted-color);
+    font-style: italic;
+    font-size: 0.9em;
+    padding: 0.5rem 0;
+  }
+</style>
+{{end}}
+
+{{define "content"}}
+<p style="margin-bottom:1rem"><a href="/ui/models" onclick="if(history.length>1){event.preventDefault();history.back()}">← Back to Models</a></p>
+
+<div class="model-header">
+  <h2>{{.ModelName}}</h2>
+  {{if .IsUnconfigured}}<span class="badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span>{{end}}
+  {{if .IsVirtual}}<span class="badge badge-virtual">Virtual</span>{{end}}
+  {{if .IsWildcard}}<span class="badge badge-wildcard">Wildcard</span>{{end}}
+</div>
+{{if not .IsVirtual}}
+<p class="model-meta">
+  {{if .UpstreamModel}}Upstream: <code>{{.UpstreamModel}}</code> &nbsp;·&nbsp; {{end}}
+  {{if .ProviderName}}<span class="provider-pill">{{.ProviderName}} <span class="provider-type">{{.ProviderType}}</span></span>{{if .IsUnconfigured}} <span style="color:var(--pico-muted-color);font-size:0.85em">· seen in logs</span>{{end}}{{else}}<span style="color:var(--pico-muted-color);font-size:0.9em">Not in model_list config</span>{{end}}
+</p>
+{{else}}
+<p class="model-meta">Routes across a fallback chain of {{len .Fallbacks}} model{{if gt (len .Fallbacks) 1}}s{{end}}</p>
+{{end}}
+
+{{/* ── Usage stats ─────────────────────────────────────────── */}}
+<div class="section-label">Usage</div>
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-value">{{.Usage.RequestCount}}</div>
+    <div class="stat-label">Requests</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{.Usage.InputTokens | fmtTokens}}</div>
+    <div class="stat-label">Input Tokens</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{.Usage.OutputTokens | fmtTokens}}</div>
+    <div class="stat-label">Output Tokens</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">${{printf "%.4f" .Usage.TotalCostUSD}}</div>
+    <div class="stat-label">Total Spend</div>
+  </div>
+</div>
+
+{{/* ── Pricing ──────────────────────────────────────────────── */}}
+{{if not .IsUnconfigured}}
+<div class="section-label">Pricing</div>
+{{if .HasPricing}}
+<div class="pricing-grid">
+  <div class="pricing-card">
+    <div class="pricing-card-label">Input</div>
+    <div class="pricing-card-value">${{printf "%.4f" .Pricing.InputPerMillion}}</div>
+    <div class="pricing-card-unit">per million tokens</div>
+  </div>
+  <div class="pricing-card">
+    <div class="pricing-card-label">Output</div>
+    <div class="pricing-card-value">${{printf "%.4f" .Pricing.OutputPerMillion}}</div>
+    <div class="pricing-card-unit">per million tokens</div>
+  </div>
+  <div class="pricing-card">
+    <div class="pricing-card-label">Cache Write</div>
+    <div class="pricing-card-value">${{printf "%.4f" .Pricing.CacheWritePerMillion}}</div>
+    <div class="pricing-card-unit">per million tokens</div>
+  </div>
+  <div class="pricing-card">
+    <div class="pricing-card-label">Cache Read</div>
+    <div class="pricing-card-value">${{printf "%.4f" .Pricing.CacheReadPerMillion}}</div>
+    <div class="pricing-card-unit">per million tokens</div>
+  </div>
+</div>
+{{else}}
+<p class="no-pricing">No pricing data available for this model.</p>
+{{end}}
+{{end}}
+
+{{/* ── Fallback chain (virtual models only) ────────────────── */}}
+{{if .IsVirtual}}
+<div class="section-label">Fallback Chain</div>
+<div class="fallback-chain" style="margin-bottom:2rem">
+  {{range .Fallbacks}}
+  <div class="fallback-item"><code>{{.}}</code></div>
+  {{end}}
+</div>
+{{end}}
+
+{{/* ── Example request ─────────────────────────────────────── */}}
+<div class="section-label">Example Request</div>
+<div class="example-header">
+  <span style="font-size:0.85em;color:var(--pico-muted-color)">Anthropic Messages API</span>
+  <button class="copy-btn outline secondary" onclick="copyText(this, document.getElementById('curl-example').textContent)">⎘ Copy</button>
+</div>
+<pre class="curl-block"><code id="curl-example">{{.CurlExample}}</code></pre>
+<p style="margin-top:0.5rem"><small>The OpenAI-compatible endpoint (<code>/v1/chat/completions</code>) is also supported with the same proxy key.</small></p>
+{{end}}

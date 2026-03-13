@@ -177,11 +177,11 @@ func TestGetCostBreakdown(t *testing.T) {
 		require.Len(t, entries, 2)
 
 		// Ordered by cost DESC: opus (0.055) > sonnet (0.025).
-		require.Equal(t, "claude-opus-4-20250514", entries[0].Group)
+		require.Equal(t, "claude-opus", entries[0].Group)
 		require.InDelta(t, 0.055, entries[0].CostUSD, 0.001)
 		require.Equal(t, int64(2), entries[0].Requests)
 
-		require.Equal(t, "claude-sonnet-4-20250514", entries[1].Group)
+		require.Equal(t, "claude-sonnet", entries[1].Group)
 		require.InDelta(t, 0.025, entries[1].CostUSD, 0.001)
 		require.Equal(t, int64(2), entries[1].Requests)
 	})
