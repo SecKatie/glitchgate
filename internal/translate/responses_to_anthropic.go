@@ -5,6 +5,7 @@ package translate
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
@@ -44,8 +45,10 @@ func ResponsesToAnthropic(req *ResponsesRequest, upstreamModel string) (*anthrop
 	// Translate tools.
 	for _, t := range req.Tools {
 		if t.Type != "function" {
-			// Built-in tools (web_search, etc.) can't be translated to Anthropic.
-			return nil, fmt.Errorf("tool type %q is not supported for Anthropic upstream; only function tools are translatable", t.Type)
+			// Built-in tools (web_search, computer_use, custom) can't be translated to Anthropic.
+			// Skip them with a warning - they may not be used in this request.
+			slog.Warn("skipping unsupported tool type for Anthropic upstream", "tool_type", t.Type, "tool_name", t.Name)
+			continue
 		}
 		var schema interface{}
 		if len(t.Parameters) > 0 {

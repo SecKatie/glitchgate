@@ -113,10 +113,12 @@
 
 {{if .ParseFailed}}
 {{/* Fallback: pretty-printed raw JSON */}}
-<p style="color:var(--pico-muted-color);font-size:0.85em"><em>Could not parse conversation structure — showing raw bodies.</em></p>
+<p style="color:var(--pico-muted-color);font-size:0.85em"><em>{{if .TruncatedRequest}}Request body was truncated before logging — could not parse conversation structure.{{else}}Could not parse conversation structure — showing raw bodies.{{end}}</em></p>
 {{else}}
 
-{{/* System Prompt */}}
+{{if .TruncatedRequest}}
+<p style="color:var(--pico-muted-color);font-size:0.85em"><em>Request body was truncated before logging — conversation history may be incomplete.</em></p>
+{{end}}
 {{if .HasSystem}}
 <details>
     <summary><strong>System Prompt</strong> ({{.SystemPromptLen}} chars)</summary>

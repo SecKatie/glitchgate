@@ -99,6 +99,7 @@ func TestAsyncLoggerTruncatesBodiesBeforePersisting(t *testing.T) {
 		"anthropic",
 		"claude-sonnet",
 		"claude-sonnet-4-20250514",
+		"",
 		25,
 		[]byte(`{"api_key":"secret","payload":"`+strings.Repeat("x", 64)+`"}`),
 		1,
