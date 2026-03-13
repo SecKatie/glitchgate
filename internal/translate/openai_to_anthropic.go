@@ -185,6 +185,81 @@ func extractTextContent(content interface{}) (string, error) {
 	}
 }
 
+// imageURLToAnthropicBlock converts an image URL string (data URI or plain URL)
+// to an Anthropic image ContentBlock. Used by both OpenAI→Anthropic and
+// Responses→Anthropic translation paths.
+func imageURLToAnthropicBlock(imageURL string) (anthropic.ContentBlock, error) {
+	if strings.HasPrefix(imageURL, "data:") {
+		parts := strings.SplitN(imageURL, ",", 2)
+		if len(parts) != 2 {
+			return anthropic.ContentBlock{}, fmt.Errorf("invalid data URI for image")
+		}
+		mediaInfo := strings.TrimPrefix(parts[0], "data:")
+		mediaInfo = strings.TrimSuffix(mediaInfo, ";base64")
+		return anthropic.ContentBlock{
+			Type: "image",
+			Source: &anthropic.ImageSource{
+				Type:      "base64",
+				MediaType: mediaInfo,
+				Data:      parts[1],
+			},
+		}, nil
+	}
+	return anthropic.ContentBlock{
+		Type: "image",
+		Source: &anthropic.ImageSource{
+			Type: "url",
+			URL:  imageURL,
+		},
+	}, nil
+}
+
+// translateOpenAIContentParts converts a multipart content array from OpenAI
+// format to Anthropic content. Returns []anthropic.ContentBlock if images are
+// present, otherwise returns a plain string (preserving backward compat).
+func translateOpenAIContentParts(parts []interface{}) (interface{}, error) {
+	var blocks []anthropic.ContentBlock
+	hasImages := false
+
+	for _, item := range parts {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t, _ := m["type"].(string)
+		switch t {
+		case "text":
+			if text, ok := m["text"].(string); ok {
+				blocks = append(blocks, anthropic.ContentBlock{Type: "text", Text: text})
+			}
+		case "image_url":
+			imgURL, ok := m["image_url"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			url, _ := imgURL["url"].(string)
+			if url == "" {
+				continue
+			}
+			block, err := imageURLToAnthropicBlock(url)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
+			hasImages = true
+		}
+	}
+
+	if hasImages {
+		return blocks, nil
+	}
+	var texts []string
+	for _, b := range blocks {
+		texts = append(texts, b.Text)
+	}
+	return strings.Join(texts, ""), nil
+}
+
 // translateMessage converts an OpenAI ChatMessage to an Anthropic Message.
 func translateMessage(msg ChatMessage) (anthropic.Message, error) {
 	anthMsg := anthropic.Message{
@@ -221,6 +296,18 @@ func translateMessage(msg ChatMessage) (anthropic.Message, error) {
 		}
 		anthMsg.Content = blocks
 		return anthMsg, nil
+	}
+
+	// For user messages with multipart content, check for images.
+	if msg.Role == "user" {
+		if parts, ok := msg.Content.([]interface{}); ok {
+			content, err := translateOpenAIContentParts(parts)
+			if err != nil {
+				return anthMsg, err
+			}
+			anthMsg.Content = content
+			return anthMsg, nil
+		}
 	}
 
 	// For simple text content, pass through directly.

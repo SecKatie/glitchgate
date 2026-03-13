@@ -176,26 +176,67 @@ func parseContentBlocks(content interface{}) ([]anthropic.ContentBlock, error) {
 	return blocks, nil
 }
 
-// translateAnthropicUserBlocks converts user content blocks. Text blocks are
-// combined into a single user message. Tool_result blocks become separate
-// OpenAI tool messages.
+// anthropicSourceToImageURL converts an Anthropic image source to a URL string
+// suitable for an OpenAI image_url content part.
+func anthropicSourceToImageURL(src *anthropic.ImageSource) string {
+	if src == nil {
+		return ""
+	}
+	if src.Type == "base64" {
+		return "data:" + src.MediaType + ";base64," + src.Data
+	}
+	return src.URL
+}
+
+// translateAnthropicUserBlocks converts user content blocks. Text and image
+// blocks are accumulated into a single user message. Tool_result blocks become
+// separate OpenAI tool messages.
 func translateAnthropicUserBlocks(blocks []anthropic.ContentBlock) ([]ChatMessage, error) {
 	var messages []ChatMessage
-	var textParts []string
+	var parts []ContentPart
+
+	flushParts := func() {
+		if len(parts) == 0 {
+			return
+		}
+		hasImages := false
+		for _, p := range parts {
+			if p.Type == "image_url" {
+				hasImages = true
+				break
+			}
+		}
+		var content interface{}
+		if hasImages {
+			content = parts
+		} else {
+			var texts []string
+			for _, p := range parts {
+				texts = append(texts, p.Text)
+			}
+			content = strings.Join(texts, "")
+		}
+		messages = append(messages, ChatMessage{
+			Role:    "user",
+			Content: content,
+		})
+		parts = nil
+	}
 
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			textParts = append(textParts, b.Text)
-		case "tool_result":
-			// Flush any accumulated text first.
-			if len(textParts) > 0 {
-				messages = append(messages, ChatMessage{
-					Role:    "user",
-					Content: strings.Join(textParts, ""),
+			parts = append(parts, ContentPart{Type: "text", Text: b.Text})
+		case "image":
+			url := anthropicSourceToImageURL(b.Source)
+			if url != "" {
+				parts = append(parts, ContentPart{
+					Type:     "image_url",
+					ImageURL: &ImageURLContent{URL: url},
 				})
-				textParts = nil
 			}
+		case "tool_result":
+			flushParts()
 			messages = append(messages, ChatMessage{
 				Role:       "tool",
 				ToolCallID: b.ToolUseID,
@@ -204,13 +245,7 @@ func translateAnthropicUserBlocks(blocks []anthropic.ContentBlock) ([]ChatMessag
 		}
 	}
 
-	if len(textParts) > 0 {
-		messages = append(messages, ChatMessage{
-			Role:    "user",
-			Content: strings.Join(textParts, ""),
-		})
-	}
-
+	flushParts()
 	return messages, nil
 }
 

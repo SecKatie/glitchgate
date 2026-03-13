@@ -29,14 +29,23 @@ type Message struct {
 	Content interface{} `json:"content"` // string or []ContentBlock
 }
 
+// ImageSource holds the source data for an image content block.
+type ImageSource struct {
+	Type      string `json:"type"`                 // "base64" or "url"
+	MediaType string `json:"media_type,omitempty"` // e.g. "image/jpeg"
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
+}
+
 // ContentBlock represents a typed content element within a message.
 type ContentBlock struct {
-	Type     string      `json:"type"`
-	Text     string      `json:"text,omitempty"`
-	Thinking string      `json:"thinking,omitempty"`
-	ID       string      `json:"id,omitempty"`
-	Name     string      `json:"name,omitempty"`
-	Input    interface{} `json:"input,omitempty"`
+	Type     string       `json:"type"`
+	Text     string       `json:"text,omitempty"`
+	Thinking string       `json:"thinking,omitempty"`
+	ID       string       `json:"id,omitempty"`
+	Name     string       `json:"name,omitempty"`
+	Input    interface{}  `json:"input,omitempty"`
+	Source   *ImageSource `json:"source,omitempty"`
 	// tool_result fields
 	ToolUseID string      `json:"tool_use_id,omitempty"`
 	Content   interface{} `json:"content,omitempty"` // string or []ContentBlock

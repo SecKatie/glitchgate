@@ -25,10 +25,17 @@ type ChatMessage struct {
 	ToolCallID string      `json:"tool_call_id,omitempty"`
 }
 
+// ImageURLContent holds the URL and optional detail level for an image_url content part.
+type ImageURLContent struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
 // ContentPart represents a typed content element within a multimodal message.
 type ContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	ImageURL *ImageURLContent `json:"image_url,omitempty"`
 }
 
 // OpenAITool describes a tool available to the model in OpenAI format.

@@ -762,3 +762,205 @@ func TestAnthropicToOpenAIRequest_SystemMessage(t *testing.T) {
 func strPtr(s string) *string { return &s }
 
 func intPtr(i int) *int { return &i }
+
+func TestOpenAIToAnthropic_ImageURL(t *testing.T) {
+	req := &ChatCompletionRequest{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []ChatMessage{
+			{
+				Role: "user",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "image_url",
+						"image_url": map[string]interface{}{
+							"url": "data:image/jpeg;base64,/9j/abc123",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := OpenAIToAnthropic(req)
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+
+	blocks, ok := result.Messages[0].Content.([]anthropic.ContentBlock)
+	require.True(t, ok, "expected []ContentBlock")
+	require.Len(t, blocks, 1)
+	require.Equal(t, "image", blocks[0].Type)
+	require.NotNil(t, blocks[0].Source)
+	require.Equal(t, "base64", blocks[0].Source.Type)
+	require.Equal(t, "image/jpeg", blocks[0].Source.MediaType)
+	require.Equal(t, "/9j/abc123", blocks[0].Source.Data)
+}
+
+func TestOpenAIToAnthropic_ImageURLExternal(t *testing.T) {
+	req := &ChatCompletionRequest{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []ChatMessage{
+			{
+				Role: "user",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "image_url",
+						"image_url": map[string]interface{}{
+							"url": "https://example.com/photo.jpg",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := OpenAIToAnthropic(req)
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+
+	blocks, ok := result.Messages[0].Content.([]anthropic.ContentBlock)
+	require.True(t, ok, "expected []ContentBlock")
+	require.Len(t, blocks, 1)
+	require.Equal(t, "image", blocks[0].Type)
+	require.NotNil(t, blocks[0].Source)
+	require.Equal(t, "url", blocks[0].Source.Type)
+	require.Equal(t, "https://example.com/photo.jpg", blocks[0].Source.URL)
+}
+
+func TestOpenAIToAnthropic_MixedTextAndImage(t *testing.T) {
+	req := &ChatCompletionRequest{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []ChatMessage{
+			{
+				Role: "user",
+				Content: []interface{}{
+					map[string]interface{}{"type": "text", "text": "What is this?"},
+					map[string]interface{}{
+						"type": "image_url",
+						"image_url": map[string]interface{}{
+							"url": "https://example.com/img.jpg",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := OpenAIToAnthropic(req)
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+
+	blocks, ok := result.Messages[0].Content.([]anthropic.ContentBlock)
+	require.True(t, ok, "expected []ContentBlock")
+	require.Len(t, blocks, 2)
+	require.Equal(t, "text", blocks[0].Type)
+	require.Equal(t, "What is this?", blocks[0].Text)
+	require.Equal(t, "image", blocks[1].Type)
+	require.NotNil(t, blocks[1].Source)
+	require.Equal(t, "url", blocks[1].Source.Type)
+}
+
+func TestAnthropicToOpenAIRequest_ImageBlock(t *testing.T) {
+	userBlocks := []anthropic.ContentBlock{
+		{
+			Type: "image",
+			Source: &anthropic.ImageSource{
+				Type:      "base64",
+				MediaType: "image/png",
+				Data:      "iVBORw0KGgo=",
+			},
+		},
+	}
+	contentJSON, _ := json.Marshal(userBlocks)
+	var contentRaw interface{}
+	_ = json.Unmarshal(contentJSON, &contentRaw)
+
+	req := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: contentRaw},
+		},
+	}
+
+	result, err := AnthropicToOpenAIRequest(req)
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+
+	parts, ok := result.Messages[0].Content.([]ContentPart)
+	require.True(t, ok, "expected []ContentPart")
+	require.Len(t, parts, 1)
+	require.Equal(t, "image_url", parts[0].Type)
+	require.NotNil(t, parts[0].ImageURL)
+	require.Equal(t, "data:image/png;base64,iVBORw0KGgo=", parts[0].ImageURL.URL)
+}
+
+func TestAnthropicToOpenAIRequest_ImageBlockURL(t *testing.T) {
+	userBlocks := []anthropic.ContentBlock{
+		{
+			Type: "image",
+			Source: &anthropic.ImageSource{
+				Type: "url",
+				URL:  "https://example.com/photo.jpg",
+			},
+		},
+	}
+	contentJSON, _ := json.Marshal(userBlocks)
+	var contentRaw interface{}
+	_ = json.Unmarshal(contentJSON, &contentRaw)
+
+	req := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: contentRaw},
+		},
+	}
+
+	result, err := AnthropicToOpenAIRequest(req)
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+
+	parts, ok := result.Messages[0].Content.([]ContentPart)
+	require.True(t, ok, "expected []ContentPart")
+	require.Len(t, parts, 1)
+	require.Equal(t, "image_url", parts[0].Type)
+	require.NotNil(t, parts[0].ImageURL)
+	require.Equal(t, "https://example.com/photo.jpg", parts[0].ImageURL.URL)
+}
+
+func TestAnthropicToOpenAIRequest_MixedTextAndImage(t *testing.T) {
+	userBlocks := []anthropic.ContentBlock{
+		{Type: "text", Text: "Look at this:"},
+		{
+			Type: "image",
+			Source: &anthropic.ImageSource{
+				Type: "url",
+				URL:  "https://example.com/img.jpg",
+			},
+		},
+	}
+	contentJSON, _ := json.Marshal(userBlocks)
+	var contentRaw interface{}
+	_ = json.Unmarshal(contentJSON, &contentRaw)
+
+	req := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: contentRaw},
+		},
+	}
+
+	result, err := AnthropicToOpenAIRequest(req)
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+
+	parts, ok := result.Messages[0].Content.([]ContentPart)
+	require.True(t, ok, "expected []ContentPart")
+	require.Len(t, parts, 2)
+	require.Equal(t, "text", parts[0].Type)
+	require.Equal(t, "Look at this:", parts[0].Text)
+	require.Equal(t, "image_url", parts[1].Type)
+	require.NotNil(t, parts[1].ImageURL)
+	require.Equal(t, "https://example.com/img.jpg", parts[1].ImageURL.URL)
+}
