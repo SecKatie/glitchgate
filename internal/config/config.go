@@ -18,6 +18,7 @@ type Config struct {
 	MasterKey    string           `mapstructure:"master_key"    yaml:"master_key"`
 	Listen       string           `mapstructure:"listen"        yaml:"listen"`
 	DatabasePath string           `mapstructure:"database_path" yaml:"database_path"`
+	LogPath      string           `mapstructure:"log_path"      yaml:"log_path"` // Path to log file; default "glitchgate.log"
 	Timezone     string           `mapstructure:"timezone"      yaml:"timezone"` // IANA timezone name, e.g. "America/New_York"
 	Providers    []ProviderConfig `mapstructure:"providers"  yaml:"providers"`
 	ModelList    []ModelMapping   `mapstructure:"model_list" yaml:"model_list"`
@@ -47,12 +48,13 @@ func (c *Config) OIDCEnabled() bool {
 // ProviderConfig describes an upstream LLM provider endpoint.
 type ProviderConfig struct {
 	Name           string `mapstructure:"name"            yaml:"name"`
-	Type           string `mapstructure:"type"            yaml:"type"` // "anthropic" (default), "github_copilot"
+	Type           string `mapstructure:"type"            yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses"
 	BaseURL        string `mapstructure:"base_url"        yaml:"base_url"`
 	AuthMode       string `mapstructure:"auth_mode"       yaml:"auth_mode"` // "proxy_key" or "forward"
 	APIKey         string `mapstructure:"api_key"         yaml:"api_key"`
 	DefaultVersion string `mapstructure:"default_version" yaml:"default_version"`
-	TokenDir       string `mapstructure:"token_dir"       yaml:"token_dir"` // github_copilot: OAuth token storage directory
+	TokenDir       string `mapstructure:"token_dir"       yaml:"token_dir"`        // github_copilot: OAuth token storage directory
+	Stream         *bool  `mapstructure:"stream"          yaml:"stream,omitempty"` // nil = follow client; false = force non-streaming upstream
 }
 
 // ModelMetadata holds optional per-request pricing rates for a model entry.
@@ -106,6 +108,7 @@ func Load(configFile string) (*Config, error) {
 	// Defaults.
 	v.SetDefault("listen", ":4000")
 	v.SetDefault("database_path", "glitchgate.db")
+	v.SetDefault("log_path", "glitchgate.log")
 	v.SetDefault("timezone", "UTC")
 	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
 
@@ -124,6 +127,8 @@ func Load(configFile string) (*Config, error) {
 
 	// Expand ~ prefix in database path.
 	cfg.DatabasePath = expandTilde(cfg.DatabasePath)
+	// Expand ~ prefix in log path.
+	cfg.LogPath = expandTilde(cfg.LogPath)
 
 	// Apply provider defaults and expand env vars.
 	for i := range cfg.Providers {

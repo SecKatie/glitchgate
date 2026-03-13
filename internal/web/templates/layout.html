@@ -207,6 +207,40 @@
         .token-detail {
             font-size: 0.9em;
         }
+        .token-detail thead th {
+            border-bottom: 3px solid color-mix(
+                in srgb,
+                var(--pico-color) 22%,
+                var(--pico-muted-border-color)
+            );
+        }
+        .token-detail td.token-detail-value,
+        .token-detail th.token-detail-value {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .token-detail td.token-detail-child {
+            padding-left: 1.5rem;
+        }
+        .token-detail .token-detail-marker {
+            color: var(--pico-muted-color);
+            display: inline-block;
+            width: 1.2rem;
+        }
+        .token-detail .token-detail-note {
+            color: var(--pico-muted-color);
+        }
+        .token-detail tr.token-detail-total td {
+            background: color-mix(
+                in srgb,
+                var(--pico-color) 5%,
+                var(--pico-background-color)
+            );
+        }
+        .token-detail td.token-detail-total-cost {
+            font-weight: 700;
+        }
         /* Clickable table rows */
         tr[data-href] {
             cursor: pointer;

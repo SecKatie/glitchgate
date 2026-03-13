@@ -2,7 +2,7 @@ package proxy
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
@@ -32,7 +32,7 @@ func (l *AsyncLogger) Log(entry *store.RequestLogEntry) {
 	select {
 	case l.ch <- entry:
 	default:
-		log.Printf("WARNING: log buffer full, dropping entry %s", entry.ID)
+		slog.Warn("log buffer full, dropping entry", "entry_id", entry.ID)
 	}
 }
 
@@ -46,7 +46,7 @@ func (l *AsyncLogger) run() {
 	defer close(l.done)
 	for entry := range l.ch {
 		if err := l.store.InsertRequestLog(context.Background(), entry); err != nil {
-			log.Printf("WARNING: failed to persist log entry %s: %v", entry.ID, err)
+			slog.Warn("failed to persist log entry", "entry_id", entry.ID, "error", err)
 		}
 	}
 }

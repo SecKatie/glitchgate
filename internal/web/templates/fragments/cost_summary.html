@@ -10,22 +10,76 @@
         <div class="value">{{.Summary.TotalRequests}}</div>
     </article>
     <article class="summary-card">
-        <div class="label">Input Tokens</div>
-        <div class="value">{{fmtTokens .Summary.TotalInputTokens}}</div>
+        <div class="label">Total Input Tokens</div>
+        <div class="value">{{fmtTokens .TotalAllInputTokens}}</div>
     </article>
     <article class="summary-card">
         <div class="label">Output Tokens</div>
         <div class="value">{{fmtTokens .Summary.TotalOutputTokens}}</div>
     </article>
-    <article class="summary-card">
-        <div class="label">Cache Write Tokens</div>
-        <div class="value">{{fmtTokens .Summary.TotalCacheCreationTokens}}</div>
-    </article>
-    <article class="summary-card">
-        <div class="label">Cache Read Tokens</div>
-        <div class="value">{{fmtTokens .Summary.TotalCacheReadTokens}}</div>
-    </article>
 </div>
+
+<details style="margin-bottom: 1.5rem;">
+    <summary>Token Details</summary>
+    <p style="margin:0.5rem 0;color:var(--pico-muted-color);font-size:0.95em">
+        Cache write and cache read tokens are included in the total input token count.
+    </p>
+    <table class="token-detail">
+        <thead>
+            <tr><th>Token Type</th><th class="token-detail-value">Count</th><th class="token-detail-value">Cost</th></tr>
+        </thead>
+        <tbody>
+            <tr class="token-detail-total">
+                <td>Total Input</td>
+                <td class="token-detail-value">{{fmtTokens .TotalAllInputTokens}} <span class="token-detail-note">(100%)</span></td>
+                <td class="token-detail-value token-detail-total-cost">
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.TotalInputCostUSD}} <span class="token-detail-note">(100%)</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                </td>
+            </tr>
+            <tr>
+                <td class="token-detail-child"><span class="token-detail-marker">↳</span>Uncached Input <span class="token-detail-note">(included in total input)</span></td>
+                <td class="token-detail-value">{{fmtTokens .Summary.TotalInputTokens}} <span class="token-detail-note">({{fmtPctInt64 .Summary.TotalInputTokens .TotalAllInputTokens}} of total input)</span></td>
+                <td class="token-detail-value">
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.InputCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.InputCostUSD .TokenCosts.TotalInputCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                </td>
+            </tr>
+            {{if gt .Summary.TotalCacheCreationTokens 0}}
+            <tr>
+                <td class="token-detail-child"><span class="token-detail-marker">↳</span>Cache Write <span class="token-detail-note">(subset of total input)</span></td>
+                <td class="token-detail-value">{{fmtTokens .Summary.TotalCacheCreationTokens}} <span class="token-detail-note">({{fmtPctInt64 .Summary.TotalCacheCreationTokens .TotalAllInputTokens}} of total input)</span></td>
+                <td class="token-detail-value">
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.CacheWriteCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.CacheWriteCostUSD .TokenCosts.TotalInputCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                </td>
+            </tr>
+            {{end}}
+            {{if gt .Summary.TotalCacheReadTokens 0}}
+            <tr>
+                <td class="token-detail-child"><span class="token-detail-marker">↳</span>Cache Read <span class="token-detail-note">(subset of total input)</span></td>
+                <td class="token-detail-value">{{fmtTokens .Summary.TotalCacheReadTokens}} <span class="token-detail-note">({{fmtPctInt64 .Summary.TotalCacheReadTokens .TotalAllInputTokens}} of total input)</span></td>
+                <td class="token-detail-value">
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.CacheReadCostUSD}} <span class="token-detail-note">({{fmtPctFloat .TokenCosts.CacheReadCostUSD .TokenCosts.TotalInputCostUSD}})</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                </td>
+            </tr>
+            {{end}}
+            <tr class="token-detail-total">
+                <td>Output</td>
+                <td class="token-detail-value">{{fmtTokens .Summary.TotalOutputTokens}} <span class="token-detail-note">(100%)</span></td>
+                <td class="token-detail-value token-detail-total-cost">
+                    {{if .TokenCosts.HasAnyPricing}}${{printf "%.6f" .TokenCosts.OutputCostUSD}} <span class="token-detail-note">(100%)</span>{{else}}<span class="token-detail-note">&mdash;</span>{{end}}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    {{if .TokenCosts.PartialPricing}}
+    <p style="margin:0.5rem 0 0;color:var(--pico-muted-color);font-size:0.9em">
+        Per-category costs are partial because some models in this filtered result set do not have pricing configured.
+    </p>
+    {{else if not .TokenCosts.HasAnyPricing}}
+    <p style="margin:0.5rem 0 0;color:var(--pico-muted-color);font-size:0.9em">
+        Per-category costs are unavailable for some models in this filtered result set.
+    </p>
+    {{end}}
+</details>
 
 <!-- Daily cost chart -->
 {{if and .Timeseries (gt (len .Timeseries) 1)}}
@@ -49,17 +103,15 @@
 
 <!-- Breakdown table -->
 {{if .Breakdown}}
-<h3>Breakdown by {{if eq .GroupBy "key"}}API Key{{else}}Model{{end}}</h3>
+<h3>Breakdown by {{if eq .GroupBy "key"}}API Key{{else if eq .GroupBy "provider"}}Provider{{else}}Model{{end}}</h3>
 <figure>
 <table>
     <thead>
         <tr>
-            <th>{{if eq .GroupBy "key"}}API Key{{else}}Model{{end}}</th>
+            <th>{{if eq .GroupBy "key"}}API Key{{else if eq .GroupBy "provider"}}Provider{{else}}Model{{end}}</th>
             <th>Cost</th>
             <th>Cost (USD)</th>
-            <th>Input Tokens</th>
-            <th>Cache Write</th>
-            <th>Cache Read</th>
+            <th>Total Input Tokens</th>
             <th>Output Tokens</th>
             <th>Requests</th>
         </tr>
@@ -67,16 +119,14 @@
     <tbody>
         {{range .Breakdown}}
         <tr>
-            <td class="mono">{{.Group}}</td>
+            <td class="mono">{{if and (eq $.GroupBy "provider") $.ProviderNames}}{{or (index $.ProviderNames .Group) .Group}}{{else}}{{.Group}}{{end}}</td>
             <td>
                 <div class="breakdown-bar-cell">
                     <span class="breakdown-bar" style="width: {{if gt $.MaxBreakdownCost 0.0}}{{barPct .CostUSD $.MaxBreakdownCost}}{{else}}0{{end}}px; min-width: 2px; max-width: 100px;"></span>
                 </div>
             </td>
             <td class="cost">${{printf "%.4f" .CostUSD}}</td>
-            <td>{{fmtTokens .InputTokens}}</td>
-            <td>{{fmtTokens .CacheCreationTokens}}</td>
-            <td>{{fmtTokens .CacheReadTokens}}</td>
+            <td>{{fmtTokens (sumTokens .InputTokens .CacheCreationTokens .CacheReadTokens)}}</td>
             <td>{{fmtTokens .OutputTokens}}</td>
             <td>{{.Requests}}</td>
         </tr>
@@ -91,4 +141,3 @@
 <p>No cost data found for this date range.</p>
 {{end}}
 {{end}}
-

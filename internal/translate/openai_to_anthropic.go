@@ -107,6 +107,15 @@ func OpenAIToAnthropic(req *ChatCompletionRequest) (*anthropic.MessagesRequest, 
 		result.ToolChoice = tc
 	}
 
+	// Translate reasoning_effort to Anthropic thinking config.
+	if req.ReasoningEffort != nil && *req.ReasoningEffort != "" {
+		budget := effortToBudgetTokens(*req.ReasoningEffort, result.MaxTokens)
+		result.Thinking = &anthropic.ThinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: budget,
+		}
+	}
+
 	return result, nil
 }
 

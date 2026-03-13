@@ -1,0 +1,6 @@
+model = "gpt-5.4"
+[projects."/Users/katiemulliken/.local/share/chezmoi"]
+trust_level = "trusted"
+
+[notice.model_migrations]
+"gpt-5.3-codex" = "gpt-5.4"

@@ -25,6 +25,7 @@ type Response struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+	ReasoningTokens          int64
 }
 
 // Provider abstracts an upstream LLM service (e.g. Anthropic, OpenAI-compatible).

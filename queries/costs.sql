@@ -38,6 +38,20 @@ WHERE rl.timestamp >= ? AND rl.timestamp <= ?
 GROUP BY rl.proxy_key_id
 ORDER BY cost_usd DESC;
 
+-- name: GetCostByProvider :many
+SELECT
+    provider_name AS group_name,
+    COALESCE(SUM(estimated_cost_usd), 0) AS cost_usd,
+    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+    COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_tokens,
+    COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_tokens,
+    COUNT(*) AS requests
+FROM request_logs
+WHERE timestamp >= ? AND timestamp <= ?
+GROUP BY provider_name
+ORDER BY cost_usd DESC;
+
 -- name: GetCostTimeseries :many
 SELECT
     DATE(timestamp) AS date,

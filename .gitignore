@@ -1,8 +1,17 @@
 # Binary
 llm-proxy
+glitchgate
 *.exe
 *.test
 *.out
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
 
 # Go
 vendor/

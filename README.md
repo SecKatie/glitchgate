@@ -6,8 +6,9 @@ Routes requests to upstream providers, logs all traffic to a local SQLite databa
 
 ## Features
 
-- Proxy requests to Anthropic and GitHub Copilot upstreams
-- Format-aware routing: clients can use OpenAI or Anthropic format regardless of upstream provider
+- Proxy requests to Anthropic, OpenAI, and GitHub Copilot upstreams
+- Format-aware routing: clients can use Anthropic, OpenAI Chat Completions, or OpenAI Responses API format regardless of upstream provider
+- Full 3×3 translation matrix across all three API formats
 - GitHub Copilot integration via OAuth device flow (`glitchgate auth copilot`)
 - Multiple proxy API keys with per-key cost attribution
 - Wildcard prefix model routing
@@ -36,6 +37,7 @@ make generate   # sqlc generate
 
 ## Roadmap
 
+- [ ] Track errors on a provider and put into temporary cooldown if we get specific responses like a 429 or 503
 - [ ] **Per-key UI login** — proxy API key holders can sign in to the web UI to view their own logs and spend.
 - [ ] **OIDC/SSO authentication** — sign in with an external identity provider; enables user accounts with owned API keys and team membership.
 - [ ] **Teams & team-level budgets** — group users into teams, assign API keys to a team, and apply shared spend limits at the team level.

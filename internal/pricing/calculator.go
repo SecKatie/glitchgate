@@ -1,7 +1,7 @@
 // Package pricing computes request costs from token usage and model pricing tables.
 package pricing
 
-import "log"
+import "log/slog"
 
 // Entry holds the per-million-token cost for a single model.
 type Entry struct {
@@ -42,7 +42,7 @@ func (c *Calculator) Calculate(providerName, upstreamModel string, inputTokens, 
 
 	if cacheCreationTokens > 0 || cacheReadTokens > 0 {
 		if entry.CacheWritePerMillion == 0 && entry.CacheReadPerMillion == 0 {
-			log.Printf("WARNING: cache tokens present but no cache pricing configured for model %q", upstreamModel)
+			slog.Warn("cache tokens present but no cache pricing configured", "model", upstreamModel)
 		} else {
 			cost += (float64(cacheCreationTokens)*entry.CacheWritePerMillion +
 				float64(cacheReadTokens)*entry.CacheReadPerMillion) / 1_000_000

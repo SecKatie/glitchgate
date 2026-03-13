@@ -43,6 +43,7 @@ type Store interface {
 	// Cost queries.
 	GetCostSummary(ctx context.Context, params CostParams) (*CostSummary, error)
 	GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error)
+	GetCostPricingGroups(ctx context.Context, params CostParams) ([]CostPricingGroup, error)
 	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
 
 	// OIDC users.
@@ -59,6 +60,7 @@ type Store interface {
 	CreateTeam(ctx context.Context, id, name, description string) error
 	ListTeams(ctx context.Context) ([]Team, error)
 	GetTeamByID(ctx context.Context, id string) (*Team, error)
+	DeleteTeam(ctx context.Context, teamID string) error
 
 	// Team memberships.
 	AssignUserToTeam(ctx context.Context, userID, teamID string) error
@@ -113,6 +115,7 @@ type RequestLogEntry struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+	ReasoningTokens          int64
 	LatencyMs                int64
 	Status                   int
 	RequestBody              string
@@ -153,6 +156,7 @@ type RequestLogSummary struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+	ReasoningTokens          int64
 	LatencyMs                int64
 	Status                   int
 	EstimatedCostUSD         *float64
@@ -170,13 +174,26 @@ type RequestLogDetail struct {
 
 // CostParams controls filtering for cost queries.
 type CostParams struct {
-	From        string // Start date (inclusive), e.g. "2026-03-01"
-	To          string // End date (inclusive), e.g. "2026-03-11"
-	GroupBy     string // "model" or "key"
-	KeyPrefix   string // Optional filter by proxy key prefix
-	ScopeType   string // "all" | "team" | "user"
-	ScopeUserID string
-	ScopeTeamID string
+	From        string // Start datetime (inclusive), UTC, e.g. "2026-03-01 00:00:00"
+	To          string // End datetime (inclusive), UTC, e.g. "2026-03-11 23:59:59"
+	GroupBy     string // "model", "key", or "provider"
+	KeyPrefix   string // Optional filter by proxy key prefix when grouping by key
+	GroupFilter string // Optional prefix filter on the current group dimension (model or provider)
+	// ProviderGroups is an optional set of exact provider_name values to include
+	// when GroupBy == "provider". This lets the web layer translate a displayed
+	// provider name back to one or more raw provider keys used in logs.
+	ProviderGroups []string
+	ScopeType      string // "all" | "team" | "user"
+	ScopeUserID    string
+	ScopeTeamID    string
+	// TzOffsetSeconds is the UTC offset of the display timezone in seconds
+	// (positive = east, e.g. +28800 for UTC+8, -18000 for UTC-5).
+	// Used to bucket timestamps by local date in the timeseries query.
+	TzOffsetSeconds int
+	// TzLocation is the display timezone used to bucket timestamps by local
+	// calendar day. When set, it takes precedence over TzOffsetSeconds so
+	// DST transitions are handled per timestamp.
+	TzLocation *time.Location
 }
 
 // CostSummary holds aggregated cost totals for a date range.
@@ -200,6 +217,17 @@ type CostBreakdownEntry struct {
 	Requests            int64
 }
 
+// CostPricingGroup holds token totals grouped by exact provider/model pair so
+// the web layer can apply pricing rates without ambiguity.
+type CostPricingGroup struct {
+	ProviderName        string
+	ModelUpstream       string
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
+}
+
 // CostTimeseriesEntry holds cost data for a single time bucket.
 type CostTimeseriesEntry struct {
 	Date     string
@@ -218,26 +246,30 @@ type AuditEvent struct {
 
 // OIDCUser represents an OIDC-authenticated user account.
 type OIDCUser struct {
-	ID             string
-	Subject        string
-	Email          string
-	DisplayName    string
-	Role           string // "global_admin" | "team_admin" | "member"
-	Active         bool
-	LastSeenAt     *time.Time
-	CreatedAt      time.Time
-	BudgetLimitUSD *float64
-	BudgetPeriod   *string
+	ID          string
+	Subject     string
+	Email       string
+	DisplayName string
+	Role        string // "global_admin" | "team_admin" | "member"
+	Active      bool
+	LastSeenAt  *time.Time
+	CreatedAt   time.Time
+	Budget      BudgetPolicy
 }
 
 // Team represents an organizational group.
 type Team struct {
-	ID             string
-	Name           string
-	Description    string
-	CreatedAt      time.Time
-	BudgetLimitUSD *float64
-	BudgetPeriod   *string
+	ID          string
+	Name        string
+	Description string
+	CreatedAt   time.Time
+	Budget      BudgetPolicy
+}
+
+// BudgetPolicy holds an optional spend limit for an entity.
+type BudgetPolicy struct {
+	LimitUSD *float64
+	Period   *string
 }
 
 // TeamMembership records a user's assignment to a team.

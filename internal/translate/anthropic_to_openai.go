@@ -32,6 +32,8 @@ func AnthropicToOpenAI(resp *anthropic.MessagesResponse, model string) *ChatComp
 		switch block.Type {
 		case "text":
 			textParts = append(textParts, block.Text)
+		case "thinking":
+			// Thinking blocks are not included in the message text.
 		case "tool_use":
 			args, err := json.Marshal(block.Input)
 			if err != nil {

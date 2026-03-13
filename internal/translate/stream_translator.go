@@ -13,6 +13,20 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
 )
 
+// maxSSELineSize is the maximum size of a single SSE line we support.
+// Anthropic's extended thinking produces signature_delta events that encode
+// the full thinking content as a base64 signature, which can easily exceed
+// bufio.Scanner's default 64 KB limit. 1 MB handles realistic thinking sizes.
+const maxSSELineSize = 1 << 20 // 1 MB
+
+// newSSEScanner creates a bufio.Scanner with a buffer large enough for
+// extended thinking signature_delta events.
+func newSSEScanner(r io.Reader) *bufio.Scanner {
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 0, maxSSELineSize), maxSSELineSize)
+	return s
+}
+
 // StreamResult holds the captured data from a translated streaming response.
 type StreamResult struct {
 	Body                     []byte
@@ -20,6 +34,7 @@ type StreamResult struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+	ReasoningTokens          int64
 }
 
 // SSEStream reads Anthropic SSE events from upstream, translates
@@ -44,8 +59,9 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 	created := time.Now().Unix()
 	messageID := ""
 	sentInitial := false
+	thinkingBlockIndices := make(map[int]bool)
 
-	scanner := bufio.NewScanner(upstream)
+	scanner := newSSEScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -83,14 +99,28 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 					Content: "",
 				}, nil)
 				if err := writeSSEChunk(w, rc, &captured, chunk); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens), err
+					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 				}
 				sentInitial = true
+			}
+
+		case "content_block_start":
+			// Track thinking blocks by index so we can skip their deltas.
+			var cbEvent anthropic.ContentBlockStartEvent
+			if err := json.Unmarshal([]byte(data), &cbEvent); err == nil {
+				if cbEvent.ContentBlock.Type == "thinking" {
+					thinkingBlockIndices[cbEvent.Index] = true
+				}
 			}
 
 		case "content_block_delta":
 			var event anthropic.ContentBlockDeltaEvent
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				continue
+			}
+
+			// Skip thinking block deltas — OpenAI CC doesn't stream reasoning.
+			if thinkingBlockIndices[event.Index] {
 				continue
 			}
 
@@ -100,13 +130,24 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 					Content: event.Delta.Text,
 				}, nil)
 				if err := writeSSEChunk(w, rc, &captured, chunk); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens), err
+					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 				}
 
 			case "input_json_delta":
 				// Tool call argument streaming - pass through as tool call delta.
 				// This is a simplified handling; full tool streaming would need
 				// more state tracking.
+			}
+
+		case "content_block_stop":
+			// Check if this was a thinking block — if so, skip.
+			var cbStopEvent struct {
+				Index int `json:"index"`
+			}
+			if err := json.Unmarshal([]byte(data), &cbStopEvent); err == nil {
+				if thinkingBlockIndices[cbStopEvent.Index] {
+					continue
+				}
 			}
 
 		case "message_delta":
@@ -122,7 +163,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			finishReason := mapStopReason(event.Delta.StopReason)
 			chunk := buildChunk(messageID, model, created, &ChatMessage{}, finishReason)
 			if err := writeSSEChunk(w, rc, &captured, chunk); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens), err
+				return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 			}
 
 		case "message_stop":
@@ -130,10 +171,10 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			done := "data: [DONE]\n\n"
 			captured.WriteString(done)
 			if _, err := w.Write([]byte(done)); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens), err
+				return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 			}
 			if err := rc.Flush(); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens), err
+				return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 			}
 
 		case "ping":
@@ -141,7 +182,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 		}
 	}
 
-	return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens), scanner.Err()
+	return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), scanner.Err()
 }
 
 // buildChunk creates a ChatCompletionResponse formatted as a streaming chunk.
@@ -178,12 +219,13 @@ func writeSSEChunk(w http.ResponseWriter, rc *http.ResponseController, captured 
 }
 
 // buildResult creates a StreamResult from the accumulated state.
-func buildResult(captured *bytes.Buffer, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) *StreamResult {
+func buildResult(captured *bytes.Buffer, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens int64) *StreamResult {
 	return &StreamResult{
 		Body:                     captured.Bytes(),
 		InputTokens:              inputTokens,
 		OutputTokens:             outputTokens,
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,
+		ReasoningTokens:          reasoningTokens,
 	}
 }

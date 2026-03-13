@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -147,6 +147,18 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 				return p.Sprintf("%d", n)
 			}
 		},
+		"fmtPctInt64": func(part, total int64) string {
+			if total <= 0 {
+				return "0%"
+			}
+			return fmt.Sprintf("%.1f%%", (float64(part)/float64(total))*100)
+		},
+		"fmtPctFloat": func(part, total float64) string {
+			if total <= 0 {
+				return "0%"
+			}
+			return fmt.Sprintf("%.1f%%", (part/total)*100)
+		},
 	}
 }
 
@@ -215,7 +227,7 @@ func (h *Handlers) LoginPage(w http.ResponseWriter, r *http.Request) {
 		"OIDCEnabled":       oidcEnabled,
 		"ShowMasterKeyForm": showMasterKeyForm,
 	}); err != nil {
-		log.Printf("ERROR: render login page: %v", err)
+		slog.Error("render login page", "error", err)
 	}
 }
 
@@ -231,27 +243,27 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			MasterKey string `json:"master_key"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			log.Printf("WARNING: decode login body: %v", err)
+			slog.Warn("decode login body", "error", err)
 		}
 		masterKey = body.MasterKey
 	}
 
 	if masterKey != h.masterKey {
 		if err := h.store.RecordAuditEvent(r.Context(), "master_key.login_failed", "", ""); err != nil {
-			log.Printf("WARNING: record audit event: %v", err)
+			slog.Warn("record audit event", "error", err)
 		}
 		contentType := r.Header.Get("Content-Type")
 		if contentType == "application/json" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if _, err := w.Write([]byte(`{"error":"Invalid master key"}`)); err != nil {
-				log.Printf("ERROR: write login error response: %v", err)
+				slog.Error("write login error response", "error", err)
 			}
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := h.templates.ExecuteTemplate(w, "login.html", map[string]any{"Error": "Invalid master key"}); err != nil {
-			log.Printf("ERROR: render login page: %v", err)
+			slog.Error("render login page", "error", err)
 		}
 		return
 	}
@@ -273,7 +285,7 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err := h.store.RecordAuditEvent(r.Context(), "master_key.login", "", ""); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	contentType := r.Header.Get("Content-Type")
@@ -283,7 +295,7 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			"session_token": sess.Token,
 			"expires_at":    sess.ExpiresAt.Format(time.RFC3339),
 		}); err != nil {
-			log.Printf("ERROR: write login response: %v", err)
+			slog.Error("write login response", "error", err)
 		}
 		return
 	}
@@ -295,11 +307,11 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("llmp_session"); err == nil {
 		if delErr := h.sessions.Delete(r.Context(), c.Value); delErr != nil {
-			log.Printf("WARNING: delete session: %v", delErr)
+			slog.Warn("delete session", "error", delErr)
 		}
 	}
 	if err := h.store.RecordAuditEvent(r.Context(), "session.logout", "", ""); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 	for _, name := range []string{"llmp_session", "session"} {
 		http.SetCookie(w, &http.Cookie{
@@ -330,13 +342,13 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 
 	models, err := h.store.ListDistinctModels(r.Context())
 	if err != nil {
-		log.Printf("WARNING: list distinct models: %v", err)
+		slog.Warn("list distinct models", "error", err)
 		models = []string{}
 	}
 
 	statuses, err := h.store.ListDistinctStatuses(r.Context())
 	if err != nil {
-		log.Printf("WARNING: list distinct statuses: %v", err)
+		slog.Warn("list distinct statuses", "error", err)
 		statuses = []int{}
 	}
 
@@ -409,7 +421,7 @@ func (h *Handlers) LogsAPIHandler(w http.ResponseWriter, r *http.Request) {
 		if sinceID != "" && params.Page > 1 {
 			count, err := h.store.CountLogsSince(r.Context(), sinceID, params)
 			if err != nil {
-				log.Printf("WARNING: count logs since <id>: %v", err) //nolint:gosec // G706: sinceID not included in log output
+				slog.Warn("count logs since ID", "error", err)
 			} else {
 				w.Header().Set("X-New-Count", strconv.FormatInt(count, 10))
 			}
@@ -428,7 +440,7 @@ func (h *Handlers) LogsAPIHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := h.templates.ExecuteNamed(w, "log_fragment", data); err != nil {
-			log.Printf("ERROR: render log_rows fragment: %v", err)
+			slog.Error("render log_rows fragment", "error", err)
 		}
 		return
 	}
@@ -446,7 +458,7 @@ func (h *Handlers) LogsAPIHandler(w http.ResponseWriter, r *http.Request) {
 		"page":     params.Page,
 		"per_page": perPage,
 	}); err != nil {
-		log.Printf("ERROR: write logs JSON response: %v", err)
+		slog.Error("write logs JSON response", "error", err)
 	}
 }
 
@@ -505,7 +517,7 @@ func (h *Handlers) LogDetailAPIHandler(w http.ResponseWriter, r *http.Request, i
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		if _, err := w.Write([]byte(`{"error":"Log not found"}`)); err != nil {
-			log.Printf("ERROR: write log-not-found response: %v", err)
+			slog.Error("write log-not-found response", "error", err)
 		}
 		return
 	}
@@ -539,7 +551,7 @@ func (h *Handlers) LogDetailAPIHandler(w http.ResponseWriter, r *http.Request, i
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(logEntry); err != nil {
-		log.Printf("ERROR: write log detail response: %v", err)
+		slog.Error("write log detail response", "error", err)
 	}
 }
 
@@ -593,14 +605,14 @@ func (h *Handlers) KeysAPIHandler(w http.ResponseWriter, r *http.Request) {
 		data := map[string]any{"Keys": keys}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := h.templates.ExecuteNamed(w, "key_rows", data); err != nil {
-			log.Printf("ERROR: render key_rows fragment: %v", err)
+			slog.Error("render key_rows fragment", "error", err)
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"keys": keys}); err != nil {
-		log.Printf("ERROR: write keys JSON response: %v", err)
+		slog.Error("write keys JSON response", "error", err)
 	}
 }
 
@@ -638,7 +650,7 @@ func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		if err := h.templates.ExecuteTemplate(w, "keys.html", data); err != nil {
-			log.Printf("ERROR: render keys page with error: %v", err)
+			slog.Error("render keys page with error", "error", err)
 		}
 		return
 	}
@@ -669,7 +681,7 @@ func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 		auditAction = "key.created_for_user"
 	}
 	if err := h.store.RecordAuditEvent(r.Context(), auditAction, prefix, label); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	keys, err := h.listKeysForSession(r)
@@ -716,14 +728,14 @@ func (h *Handlers) UpdateKeyLabelHandler(w http.ResponseWriter, r *http.Request,
 		data := map[string]any{"Keys": keys}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := h.templates.ExecuteNamed(w, "key_rows", data); err != nil {
-			log.Printf("ERROR: render key_rows fragment: %v", err)
+			slog.Error("render key_rows fragment", "error", err)
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
-		log.Printf("ERROR: write update key response: %v", err)
+		slog.Error("write update key response", "error", err)
 	}
 }
 
@@ -756,7 +768,7 @@ func (h *Handlers) RevokeKeyHandler(w http.ResponseWriter, r *http.Request, pref
 	}
 
 	if err := h.store.RecordAuditEvent(r.Context(), "key.revoked", prefix, ""); err != nil {
-		log.Printf("WARNING: record audit event: %v", err)
+		slog.Warn("record audit event", "error", err)
 	}
 
 	keys, err := h.listKeysForSession(r)
@@ -769,14 +781,14 @@ func (h *Handlers) RevokeKeyHandler(w http.ResponseWriter, r *http.Request, pref
 		data := map[string]any{"Keys": keys}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := h.templates.ExecuteNamed(w, "key_rows", data); err != nil {
-			log.Printf("ERROR: render key_rows fragment: %v", err)
+			slog.Error("render key_rows fragment", "error", err)
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true}); err != nil {
-		log.Printf("ERROR: write revoke key response: %v", err)
+		slog.Error("write revoke key response", "error", err)
 	}
 }
 

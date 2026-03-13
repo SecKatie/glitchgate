@@ -2,22 +2,24 @@ package translate
 
 // ChatCompletionRequest is the OpenAI Chat Completions API request body.
 type ChatCompletionRequest struct {
-	Model         string         `json:"model"`
-	Messages      []ChatMessage  `json:"messages"`
-	MaxTokens     *int           `json:"max_tokens,omitempty"`
-	Temperature   *float64       `json:"temperature,omitempty"`
-	TopP          *float64       `json:"top_p,omitempty"`
-	Stream        bool           `json:"stream,omitempty"`
-	Stop          interface{}    `json:"stop,omitempty"` // string or []string
-	Tools         []OpenAITool   `json:"tools,omitempty"`
-	ToolChoice    interface{}    `json:"tool_choice,omitempty"`
-	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []ChatMessage  `json:"messages"`
+	MaxTokens       *int           `json:"max_tokens,omitempty"`
+	Temperature     *float64       `json:"temperature,omitempty"`
+	TopP            *float64       `json:"top_p,omitempty"`
+	Stream          bool           `json:"stream,omitempty"`
+	Stop            interface{}    `json:"stop,omitempty"` // string or []string
+	Tools           []OpenAITool   `json:"tools,omitempty"`
+	ToolChoice      interface{}    `json:"tool_choice,omitempty"`
+	StreamOptions   *StreamOptions `json:"stream_options,omitempty"`
+	ReasoningEffort *string        `json:"reasoning_effort,omitempty"`
 }
 
 // ChatMessage represents a single message in the OpenAI conversation format.
 type ChatMessage struct {
 	Role       string      `json:"role"`
 	Content    interface{} `json:"content"` // string or []ContentPart
+	Refusal    string      `json:"refusal,omitempty"`
 	Name       string      `json:"name,omitempty"`
 	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID string      `json:"tool_call_id,omitempty"`
@@ -44,6 +46,7 @@ type ToolFunction struct {
 
 // ToolCall represents a tool invocation returned by the model.
 type ToolCall struct {
+	Index    *int         `json:"index,omitempty"` // present in streaming chunks
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
@@ -80,9 +83,21 @@ type Choice struct {
 
 // OpenAIUsage reports token consumption in OpenAI format.
 type OpenAIUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
+	PromptTokens            int64                    `json:"prompt_tokens"`
+	CompletionTokens        int64                    `json:"completion_tokens"`
+	TotalTokens             int64                    `json:"total_tokens"`
+	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
+}
+
+// PromptTokensDetails holds detail breakdown of prompt tokens.
+type PromptTokensDetails struct {
+	CachedTokens int64 `json:"cached_tokens"`
+}
+
+// CompletionTokensDetails holds detail breakdown of completion tokens.
+type CompletionTokensDetails struct {
+	ReasoningTokens int64 `json:"reasoning_tokens"`
 }
 
 // OpenAIErrorResponse wraps an error in OpenAI's error envelope.

@@ -15,6 +15,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-11
 - SQLite via `modernc.org/sqlite` — 8 new migrations (006–013) (007-implement-oidc)
 - Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`) + chi/v5, go-resty/v3, cobra+viper, modernc.org/sqlite, goose/v3, testify/require (008-model-fallback)
 - SQLite — one new migration (`014_add_fallback_attempts.sql`) (008-model-fallback)
+- Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`) + chi/v5 (router), go-resty/v3 (upstream calls), cobra+viper (CLI/config), modernc.org/sqlite (storage), goose/v3 (migrations), testify/require (tests) (010-responses-api-support)
+- SQLite — no schema changes; existing `request_logs` table supports new `source_format` value `"responses"` (010-responses-api-support)
 
 - Go 1.24+ with cobra + viper (CLI/config), chi/v5 (HTTP router)
 - net/http (upstream SSE streaming), go-resty/v3 (non-streaming calls)
@@ -61,9 +63,9 @@ make audit              # gosec + govulncheck
 - Translation as pure functions in internal/translate/
 
 ## Recent Changes
+- 010-responses-api-support: Added Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`) + chi/v5 (router), go-resty/v3 (upstream calls), cobra+viper (CLI/config), modernc.org/sqlite (storage), goose/v3 (migrations), testify/require (tests)
 - 008-model-fallback: Added Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`) + chi/v5, go-resty/v3, cobra+viper, modernc.org/sqlite, goose/v3, testify/require
 - 007-implement-oidc: Added Go 1.26.1 (module: `codeberg.org/kglitchy/glitchgate`)
-- 007-implement-oidc: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 
   monitoring, web UI
 

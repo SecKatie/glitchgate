@@ -77,10 +77,18 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		}
 	}
 
-	// Forward any additional Anthropic-specific headers.
-	for _, hdr := range []string{"Anthropic-Beta"} {
-		if v := req.Headers.Get(hdr); v != "" {
-			httpReq.Header.Set(hdr, v)
+	for hdr, values := range req.Headers {
+		if !shouldForwardHeader(hdr) {
+			continue
+		}
+		if strings.EqualFold(hdr, "Content-Type") ||
+			strings.EqualFold(hdr, "Anthropic-Version") ||
+			strings.EqualFold(hdr, "Authorization") ||
+			strings.EqualFold(hdr, "X-Api-Key") {
+			continue
+		}
+		for _, v := range values {
+			httpReq.Header.Add(hdr, v)
 		}
 	}
 
@@ -118,4 +126,19 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 	}
 
 	return provResp, nil
+}
+
+func shouldForwardHeader(hdr string) bool {
+	switch {
+	case strings.EqualFold(hdr, "Accept"),
+		strings.EqualFold(hdr, "User-Agent"),
+		strings.EqualFold(hdr, "X-App"):
+		return true
+	case strings.HasPrefix(strings.ToLower(hdr), "anthropic-"):
+		return true
+	case strings.HasPrefix(strings.ToLower(hdr), "x-stainless-"):
+		return true
+	default:
+		return false
+	}
 }

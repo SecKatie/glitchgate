@@ -3,7 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"codeberg.org/kglitchy/glitchgate/internal/auth"
@@ -88,6 +88,6 @@ func writeAnthropicError(w http.ResponseWriter, status int, errType, message str
 			"message": message,
 		},
 	}); err != nil {
-		log.Printf("WARNING: write error response: %v", err)
+		slog.Warn("write error response", "error", err)
 	}
 }

@@ -6,31 +6,39 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"codeberg.org/kglitchy/glitchgate/internal/auth"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
 // CostHandlers groups the HTTP handlers for cost dashboard endpoints.
 type CostHandlers struct {
-	store     store.Store
-	templates *TemplateSet
-	tz        *time.Location
+	store         store.Store
+	templates     *TemplateSet
+	tz            *time.Location
+	calc          *pricing.Calculator
+	providerNames map[string]string // pricing key → human-readable name from config
 }
 
 // NewCostHandlers creates a new CostHandlers with the given store, template set,
-// and display timezone (pass nil or time.UTC for UTC).
-func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location) *CostHandlers {
+// display timezone (pass nil or time.UTC for UTC), and provider name map
+// (pricing key → config Name). Pass nil if no providers are configured.
+func NewCostHandlers(s store.Store, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string) *CostHandlers {
 	if tz == nil {
 		tz = time.UTC
 	}
 	return &CostHandlers{
-		store:     s,
-		templates: tmpl,
-		tz:        tz,
+		store:         s,
+		templates:     tmpl,
+		tz:            tz,
+		calc:          calc,
+		providerNames: providerNames,
 	}
 }
 
@@ -81,25 +89,90 @@ func (h *CostHandlers) parseCostParams(r *http.Request) store.CostParams {
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	groupBy := r.URL.Query().Get("group_by")
-	keyPrefix := r.URL.Query().Get("key")
+	filterValue := r.URL.Query().Get("filter")
+
+	now := time.Now().In(h.tz)
 
 	// Default: last 30 days.
 	if from == "" {
-		from = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
+		from = now.AddDate(0, 0, -30).Format("2006-01-02")
 	}
 	if to == "" {
-		to = time.Now().In(h.tz).Format("2006-01-02")
+		to = now.Format("2006-01-02")
 	}
 	if groupBy == "" {
 		groupBy = "model"
 	}
+	if groupBy == "key" && filterValue == "" {
+		// Backward compatibility for older URLs that still use ?key=...
+		filterValue = r.URL.Query().Get("key")
+	}
+
+	keyPrefix := ""
+	groupFilter := ""
+	if groupBy == "key" {
+		keyPrefix = filterValue
+	} else {
+		groupFilter = filterValue
+	}
+
+	// Convert local date strings to UTC datetime boundaries so that the SQL
+	// comparisons against UTC-stored timestamps are correct.
+	fromLocal, err := time.ParseInLocation("2006-01-02", from, h.tz)
+	if err != nil {
+		fromLocal = startOfDay(now.AddDate(0, 0, -30), h.tz)
+	}
+	toLocal, err := time.ParseInLocation("2006-01-02", to, h.tz)
+	if err != nil {
+		toLocal = startOfDay(now, h.tz)
+	}
+	// toLocal is midnight at the start of `to`; advance to the next local
+	// midnight with calendar math so DST transition days stay exact.
+	toLocalEnd := toLocal.AddDate(0, 0, 1).Add(-time.Second)
+
+	_, offsetSecs := fromLocal.Zone()
 
 	return store.CostParams{
-		From:      from,
-		To:        to + " 23:59:59", // Make the end date inclusive of the full day.
-		GroupBy:   groupBy,
-		KeyPrefix: keyPrefix,
+		From:            fromLocal.UTC().Format("2006-01-02 15:04:05"),
+		To:              toLocalEnd.UTC().Format("2006-01-02 15:04:05"),
+		GroupBy:         groupBy,
+		KeyPrefix:       keyPrefix,
+		GroupFilter:     groupFilter,
+		TzOffsetSeconds: offsetSecs,
+		TzLocation:      h.tz,
 	}
+}
+
+func startOfDay(t time.Time, tz *time.Location) time.Time {
+	local := t.In(tz)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, tz)
+}
+
+func (h *CostHandlers) costParamsForRequest(r *http.Request) store.CostParams {
+	params := h.parseCostParams(r)
+	h.applyProviderFilter(&params)
+	return params
+}
+
+func (h *CostHandlers) applyProviderFilter(params *store.CostParams) {
+	if params.GroupBy != "provider" || params.GroupFilter == "" || len(h.providerNames) == 0 {
+		return
+	}
+
+	filter := strings.ToLower(params.GroupFilter)
+	providerGroups := make([]string, 0, len(h.providerNames))
+	for rawKey, displayName := range h.providerNames {
+		if strings.HasPrefix(strings.ToLower(rawKey), filter) || strings.HasPrefix(strings.ToLower(displayName), filter) {
+			providerGroups = append(providerGroups, rawKey)
+		}
+	}
+
+	if len(providerGroups) == 0 {
+		return
+	}
+
+	slices.Sort(providerGroups)
+	params.ProviderGroups = slices.Compact(providerGroups)
 }
 
 // --------------------------------------------------------------------------
@@ -107,9 +180,9 @@ func (h *CostHandlers) parseCostParams(r *http.Request) store.CostParams {
 // --------------------------------------------------------------------------
 
 // CostSummaryHandler returns aggregated cost data with a breakdown grouped
-// by model or key. Query parameters: from, to, group_by (model|key), key.
+// by model, provider, or key. Query parameters: from, to, group_by (model|provider|key), filter.
 func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request) {
-	params := h.parseCostParams(r)
+	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	summary, err := h.store.GetCostSummary(r.Context(), params)
@@ -161,7 +234,7 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("ERROR: write cost summary response: %v", err)
+		slog.Error("write cost summary response", "error", err)
 	}
 }
 
@@ -170,9 +243,9 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 // --------------------------------------------------------------------------
 
 // CostTimeseriesHandler returns cost data bucketed over time.
-// Query parameters: from, to, interval (day|week|month), key.
+// Query parameters: from, to, interval (day|week|month), filter.
 func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Request) {
-	params := h.parseCostParams(r)
+	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	interval := r.URL.Query().Get("interval")
@@ -216,7 +289,7 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("ERROR: write cost timeseries response: %v", err)
+		slog.Error("write cost timeseries response", "error", err)
 	}
 }
 
@@ -283,13 +356,59 @@ func aggregateTimeseries(entries []store.CostTimeseriesEntry, interval string) [
 	return result
 }
 
+func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerNames map[string]string) []store.CostBreakdownEntry {
+	if len(entries) == 0 || len(providerNames) == 0 {
+		return entries
+	}
+
+	combined := make(map[string]store.CostBreakdownEntry, len(entries))
+	for _, entry := range entries {
+		name := entry.Group
+		if mapped, ok := providerNames[entry.Group]; ok && mapped != "" {
+			name = mapped
+		}
+
+		agg := combined[name]
+		agg.Group = name
+		agg.CostUSD += entry.CostUSD
+		agg.InputTokens += entry.InputTokens
+		agg.OutputTokens += entry.OutputTokens
+		agg.CacheCreationTokens += entry.CacheCreationTokens
+		agg.CacheReadTokens += entry.CacheReadTokens
+		agg.Requests += entry.Requests
+		combined[name] = agg
+	}
+
+	result := make([]store.CostBreakdownEntry, 0, len(combined))
+	for _, entry := range combined {
+		result = append(result, entry)
+	}
+
+	slices.SortFunc(result, func(a, b store.CostBreakdownEntry) int {
+		switch {
+		case a.CostUSD > b.CostUSD:
+			return -1
+		case a.CostUSD < b.CostUSD:
+			return 1
+		case a.Group < b.Group:
+			return -1
+		case a.Group > b.Group:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	return result
+}
+
 // --------------------------------------------------------------------------
 // T052: GET /ui/costs — render full cost dashboard page
 // --------------------------------------------------------------------------
 
 // CostsPageHandler renders the full cost dashboard HTML page.
 func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) {
-	params := h.parseCostParams(r)
+	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	summary, err := h.store.GetCostSummary(r.Context(), params)
@@ -299,6 +418,15 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	breakdown, err := h.store.GetCostBreakdown(r.Context(), params)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if params.GroupBy == "provider" {
+		breakdown = aggregateProviderBreakdown(breakdown, h.providerNames)
+	}
+
+	pricingGroups, err := h.store.GetCostPricingGroups(r.Context(), params)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -339,6 +467,10 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	if groupBy == "" {
 		groupBy = "model"
 	}
+	groupFilter := r.URL.Query().Get("filter")
+	if groupBy == "key" && groupFilter == "" {
+		groupFilter = r.URL.Query().Get("key")
+	}
 
 	// Check for incomplete data (rows with 0 tokens but requests).
 	hasIncompleteData := false
@@ -349,19 +481,24 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+
 	data := map[string]any{
-		"ActiveTab":         "costs",
-		"Title":             "Cost Dashboard",
-		"Summary":           summary,
-		"Breakdown":         breakdown,
-		"Timeseries":        timeseries,
-		"MaxCost":           maxCost,
-		"MaxBreakdownCost":  maxBreakdownCost,
-		"HasIncompleteData": hasIncompleteData,
-		"From":              fromDate,
-		"To":                toDate,
-		"GroupBy":           groupBy,
-		"KeyFilter":         r.URL.Query().Get("key"),
+		"ActiveTab":           "costs",
+		"Title":               "Cost Dashboard",
+		"Summary":             summary,
+		"TokenCosts":          tokenCosts,
+		"Breakdown":           breakdown,
+		"Timeseries":          timeseries,
+		"MaxCost":             maxCost,
+		"MaxBreakdownCost":    maxBreakdownCost,
+		"HasIncompleteData":   hasIncompleteData,
+		"From":                fromDate,
+		"To":                  toDate,
+		"GroupBy":             groupBy,
+		"GroupFilter":         groupFilter,
+		"TotalAllInputTokens": summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
+		"ProviderNames":       h.providerNames,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -377,7 +514,7 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 // CostSummaryFragmentHandler renders only the cost breakdown table as an
 // HTMX partial, used when filters change without a full page reload.
 func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http.Request) {
-	params := h.parseCostParams(r)
+	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
 	summary, err := h.store.GetCostSummary(r.Context(), params)
@@ -387,6 +524,15 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 	}
 
 	breakdown, err := h.store.GetCostBreakdown(r.Context(), params)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if params.GroupBy == "provider" {
+		breakdown = aggregateProviderBreakdown(breakdown, h.providerNames)
+	}
+
+	pricingGroups, err := h.store.GetCostPricingGroups(r.Context(), params)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -425,14 +571,19 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 		}
 	}
 
+	tokenCosts := computeAggregateCostBreakdown(pricingGroups, h.calc)
+
 	data := map[string]any{
-		"Summary":           summary,
-		"Breakdown":         breakdown,
-		"Timeseries":        timeseries,
-		"MaxCost":           maxCost,
-		"MaxBreakdownCost":  maxBreakdownCost,
-		"HasIncompleteData": hasIncompleteData,
-		"GroupBy":           groupBy,
+		"Summary":             summary,
+		"TokenCosts":          tokenCosts,
+		"Breakdown":           breakdown,
+		"Timeseries":          timeseries,
+		"MaxCost":             maxCost,
+		"MaxBreakdownCost":    maxBreakdownCost,
+		"HasIncompleteData":   hasIncompleteData,
+		"GroupBy":             groupBy,
+		"TotalAllInputTokens": summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
+		"ProviderNames":       h.providerNames,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

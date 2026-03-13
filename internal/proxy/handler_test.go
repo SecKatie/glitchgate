@@ -20,6 +20,7 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	openaiprov "codeberg.org/kglitchy/glitchgate/internal/provider/openai"
 	"codeberg.org/kglitchy/glitchgate/internal/proxy"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
@@ -711,6 +712,210 @@ model_list:
 	return handler, st, logger
 }
 
+// --- Cross-format fallback tests (T039) ---
+
+// openAISuccessResponse returns a minimal valid Chat Completions response.
+func openAISuccessResponse() map[string]interface{} {
+	return map[string]interface{}{
+		"id":      "chatcmpl-test",
+		"object":  "chat.completion",
+		"created": 1741000000,
+		"model":   "gpt-4o",
+		"choices": []map[string]interface{}{
+			{
+				"index":         0,
+				"message":       map[string]interface{}{"role": "assistant", "content": "ok"},
+				"finish_reason": "stop",
+			},
+		},
+		"usage": map[string]interface{}{"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+	}
+}
+
+// responsesSuccessResponse returns a minimal valid Responses API response.
+func responsesSuccessResponse() map[string]interface{} {
+	return map[string]interface{}{
+		"id":         "resp_test",
+		"object":     "response",
+		"created_at": 1741000000,
+		"model":      "gpt-4o",
+		"status":     "completed",
+		"output": []map[string]interface{}{
+			{
+				"type": "message",
+				"role": "assistant",
+				"content": []map[string]interface{}{
+					{"type": "output_text", "text": "ok"},
+				},
+			},
+		},
+		"usage": map[string]interface{}{"input_tokens": 5, "output_tokens": 1, "total_tokens": 6},
+	}
+}
+
+// buildCrossFormatFallbackHandler creates an Anthropic handler with a virtual model
+// where primary is Anthropic and secondary is a different format (OpenAI CC or Responses).
+func buildCrossFormatFallbackHandler(t *testing.T, primaryURL, secondaryURL, secondaryType string) (*proxy.Handler, *store.SQLiteStore, *proxy.AsyncLogger) {
+	t.Helper()
+	st, _ := setupFallbackStore(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	var secondaryYAML string
+	if secondaryType == "openai" || secondaryType == "openai_responses" {
+		secondaryYAML = fmt.Sprintf(`
+  - name: secondary
+    type: %s
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key2`, secondaryType, secondaryURL)
+	}
+
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+  - name: primary
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1
+    default_version: "2023-06-01"
+%s
+model_list:
+  - model_name: virtual
+    fallbacks: [primary-model, secondary-model]
+  - model_name: primary-model
+    provider: primary
+    upstream_model: claude-3
+  - model_name: secondary-model
+    provider: secondary
+    upstream_model: gpt-4o
+`, primaryURL, secondaryYAML)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	var apiType string
+	switch secondaryType {
+	case "openai_responses":
+		apiType = openaiprov.APITypeResponses
+	default:
+		apiType = openaiprov.APITypeChatCompletions
+	}
+
+	providers := map[string]provider.Provider{
+		"primary":   anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01"),
+		"secondary": openaiprov.NewClient("secondary", secondaryURL, "proxy_key", "key2", apiType),
+	}
+
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	return handler, st, logger
+}
+
+// TestFallback_AnthropicToOpenAICC verifies that a failing Anthropic primary falls back
+// to an OpenAI Chat Completions secondary with cross-format translation.
+func TestFallback_AnthropicToOpenAICC(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify the request was sent to the CC endpoint.
+		require.Equal(t, "/v1/chat/completions", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(openAISuccessResponse()))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildCrossFormatFallbackHandler(t, primary.URL, secondary.URL, "openai")
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify response is in Anthropic format (translated from CC).
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "assistant", resp["role"])
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts, "should be attempt 2 after primary failed")
+}
+
+// TestFallback_AnthropicToResponsesAPI verifies that a failing Anthropic primary falls back
+// to a Responses API secondary with cross-format translation.
+func TestFallback_AnthropicToResponsesAPI(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify the request was sent to the Responses endpoint.
+		require.Equal(t, "/v1/responses", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(responsesSuccessResponse()))
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildCrossFormatFallbackHandler(t, primary.URL, secondary.URL, "openai_responses")
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify response is in Anthropic format (translated from Responses).
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "assistant", resp["role"])
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), logs[0].FallbackAttempts)
+}
+
+// TestFallback_AnthropicPrimary_OpenAICC_BothFail verifies both Anthropic and OpenAI CC
+// entries exhausted returns 502 (the OpenAI dispatch handles end-to-end without further fallback).
+func TestFallback_AnthropicPrimary_OpenAICC_BothFail(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer secondary.Close()
+
+	handler, st, logger := buildCrossFormatFallbackHandler(t, primary.URL, secondary.URL, "openai")
+
+	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// After primary (Anthropic, 500) triggers fallback, secondary (OpenAI CC) dispatches
+	// end-to-end — a 502 from it is forwarded as-is via translation.
+	require.True(t, rec.Code >= 400, "should return error status when both fail")
+
+	logger.Close()
+}
+
 // buildAnthropicSSEStream constructs a valid Anthropic SSE stream payload.
 func buildAnthropicSSEStream(msgID string, inputTokens, outputTokens int64, text string) string {
 	var b strings.Builder
@@ -743,4 +948,300 @@ func buildAnthropicSSEStream(msgID string, inputTokens, outputTokens int64, text
 	b.WriteString(`data: {"type":"message_stop"}` + "\n\n")
 
 	return b.String()
+}
+
+// buildAnthropicThinkingSSEStream constructs an Anthropic SSE stream with a thinking block
+// (index 0) followed by a text block (index 1), as returned by models with extended thinking.
+func buildAnthropicThinkingSSEStream(msgID string, inputTokens, outputTokens int64, thinkingText, text string) string {
+	var b strings.Builder
+
+	msgStart := fmt.Sprintf(`{"type":"message_start","message":{"id":"%s","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"usage":{"input_tokens":%d,"output_tokens":0}}}`, msgID, inputTokens)
+	b.WriteString("event: message_start\n")
+	b.WriteString("data: " + msgStart + "\n\n")
+
+	// thinking block
+	b.WriteString("event: content_block_start\n")
+	b.WriteString(`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}` + "\n\n")
+	b.WriteString("event: content_block_delta\n")
+	b.WriteString(fmt.Sprintf(`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"%s"}}`, thinkingText) + "\n\n")
+	b.WriteString("event: content_block_delta\n")
+	b.WriteString(`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"abc123"}}` + "\n\n")
+	b.WriteString("event: content_block_stop\n")
+	b.WriteString(`data: {"type":"content_block_stop","index":0}` + "\n\n")
+
+	// text block
+	b.WriteString("event: content_block_start\n")
+	b.WriteString(`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}` + "\n\n")
+	b.WriteString("event: content_block_delta\n")
+	b.WriteString(fmt.Sprintf(`data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"%s"}}`, text) + "\n\n")
+	b.WriteString("event: content_block_stop\n")
+	b.WriteString(`data: {"type":"content_block_stop","index":1}` + "\n\n")
+
+	msgDelta := fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":%d}}`, outputTokens)
+	b.WriteString("event: message_delta\n")
+	b.WriteString("data: " + msgDelta + "\n\n")
+
+	b.WriteString("event: message_stop\n")
+	b.WriteString(`data: {"type":"message_stop"}` + "\n\n")
+
+	return b.String()
+}
+
+// buildResponsesSSEStream constructs a minimal Responses API SSE stream.
+func buildResponsesSSEStream(respID, model, text string) string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf(`data: {"type":"response.created","response":{"id":"%s","object":"response","model":"%s","status":"in_progress","output":[]}}`, respID, model) + "\n\n")
+	b.WriteString(`data: {"type":"output_item.added","output_index":0,"item":{"id":"item_1","type":"message","role":"assistant","content":[]}}` + "\n\n")
+	b.WriteString(`data: {"type":"content_part.added","item_id":"item_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}` + "\n\n")
+	b.WriteString(fmt.Sprintf(`data: {"type":"output_text.delta","item_id":"item_1","output_index":0,"content_index":0,"delta":"%s"}`, text) + "\n\n")
+	b.WriteString(fmt.Sprintf(`data: {"type":"content_part.done","item_id":"item_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":"%s"}}`, text) + "\n\n")
+	b.WriteString(fmt.Sprintf(`data: {"type":"output_item.done","output_index":0,"item":{"id":"item_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"%s"}]}}`, text) + "\n\n")
+	b.WriteString(fmt.Sprintf(`data: {"type":"response.completed","response":{"id":"%s","object":"response","model":"%s","status":"completed","output":[{"id":"item_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"%s"}]}],"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}`, respID, model, text) + "\n\n")
+	b.WriteString("data: [DONE]\n\n")
+
+	return b.String()
+}
+
+// --- Thinking header forwarding tests ---
+
+// TestAnthropicProxy_Streaming_ForwardsAnthropicBetaHeader verifies that the
+// anthropic-beta response header echoed by the upstream is forwarded to the client.
+// Claude Code validates this header before rendering thinking blocks.
+func TestAnthropicProxy_Streaming_ForwardsAnthropicBetaHeader(t *testing.T) {
+	ssePayload := buildAnthropicSSEStream("msg_think1", 100, 50, "Hello with thinking!")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(ssePayload))
+	}))
+	defer upstream.Close()
+
+	h := newTestHarness(t, upstream.URL)
+
+	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Think"}],"max_tokens":100,"stream":true}`
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "interleaved-thinking-2025-05-14", rec.Header().Get("Anthropic-Beta"),
+		"anthropic-beta must be forwarded to the client for thinking block rendering")
+}
+
+// TestAnthropicProxy_Streaming_ForwardsMultipleAnthropicHeaders verifies that all
+// anthropic-* and x-request-id response headers from the upstream reach the client.
+func TestAnthropicProxy_Streaming_ForwardsMultipleAnthropicHeaders(t *testing.T) {
+	ssePayload := buildAnthropicSSEStream("msg_think2", 100, 50, "Multi-header test")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
+		w.Header().Set("Anthropic-Ratelimit-Requests-Remaining", "999")
+		w.Header().Set("X-Request-Id", "req-abc123")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(ssePayload))
+	}))
+	defer upstream.Close()
+
+	h := newTestHarness(t, upstream.URL)
+
+	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Headers"}],"max_tokens":100,"stream":true}`
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "interleaved-thinking-2025-05-14", rec.Header().Get("Anthropic-Beta"))
+	require.Equal(t, "999", rec.Header().Get("Anthropic-Ratelimit-Requests-Remaining"))
+	require.Equal(t, "req-abc123", rec.Header().Get("X-Request-Id"))
+}
+
+// TestAnthropicProxy_Streaming_NonAnthropicHeadersNotForwarded verifies that arbitrary
+// upstream headers are not forwarded — only anthropic-* and x-request-id.
+func TestAnthropicProxy_Streaming_NonAnthropicHeadersNotForwarded(t *testing.T) {
+	ssePayload := buildAnthropicSSEStream("msg_think3", 100, 50, "Header filter test")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
+		w.Header().Set("X-Custom-Upstream-Header", "should-not-appear")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(ssePayload))
+	}))
+	defer upstream.Close()
+
+	h := newTestHarness(t, upstream.URL)
+
+	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Filter test"}],"max_tokens":100,"stream":true}`
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "interleaved-thinking-2025-05-14", rec.Header().Get("Anthropic-Beta"))
+	require.Empty(t, rec.Header().Get("X-Custom-Upstream-Header"), "arbitrary upstream headers must not be forwarded")
+}
+
+// TestAnthropicProxy_Streaming_ThinkingEventsPassThrough verifies that thinking
+// content block events in Anthropic SSE streams are relayed verbatim to the client.
+func TestAnthropicProxy_Streaming_ThinkingEventsPassThrough(t *testing.T) {
+	ssePayload := buildAnthropicThinkingSSEStream("msg_think4", 200, 100, "My reasoning", "My answer")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(ssePayload))
+	}))
+	defer upstream.Close()
+
+	h := newTestHarness(t, upstream.URL)
+
+	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Think deeply"}],"max_tokens":500,"stream":true,"thinking":{"type":"enabled","budget_tokens":1024}}`
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "interleaved-thinking-2025-05-14", rec.Header().Get("Anthropic-Beta"))
+
+	body := rec.Body.String()
+	require.Contains(t, body, "thinking", "thinking content block type must appear in stream")
+	require.Contains(t, body, "My reasoning", "thinking text must pass through verbatim")
+	require.Contains(t, body, "My answer", "text content must also pass through")
+}
+
+// TestResponsesProvider_Streaming_InjectsAnthropicBetaHeader verifies that when the
+// upstream is a Responses API provider, the proxy injects Anthropic-Beta even though
+// the upstream never sends that header.
+func TestResponsesProvider_Streaming_InjectsAnthropicBetaHeader(t *testing.T) {
+	ssePayload := buildResponsesSSEStream("resp_test", "gpt-4o", "ok")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		// Deliberately do NOT set Anthropic-Beta — proxy must inject it.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(ssePayload))
+	}))
+	defer upstream.Close()
+
+	st, _ := setupFallbackStore(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+  - name: chatgpt
+    type: openai_responses
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1
+model_list:
+  - model_name: chatgpt-model
+    provider: chatgpt
+    upstream_model: gpt-4o
+`, upstream.URL)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	providers := map[string]provider.Provider{
+		"chatgpt": openaiprov.NewClient("chatgpt", upstream.URL, "proxy_key", "key1", openaiprov.APITypeResponses),
+	}
+
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	defer logger.Close()
+	handler := proxy.NewHandler(cfg, providers, calc, logger)
+
+	reqBody := `{"model":"chatgpt-model","messages":[{"role":"user","content":"hi"}],"max_tokens":10,"stream":true}`
+	req := buildFallbackRequest(t, st, "", reqBody)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "interleaved-thinking-2025-05-14", rec.Header().Get("Anthropic-Beta"),
+		"proxy must inject Anthropic-Beta for the Responses API path even without upstream sending it")
+}
+
+func TestResponsesProvider_NonStreaming_LogsCacheReadTokens(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":         "resp_cache",
+			"object":     "response",
+			"created_at": 1741000000,
+			"model":      "gpt-4o",
+			"status":     "completed",
+			"output": []map[string]interface{}{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]interface{}{
+						{"type": "output_text", "text": "cached"},
+					},
+				},
+			},
+			"usage": map[string]interface{}{
+				"input_tokens":  50,
+				"output_tokens": 10,
+				"total_tokens":  60,
+				"input_tokens_details": map[string]interface{}{
+					"cached_tokens": 30,
+				},
+			},
+		}))
+	}))
+	defer upstream.Close()
+
+	st, _ := setupFallbackStore(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
+master_key: "test"
+providers:
+  - name: chatgpt
+    type: openai_responses
+    base_url: %q
+    auth_mode: proxy_key
+    api_key: key1
+model_list:
+  - model_name: chatgpt-model
+    provider: chatgpt
+    upstream_model: gpt-4o
+`, upstream.URL)), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	require.NoError(t, err)
+
+	providers := map[string]provider.Provider{
+		"chatgpt": openaiprov.NewClient("chatgpt", upstream.URL, "proxy_key", "key1", openaiprov.APITypeResponses),
+	}
+
+	calc := pricing.NewCalculator(map[string]pricing.Entry{})
+	logger := proxy.NewAsyncLogger(st, 100)
+	handler := proxy.NewHandler(cfg, providers, calc, logger)
+
+	reqBody := `{"model":"chatgpt-model","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`
+	req := buildFallbackRequest(t, st, "", reqBody)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	logger.Close()
+	logs, total, err := st.ListRequestLogs(context.Background(), store.ListLogsParams{Page: 1, PerPage: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(30), logs[0].CacheReadInputTokens)
 }

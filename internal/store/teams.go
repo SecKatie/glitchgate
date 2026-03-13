@@ -20,7 +20,11 @@ func (s *SQLiteStore) CreateTeam(ctx context.Context, id, name, description stri
 
 // ListTeams returns all teams ordered by name.
 func (s *SQLiteStore) ListTeams(ctx context.Context) ([]Team, error) {
-	const q = `SELECT id, name, COALESCE(description,''), created_at, budget_limit_usd, budget_period FROM teams ORDER BY name ASC`
+	const q = `SELECT
+		t.id, t.name, COALESCE(t.description,''), t.created_at, tb.limit_usd, tb.period
+	FROM teams t
+	LEFT JOIN team_budgets tb ON tb.team_id = t.id
+	ORDER BY t.name ASC`
 
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -47,7 +51,11 @@ func (s *SQLiteStore) ListTeams(ctx context.Context) ([]Team, error) {
 
 // GetTeamByID returns the team with the given ID.
 func (s *SQLiteStore) GetTeamByID(ctx context.Context, id string) (*Team, error) {
-	const q = `SELECT id, name, COALESCE(description,''), created_at, budget_limit_usd, budget_period FROM teams WHERE id = ?`
+	const q = `SELECT
+		t.id, t.name, COALESCE(t.description,''), t.created_at, tb.limit_usd, tb.period
+	FROM teams t
+	LEFT JOIN team_budgets tb ON tb.team_id = t.id
+	WHERE t.id = ?`
 	row := s.db.QueryRowContext(ctx, q, id)
 
 	var t Team
@@ -56,12 +64,7 @@ func (s *SQLiteStore) GetTeamByID(ctx context.Context, id string) (*Team, error)
 	if err := row.Scan(&t.ID, &t.Name, &t.Description, &t.CreatedAt, &budgetUSD, &budgetPeriod); err != nil {
 		return nil, fmt.Errorf("get team by id: %w", err)
 	}
-	if budgetUSD.Valid {
-		t.BudgetLimitUSD = &budgetUSD.Float64
-	}
-	if budgetPeriod.Valid {
-		t.BudgetPeriod = &budgetPeriod.String
-	}
+	t.Budget = scanBudgetPolicy(budgetUSD, budgetPeriod)
 	return &t, nil
 }
 
@@ -73,13 +76,30 @@ func (s *SQLiteStore) scanTeam(rows *sql.Rows) (*Team, error) {
 	if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.CreatedAt, &budgetUSD, &budgetPeriod); err != nil {
 		return nil, fmt.Errorf("scan team: %w", err)
 	}
-	if budgetUSD.Valid {
-		t.BudgetLimitUSD = &budgetUSD.Float64
-	}
-	if budgetPeriod.Valid {
-		t.BudgetPeriod = &budgetPeriod.String
-	}
+	t.Budget = scanBudgetPolicy(budgetUSD, budgetPeriod)
 	return &t, nil
+}
+
+// DeleteTeam removes a team and all its memberships in a single transaction.
+func (s *SQLiteStore) DeleteTeam(ctx context.Context, teamID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete team: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM team_memberships WHERE team_id = ?`, teamID); err != nil {
+		return fmt.Errorf("delete team memberships: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM teams WHERE id = ?`, teamID)
+	if err != nil {
+		return fmt.Errorf("delete team: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("team not found: %s", teamID)
+	}
+	return tx.Commit()
 }
 
 // AssignUserToTeam assigns a user to a team, replacing any existing membership.
@@ -116,9 +136,10 @@ func (s *SQLiteStore) GetTeamMembership(ctx context.Context, userID string) (*Te
 // ListTeamMembers returns all active users assigned to the given team.
 func (s *SQLiteStore) ListTeamMembers(ctx context.Context, teamID string) ([]OIDCUser, error) {
 	const q = `SELECT u.id, u.subject, u.email, u.display_name, u.role, u.active,
-		u.last_seen_at, u.created_at, u.budget_limit_usd, u.budget_period
+		u.last_seen_at, u.created_at, ub.limit_usd, ub.period
 		FROM oidc_users u
 		JOIN team_memberships tm ON tm.user_id = u.id
+		LEFT JOIN user_budgets ub ON ub.user_id = u.id
 		WHERE tm.team_id = ?
 		ORDER BY u.email ASC`
 
@@ -144,12 +165,7 @@ func (s *SQLiteStore) ListTeamMembers(ctx context.Context, teamID string) ([]OID
 		if lastSeen.Valid {
 			u.LastSeenAt = &lastSeen.Time
 		}
-		if budgetUSD.Valid {
-			u.BudgetLimitUSD = &budgetUSD.Float64
-		}
-		if budgetPeriod.Valid {
-			u.BudgetPeriod = &budgetPeriod.String
-		}
+		u.Budget = scanBudgetPolicy(budgetUSD, budgetPeriod)
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {

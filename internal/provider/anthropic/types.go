@@ -14,6 +14,13 @@ type MessagesRequest struct {
 	Tools         []Tool            `json:"tools,omitempty"`
 	ToolChoice    interface{}       `json:"tool_choice,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
+	Thinking      *ThinkingConfig   `json:"thinking,omitempty"`
+}
+
+// ThinkingConfig controls the extended thinking feature.
+type ThinkingConfig struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 // Message represents a single message in the conversation.
@@ -24,11 +31,15 @@ type Message struct {
 
 // ContentBlock represents a typed content element within a message.
 type ContentBlock struct {
-	Type  string      `json:"type"`
-	Text  string      `json:"text,omitempty"`
-	ID    string      `json:"id,omitempty"`
-	Name  string      `json:"name,omitempty"`
-	Input interface{} `json:"input,omitempty"`
+	Type     string      `json:"type"`
+	Text     string      `json:"text,omitempty"`
+	Thinking string      `json:"thinking,omitempty"`
+	ID       string      `json:"id,omitempty"`
+	Name     string      `json:"name,omitempty"`
+	Input    interface{} `json:"input,omitempty"`
+	// tool_result fields
+	ToolUseID string      `json:"tool_use_id,omitempty"`
+	Content   interface{} `json:"content,omitempty"` // string or []ContentBlock
 }
 
 // Tool describes a tool available to the model.
@@ -88,6 +99,7 @@ type ContentBlockDeltaEvent struct {
 type DeltaBlock struct {
 	Type        string `json:"type"`
 	Text        string `json:"text,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 }
 
