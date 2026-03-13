@@ -105,7 +105,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	webHandlers := web.NewHandlers(runtime.Store, sessions, cfg.MasterKey, runtime.Calculator, tmpl, runtime.OIDCProvider, cfg.ModelList, cfg.Providers)
 	authHandlers := web.NewAuthHandlers(runtime.Store, sessions, runtime.OIDCProvider)
-	costHandlers := web.NewCostHandlers(runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames)
+	costHandlers := web.NewCostHandlers(runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
 	userHandlers := web.NewUserHandlers(runtime.Store, sessions, tmpl)
 	teamHandlers := web.NewTeamHandlers(runtime.Store, sessions, tmpl)
 

@@ -18,9 +18,10 @@ const defaultOpenAIBaseURL = "https://api.openai.com"
 // ProviderRegistry compiles configured provider clients, pricing tables, and
 // legacy provider-name aliases into one runtime dependency.
 type ProviderRegistry struct {
-	providers     map[string]provider.Provider
-	calculator    *pricing.Calculator
-	providerNames map[string]string
+	providers                    map[string]provider.Provider
+	calculator                   *pricing.Calculator
+	providerNames                map[string]string
+	providerMonthlySubscriptions map[string]float64
 }
 
 // NewProviderRegistry compiles provider clients, default pricing, metadata
@@ -33,6 +34,7 @@ func NewProviderRegistry(cfg *config.Config, requestTimeout time.Duration) (*Pro
 	providers := make(map[string]provider.Provider, len(cfg.Providers))
 	pricingMap := make(map[string]pricing.Entry)
 	providerNames := make(map[string]string, len(cfg.Providers)*2)
+	providerMonthlySubscriptions := make(map[string]float64, len(cfg.Providers))
 	legacyProviderNames := make(map[string]string, len(cfg.Providers))
 
 	for _, pc := range cfg.Providers {
@@ -43,6 +45,9 @@ func NewProviderRegistry(cfg *config.Config, requestTimeout time.Duration) (*Pro
 		providers[pc.Name] = client
 
 		providerNames[pc.Name] = pc.Name
+		if pc.MonthlySubscriptionCost != nil {
+			providerMonthlySubscriptions[pc.Name] = *pc.MonthlySubscriptionCost
+		}
 		addLegacyProviderAlias(providerNames, legacyProviderNames, pc)
 
 		for model, entry := range defaultPricingForProvider(pc) {
@@ -69,9 +74,10 @@ func NewProviderRegistry(cfg *config.Config, requestTimeout time.Duration) (*Pro
 	}
 
 	return &ProviderRegistry{
-		providers:     providers,
-		calculator:    pricing.NewCalculator(pricingMap),
-		providerNames: providerNames,
+		providers:                    providers,
+		calculator:                   pricing.NewCalculator(pricingMap),
+		providerNames:                providerNames,
+		providerMonthlySubscriptions: providerMonthlySubscriptions,
 	}, nil
 }
 
@@ -98,6 +104,15 @@ func (r *ProviderRegistry) ProviderNames() map[string]string {
 		return nil
 	}
 	return cloneStringMap(r.providerNames)
+}
+
+// ProviderMonthlySubscriptions returns configured monthly subscription costs
+// keyed by provider display name.
+func (r *ProviderRegistry) ProviderMonthlySubscriptions() map[string]float64 {
+	if r == nil {
+		return nil
+	}
+	return cloneFloatMap(r.providerMonthlySubscriptions)
 }
 
 func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (provider.Provider, error) {
@@ -194,6 +209,17 @@ func cloneProviderMap(in map[string]provider.Provider) map[string]provider.Provi
 		return nil
 	}
 	out := make(map[string]provider.Provider, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneFloatMap(in map[string]float64) map[string]float64 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(in))
 	for key, value := range in {
 		out[key] = value
 	}

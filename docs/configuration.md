@@ -82,6 +82,7 @@ providers:
     type: "openai"
     auth_mode: "proxy_key"
     api_key: "${OPENAI_API_KEY}"
+    monthly_subscription_cost: 20.00
 
   - name: "openai-resp"
     type: "openai_responses"
@@ -125,6 +126,7 @@ model_list:
 | `default_version` | No       | Sets `anthropic-version` header when client omits it. `anthropic` only |
 | `token_dir`       | No       | Token storage for `github_copilot`. Default: `~/.config/glitchgate/copilot/` |
 | `stream`          | No       | `false` forces non-streaming upstream even when client requests streaming (proxy synthesizes SSE). Omit to follow client preference |
+| `monthly_subscription_cost` | No | Optional monthly provider subscription cost in USD, used by the cost dashboard to compare flat subscription spend against token-based usage |
 
 ### Auth Modes
 

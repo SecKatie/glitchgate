@@ -179,6 +179,27 @@ providers:
 	require.Equal(t, "anthropic", cfg.Providers[1].Type, "explicit type should be preserved")
 }
 
+func TestProviderMonthlySubscriptionCostLoadsFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+master_key: "test"
+providers:
+  - name: "chatgpt-pro"
+    type: "openai"
+    auth_mode: "proxy_key"
+    api_key: "sk-test"
+    monthly_subscription_cost: 20
+`), 0o600))
+
+	cfg, err := Load(cfgPath)
+	require.NoError(t, err)
+	require.Len(t, cfg.Providers, 1)
+	require.NotNil(t, cfg.Providers[0].MonthlySubscriptionCost)
+	require.Equal(t, 20.0, *cfg.Providers[0].MonthlySubscriptionCost)
+}
+
 func TestProviderNamesMustBeUnique(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

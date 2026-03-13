@@ -19,13 +19,14 @@ import (
 // Runtime holds the composed application dependencies needed by the serve
 // command after configuration has been loaded.
 type Runtime struct {
-	Store         store.Store
-	Providers     map[string]provider.Provider
-	Calculator    *pricing.Calculator
-	ProviderNames map[string]string
-	AsyncLogger   *proxy.AsyncLogger
-	Timezone      *time.Location
-	OIDCProvider  *oidcpkg.Provider
+	Store                        store.Store
+	Providers                    map[string]provider.Provider
+	Calculator                   *pricing.Calculator
+	ProviderNames                map[string]string
+	ProviderMonthlySubscriptions map[string]float64
+	AsyncLogger                  *proxy.AsyncLogger
+	Timezone                     *time.Location
+	OIDCProvider                 *oidcpkg.Provider
 }
 
 // Bootstrap opens the store, runs startup migrations, compiles provider
@@ -81,13 +82,14 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (*Runtime, error) {
 
 	cleanupOnErr = false
 	return &Runtime{
-		Store:         st,
-		Providers:     registry.Providers(),
-		Calculator:    registry.Calculator(),
-		ProviderNames: registry.ProviderNames(),
-		AsyncLogger:   asyncLogger,
-		Timezone:      tz,
-		OIDCProvider:  oidcProvider,
+		Store:                        st,
+		Providers:                    registry.Providers(),
+		Calculator:                   registry.Calculator(),
+		ProviderNames:                registry.ProviderNames(),
+		ProviderMonthlySubscriptions: registry.ProviderMonthlySubscriptions(),
+		AsyncLogger:                  asyncLogger,
+		Timezone:                     tz,
+		OIDCProvider:                 oidcProvider,
 	}, nil
 }
 

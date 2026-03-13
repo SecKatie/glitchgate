@@ -189,6 +189,54 @@ func TestApplyProviderFilterMatchesDisplayNames(t *testing.T) {
 	require.Equal(t, []string{"chatgpt-pro", "openai_responses:chatgpt.com"}, params.ProviderGroups)
 }
 
+func TestBuildProviderSpendComparisons(t *testing.T) {
+	breakdown := []store.CostBreakdownEntry{
+		{Group: "chatgpt-pro", InputTokens: 100, OutputTokens: 20, Requests: 2},
+		{Group: "claude-max", Requests: 1},
+	}
+	breakdownCosts := map[string]float64{
+		"chatgpt-pro": 18.50,
+		"claude-max":  42.00,
+	}
+	subscriptions := map[string]float64{
+		"chatgpt-pro": 20.00,
+	}
+
+	comparisons, summary := buildProviderSpendComparisons(breakdown, breakdownCosts, subscriptions)
+
+	require.Len(t, comparisons, 1)
+	require.NotNil(t, comparisons["chatgpt-pro"])
+	require.Equal(t, 20.0, comparisons["chatgpt-pro"].MonthlySubscriptionCost)
+	require.InDelta(t, -1.5, comparisons["chatgpt-pro"].TokenMinusSubscriptionUSD, 1e-9)
+	require.NotNil(t, comparisons["chatgpt-pro"].TokenVsSubscriptionPct)
+	require.InDelta(t, -7.5, *comparisons["chatgpt-pro"].TokenVsSubscriptionPct, 1e-9)
+	require.Equal(t, int64(120), comparisons["chatgpt-pro"].TotalTokens)
+	require.NotNil(t, comparisons["chatgpt-pro"].EffectiveTokenCostPerMTok)
+	require.InDelta(t, 166666.6666666667, *comparisons["chatgpt-pro"].EffectiveTokenCostPerMTok, 1e-6)
+	require.NotNil(t, comparisons["chatgpt-pro"].AverageRealTokenCostPerMTok)
+	require.InDelta(t, 154166.6666666667, *comparisons["chatgpt-pro"].AverageRealTokenCostPerMTok, 1e-6)
+	require.NotNil(t, comparisons["chatgpt-pro"].EffectiveMinusRealCostPerMTok)
+	require.InDelta(t, 12500.0, *comparisons["chatgpt-pro"].EffectiveMinusRealCostPerMTok, 1e-6)
+	require.NotNil(t, comparisons["chatgpt-pro"].EffectiveVsRealPct)
+	require.InDelta(t, 8.108108108108109, *comparisons["chatgpt-pro"].EffectiveVsRealPct, 1e-9)
+	require.True(t, summary.HasAnySubscription)
+	require.Equal(t, 1, summary.ComparedProviders)
+	require.InDelta(t, 18.5, summary.TotalTokenCostUSD, 1e-9)
+	require.InDelta(t, 20.0, summary.TotalSubscriptionCost, 1e-9)
+	require.InDelta(t, -1.5, summary.TokenMinusSubscription, 1e-9)
+	require.NotNil(t, summary.TokenVsSubscriptionPct)
+	require.InDelta(t, -7.5, *summary.TokenVsSubscriptionPct, 1e-9)
+	require.Equal(t, int64(120), summary.TotalTokens)
+	require.NotNil(t, summary.EffectiveTokenCostPerMTok)
+	require.InDelta(t, 166666.6666666667, *summary.EffectiveTokenCostPerMTok, 1e-6)
+	require.NotNil(t, summary.AverageRealTokenCostPerMTok)
+	require.InDelta(t, 154166.6666666667, *summary.AverageRealTokenCostPerMTok, 1e-6)
+	require.NotNil(t, summary.EffectiveMinusRealCostPerMTok)
+	require.InDelta(t, 12500.0, *summary.EffectiveMinusRealCostPerMTok, 1e-6)
+	require.NotNil(t, summary.EffectiveVsRealPct)
+	require.InDelta(t, 8.108108108108109, *summary.EffectiveVsRealPct, 1e-9)
+}
+
 func TestCostSummaryHandlerIncludesComputedDollars(t *testing.T) {
 	calc := pricing.NewCalculator(map[string]pricing.Entry{
 		"anthropic/claude-sonnet-4-20250514": {
@@ -322,6 +370,69 @@ func TestCostSummaryHandlerAggregatesLegacyProviderDisplayCosts(t *testing.T) {
 	require.Equal(t, "chatgpt-pro", resp.Breakdown[0].Group)
 	require.InDelta(t, 0.00165, resp.Breakdown[0].CostUSD, 1e-9)
 	require.InDelta(t, 0.00165, resp.TotalCostUSD, 1e-9)
+}
+
+func TestCostSummaryHandlerIncludesProviderSubscriptionComparisons(t *testing.T) {
+	calc := pricing.NewCalculator(map[string]pricing.Entry{
+		"chatgpt-pro/gpt-5.4": {
+			InputPerMillion:  2.5,
+			OutputPerMillion: 15,
+		},
+	})
+	h := &CostHandlers{
+		store: &stubCostAPIStore{
+			summary: &store.CostSummary{TotalRequests: 1},
+			breakdown: []store.CostBreakdownEntry{
+				{Group: "chatgpt-pro", InputTokens: 100, OutputTokens: 20, Requests: 1},
+			},
+			pricingGroups: []store.CostPricingGroup{
+				{ProviderName: "chatgpt-pro", ModelUpstream: "gpt-5.4", InputTokens: 100, OutputTokens: 20},
+			},
+		},
+		tz:   time.UTC,
+		calc: calc,
+		providerMonthlySubscriptions: map[string]float64{
+			"chatgpt-pro": 20.0,
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/ui/api/costs?from=2026-03-01&to=2026-03-31&group_by=provider", nil)
+	rec := httptest.NewRecorder()
+
+	h.CostSummaryHandler(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	var resp costSummaryResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.NotNil(t, resp.TotalMonthlySubscriptionCostUSD)
+	require.Equal(t, 20.0, *resp.TotalMonthlySubscriptionCostUSD)
+	require.NotNil(t, resp.TotalTokenMinusSubscriptionUSD)
+	require.InDelta(t, -19.99945, *resp.TotalTokenMinusSubscriptionUSD, 1e-9)
+	require.NotNil(t, resp.TotalTokenVsSubscriptionPct)
+	require.InDelta(t, -99.99725, *resp.TotalTokenVsSubscriptionPct, 1e-9)
+	require.NotNil(t, resp.EffectiveTokenCostPerMTokUSD)
+	require.InDelta(t, 166666.6666666667, *resp.EffectiveTokenCostPerMTokUSD, 1e-6)
+	require.NotNil(t, resp.AverageRealTokenCostPerMTokUSD)
+	require.InDelta(t, 4.583333333333333, *resp.AverageRealTokenCostPerMTokUSD, 1e-6)
+	require.NotNil(t, resp.EffectiveMinusRealCostPerMTokUSD)
+	require.InDelta(t, 166662.08333333334, *resp.EffectiveMinusRealCostPerMTokUSD, 1e-6)
+	require.NotNil(t, resp.EffectiveVsRealPct)
+	require.InDelta(t, 3636263.6363636362, *resp.EffectiveVsRealPct, 1e-3)
+	require.Len(t, resp.Breakdown, 1)
+	require.NotNil(t, resp.Breakdown[0].MonthlySubscriptionCostUSD)
+	require.Equal(t, 20.0, *resp.Breakdown[0].MonthlySubscriptionCostUSD)
+	require.NotNil(t, resp.Breakdown[0].TokenMinusSubscriptionUSD)
+	require.InDelta(t, -19.99945, *resp.Breakdown[0].TokenMinusSubscriptionUSD, 1e-9)
+	require.NotNil(t, resp.Breakdown[0].TokenVsSubscriptionPct)
+	require.InDelta(t, -99.99725, *resp.Breakdown[0].TokenVsSubscriptionPct, 1e-9)
+	require.NotNil(t, resp.Breakdown[0].EffectiveTokenCostPerMTok)
+	require.InDelta(t, 166666.6666666667, *resp.Breakdown[0].EffectiveTokenCostPerMTok, 1e-6)
+	require.NotNil(t, resp.Breakdown[0].AverageRealTokenCostPerMTok)
+	require.InDelta(t, 4.583333333333333, *resp.Breakdown[0].AverageRealTokenCostPerMTok, 1e-6)
+	require.NotNil(t, resp.Breakdown[0].EffectiveMinusRealCostPerMTok)
+	require.InDelta(t, 166662.08333333334, *resp.Breakdown[0].EffectiveMinusRealCostPerMTok, 1e-6)
+	require.NotNil(t, resp.Breakdown[0].EffectiveVsRealPct)
+	require.InDelta(t, 3636263.6363636362, *resp.Breakdown[0].EffectiveVsRealPct, 1e-3)
 }
 
 func TestCostSummaryHandlerIncludesKeyBreakdownCosts(t *testing.T) {
