@@ -997,8 +997,8 @@ func (s *SQLiteStore) GetCostPricingGroups(ctx context.Context, params CostParam
 	keyPrefixSelect := ""
 	keyPrefixGroupBy := ""
 	if groupByKey {
-		keyPrefixSelect = "\n\t\tCOALESCE(pk.key_prefix, ''),"
-		keyPrefixGroupBy = ", pk.key_prefix"
+		keyPrefixSelect = "\n\t\tCOALESCE(pk.key_prefix, ''),\n\t\tCOALESCE(pk.key_prefix || ' (' || pk.label || ')', ''),"
+		keyPrefixGroupBy = ", pk.key_prefix, pk.label"
 	}
 
 	query := `SELECT
@@ -1064,6 +1064,7 @@ func (s *SQLiteStore) GetCostPricingGroups(ctx context.Context, params CostParam
 				&group.ProviderName,
 				&group.ModelUpstream,
 				&group.ProxyKeyPrefix,
+				&group.ProxyKeyGroup,
 				&group.InputTokens,
 				&group.OutputTokens,
 				&group.CacheCreationTokens,

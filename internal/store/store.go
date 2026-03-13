@@ -240,6 +240,7 @@ type CostPricingGroup struct {
 	ProviderName        string
 	ModelUpstream       string
 	ProxyKeyPrefix      string // populated only when GroupBy == "key"
+	ProxyKeyGroup       string // rendered key label, e.g. "llmp_sk_xxxx (my key)", populated only when GroupBy == "key"
 	InputTokens         int64
 	OutputTokens        int64
 	CacheCreationTokens int64

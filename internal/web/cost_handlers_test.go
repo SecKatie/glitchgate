@@ -127,21 +127,21 @@ func TestAggregateProviderBreakdown(t *testing.T) {
 	}
 
 	result := aggregateProviderBreakdown(entries, map[string]string{
-		"claude-max":  "Claude Max",
-		"chatgpt-pro": "ChatGPT Pro",
-		"copilot":     "Copilot",
+		"claude-max":  "claude-max",
+		"chatgpt-pro": "chatgpt-pro",
+		"copilot":     "copilot",
 	})
 
 	require.Len(t, result, 3)
-	require.Equal(t, "Copilot", result[0].Group)
+	require.Equal(t, "copilot", result[0].Group)
 	require.Equal(t, int64(3), result[0].Requests)
 
-	require.Equal(t, "Claude Max", result[1].Group)
+	require.Equal(t, "claude-max", result[1].Group)
 	require.Equal(t, int64(100), result[1].InputTokens)
 	require.Equal(t, int64(50), result[1].OutputTokens)
 	require.Equal(t, int64(2), result[1].Requests)
 
-	require.Equal(t, "ChatGPT Pro", result[2].Group)
+	require.Equal(t, "chatgpt-pro", result[2].Group)
 	require.Equal(t, int64(120), result[2].InputTokens)
 	require.Equal(t, int64(70), result[2].OutputTokens)
 	require.Equal(t, int64(1), result[2].Requests)
@@ -173,8 +173,9 @@ func TestAggregateProviderBreakdownFallsBackToStoredProviderName(t *testing.T) {
 func TestApplyProviderFilterMatchesDisplayNames(t *testing.T) {
 	h := &CostHandlers{
 		providerNames: map[string]string{
-			"chatgpt-pro": "ChatGPT Pro",
-			"claude-max":  "Claude Max",
+			"chatgpt-pro":                  "chatgpt-pro",
+			"openai_responses:chatgpt.com": "chatgpt-pro",
+			"claude-max":                   "claude-max",
 		},
 	}
 
@@ -185,7 +186,7 @@ func TestApplyProviderFilterMatchesDisplayNames(t *testing.T) {
 
 	h.applyProviderFilter(&params)
 
-	require.Equal(t, []string{"chatgpt-pro"}, params.ProviderGroups)
+	require.Equal(t, []string{"chatgpt-pro", "openai_responses:chatgpt.com"}, params.ProviderGroups)
 }
 
 func TestCostSummaryHandlerIncludesComputedDollars(t *testing.T) {
@@ -263,7 +264,8 @@ func TestCostSummaryHandlerAggregatesProviderDisplayCosts(t *testing.T) {
 		tz:   time.UTC,
 		calc: calc,
 		providerNames: map[string]string{
-			"claude-max": "Claude Max",
+			"claude-max":                  "claude-max",
+			"anthropic:api.anthropic.com": "claude-max",
 		},
 	}
 
@@ -276,9 +278,101 @@ func TestCostSummaryHandlerAggregatesProviderDisplayCosts(t *testing.T) {
 	var resp costSummaryResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	require.Len(t, resp.Breakdown, 1)
-	require.Equal(t, "Claude Max", resp.Breakdown[0].Group)
+	require.Equal(t, "claude-max", resp.Breakdown[0].Group)
 	require.InDelta(t, 0.00210, resp.Breakdown[0].CostUSD, 1e-9)
 	require.InDelta(t, 0.00210, resp.TotalCostUSD, 1e-9)
+}
+
+func TestCostSummaryHandlerAggregatesLegacyProviderDisplayCosts(t *testing.T) {
+	calc := pricing.NewCalculator(map[string]pricing.Entry{
+		"chatgpt-pro/gpt-5.4": {
+			InputPerMillion:  2.5,
+			OutputPerMillion: 15,
+		},
+	})
+	h := &CostHandlers{
+		store: &stubCostAPIStore{
+			summary: &store.CostSummary{TotalRequests: 2},
+			breakdown: []store.CostBreakdownEntry{
+				{Group: "chatgpt-pro", InputTokens: 100, OutputTokens: 20, Requests: 1},
+				{Group: "openai_responses:chatgpt.com", InputTokens: 200, OutputTokens: 40, Requests: 1},
+			},
+			pricingGroups: []store.CostPricingGroup{
+				{ProviderName: "chatgpt-pro", ModelUpstream: "gpt-5.4", InputTokens: 100, OutputTokens: 20},
+				{ProviderName: "openai_responses:chatgpt.com", ModelUpstream: "gpt-5.4", InputTokens: 200, OutputTokens: 40},
+			},
+		},
+		tz:   time.UTC,
+		calc: calc,
+		providerNames: map[string]string{
+			"chatgpt-pro":                  "chatgpt-pro",
+			"openai_responses:chatgpt.com": "chatgpt-pro",
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/ui/api/costs?from=2026-03-01&to=2026-03-31&group_by=provider", nil)
+	rec := httptest.NewRecorder()
+
+	h.CostSummaryHandler(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	var resp costSummaryResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Breakdown, 1)
+	require.Equal(t, "chatgpt-pro", resp.Breakdown[0].Group)
+	require.InDelta(t, 0.00165, resp.Breakdown[0].CostUSD, 1e-9)
+	require.InDelta(t, 0.00165, resp.TotalCostUSD, 1e-9)
+}
+
+func TestCostSummaryHandlerIncludesKeyBreakdownCosts(t *testing.T) {
+	calc := pricing.NewCalculator(map[string]pricing.Entry{
+		"claude-max/claude-sonnet-4-6": {
+			InputPerMillion:  3,
+			OutputPerMillion: 15,
+		},
+	})
+	h := &CostHandlers{
+		store: &stubCostAPIStore{
+			summary: &store.CostSummary{
+				TotalInputTokens:  100,
+				TotalOutputTokens: 50,
+				TotalRequests:     2,
+			},
+			breakdown: []store.CostBreakdownEntry{
+				{
+					Group:        "llmp_sk_aa11 (key-alpha)",
+					InputTokens:  100,
+					OutputTokens: 50,
+					Requests:     2,
+				},
+			},
+			pricingGroups: []store.CostPricingGroup{
+				{
+					ModelRequested: "cm/claude-sonnet-4-6",
+					ProviderName:   "claude-max",
+					ModelUpstream:  "claude-sonnet-4-6",
+					ProxyKeyPrefix: "llmp_sk_aa11",
+					ProxyKeyGroup:  "llmp_sk_aa11 (key-alpha)",
+					InputTokens:    100,
+					OutputTokens:   50,
+				},
+			},
+		},
+		tz:   time.UTC,
+		calc: calc,
+	}
+
+	req := httptest.NewRequest("GET", "/ui/api/costs?from=2026-03-01&to=2026-03-31&group_by=key", nil)
+	rec := httptest.NewRecorder()
+
+	h.CostSummaryHandler(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	var resp costSummaryResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Breakdown, 1)
+	require.Equal(t, "llmp_sk_aa11 (key-alpha)", resp.Breakdown[0].Group)
+	require.InDelta(t, 0.00105, resp.Breakdown[0].CostUSD, 1e-9)
 }
 
 func TestCostTimeseriesHandlerIncludesComputedDollars(t *testing.T) {

@@ -49,6 +49,21 @@ func lookupPricedUsage(calc *pricing.Calculator, providerName, modelUpstream str
 	return priceUsage(entry, usage), entry, true
 }
 
+func lookupPricedUsageWithAliases(calc *pricing.Calculator, providerName, modelUpstream string, usage tokenUsage, providerNames map[string]string) (pricedUsage, pricing.Entry, bool) {
+	priced, entry, ok := lookupPricedUsage(calc, providerName, modelUpstream, usage)
+	if ok {
+		return priced, entry, true
+	}
+	if providerNames == nil {
+		return pricedUsage{}, pricing.Entry{}, false
+	}
+	displayName, mapped := providerDisplayName(providerName, providerNames)
+	if !mapped || displayName == providerName {
+		return pricedUsage{}, pricing.Entry{}, false
+	}
+	return lookupPricedUsage(calc, displayName, modelUpstream, usage)
+}
+
 // CostBreakdown holds per-category token counts and costs for a single request.
 // Passed to log_detail.html as .Cost.
 type CostBreakdown struct {
@@ -168,12 +183,12 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 	}
 	costs := make(map[string]float64)
 	for _, group := range groups {
-		priced, _, ok := lookupPricedUsage(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+		priced, _, ok := lookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
 			InputTokens:      group.InputTokens,
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
 			OutputTokens:     group.OutputTokens,
-		})
+		}, providerNames)
 		if !ok {
 			continue
 		}
@@ -188,7 +203,10 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 				}
 			}
 		case "key":
-			key = group.ProxyKeyPrefix
+			key = group.ProxyKeyGroup
+			if key == "" {
+				key = group.ProxyKeyPrefix
+			}
 		default: // "model"
 			key = group.ModelRequested
 		}
@@ -207,6 +225,10 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 // grouping token totals by exact provider/model pair before applying pricing.
 // If any non-zero usage group lacks pricing, PricingKnown is false.
 func computeAggregateCostBreakdown(groups []store.CostPricingGroup, calc *pricing.Calculator) *AggregateCostBreakdown {
+	return computeAggregateCostBreakdownWithAliases(groups, calc, nil)
+}
+
+func computeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, calc *pricing.Calculator, providerNames map[string]string) *AggregateCostBreakdown {
 	cb := &AggregateCostBreakdown{}
 	if calc == nil {
 		return cb
@@ -214,12 +236,12 @@ func computeAggregateCostBreakdown(groups []store.CostPricingGroup, calc *pricin
 
 	hasUnknownUsage := false
 	for _, group := range groups {
-		priced, _, ok := lookupPricedUsage(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+		priced, _, ok := lookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
 			InputTokens:      group.InputTokens,
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
 			OutputTokens:     group.OutputTokens,
-		})
+		}, providerNames)
 		if !ok {
 			if group.InputTokens > 0 || group.OutputTokens > 0 || group.CacheCreationTokens > 0 || group.CacheReadTokens > 0 {
 				hasUnknownUsage = true
