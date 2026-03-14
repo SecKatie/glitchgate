@@ -115,3 +115,36 @@ func TestAsyncLoggerTruncatesBodiesBeforePersisting(t *testing.T) {
 	require.Contains(t, entry.RequestBody, "[TRUNCATED original_bytes=")
 	require.Contains(t, entry.ResponseBody, "[TRUNCATED original_bytes=")
 }
+
+func TestAsyncLoggerConcurrentLogAndClose(t *testing.T) {
+	st := &capturingStore{}
+	logger := NewAsyncLoggerWithOptions(st, AsyncLoggerOptions{
+		BufferSize:      10,
+		WriteTimeout:    time.Second,
+		EnqueueTimeout:  5 * time.Millisecond,
+		SummaryInterval: time.Hour,
+		BodyMaxBytes:    64,
+	})
+
+	// Hammer Log() from many goroutines while Close() is called concurrently.
+	// Before the fix, this would panic with "send on closed channel".
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				logger.Log(&store.RequestLogEntry{ID: "race-test"})
+			}
+		}()
+	}
+
+	// Let some entries queue up, then close while goroutines are still sending.
+	time.Sleep(2 * time.Millisecond)
+	logger.Close()
+	wg.Wait()
+
+	// No panic means the race is fixed. Verify stats are consistent.
+	stats := logger.Stats()
+	require.Equal(t, stats.Enqueued+stats.Dropped, uint64(1000))
+}

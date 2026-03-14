@@ -24,6 +24,8 @@ type UserAdminStore interface {
 
 // TeamAdminStore contains the team-management operations used by the admin UI.
 type TeamAdminStore interface {
+	ListTeams(ctx context.Context) ([]Team, error)
+	ListTeamMembers(ctx context.Context, teamID string) ([]OIDCUser, error)
 	ListTeamsWithMemberCounts(ctx context.Context) ([]TeamWithMemberCount, error)
 	ListOIDCUsers(ctx context.Context) ([]OIDCUser, error)
 	GetTeamByID(ctx context.Context, id string) (*Team, error)
@@ -87,6 +89,7 @@ type CostQueryStore interface {
 	GetCostBreakdown(ctx context.Context, params CostParams) ([]CostBreakdownEntry, error)
 	GetCostPricingGroups(ctx context.Context, params CostParams) ([]CostPricingGroup, error)
 	GetCostTimeseriesPricingGroups(ctx context.Context, params CostParams) ([]CostTimeseriesPricingGroup, error)
+	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
 }
 
 // ModelUsageStore contains per-model usage statistics queries.
@@ -94,6 +97,7 @@ type ModelUsageStore interface {
 	GetModelUsageSummary(ctx context.Context, modelName string) (*ModelUsageSummary, error)
 	GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error)
 	GetModelCostPricingGroups(ctx context.Context, modelName string) ([]CostPricingGroup, error)
+	GetModelLatencyTimeseries(ctx context.Context, modelName string) ([]ModelLatencyTimeseriesEntry, error)
 }
 
 // OIDCStateStore contains OIDC authentication state management (PKCE flow).
@@ -117,8 +121,8 @@ type MaintenanceStore interface {
 }
 
 // Store defines all data-access operations required by the proxy. It composes
-// narrow interfaces and retains a few methods not yet extracted. Prefer using
-// the narrower interfaces for new code.
+// narrow interfaces so that consumers can depend on the smallest surface they
+// need. Prefer accepting a narrow interface for new code.
 type Store interface {
 	UserAdminStore
 	TeamAdminStore
@@ -133,12 +137,6 @@ type Store interface {
 	OIDCStateStore
 	OIDCUserStore
 	MaintenanceStore
-
-	// Not yet extracted into narrow interfaces:
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
-	ListTeams(ctx context.Context) ([]Team, error)
-	ListTeamMembers(ctx context.Context, teamID string) ([]OIDCUser, error)
-	GetCostTimeseries(ctx context.Context, params CostParams) ([]CostTimeseriesEntry, error)
 
 	Migrate(ctx context.Context) error
 	Close() error
@@ -298,6 +296,7 @@ type CostPricingGroup struct {
 	OutputTokens        int64
 	CacheCreationTokens int64
 	CacheReadTokens     int64
+	ReasoningTokens     int64
 }
 
 // CostTimeseriesEntry holds cost data for a single time bucket.
@@ -317,6 +316,15 @@ type CostTimeseriesPricingGroup struct {
 	OutputTokens        int64
 	CacheCreationTokens int64
 	CacheReadTokens     int64
+	Requests            int64
+}
+
+// ModelLatencyTimeseriesEntry holds hourly latency-per-output-token data for a model.
+type ModelLatencyTimeseriesEntry struct {
+	Bucket              string  // "YYYY-MM-DD HH" (hour-precision UTC)
+	AvgMsPerOutputToken float64 // SUM(latency_ms) / SUM(output_tokens)
+	TotalLatencyMs      int64
+	TotalOutputTokens   int64
 	Requests            int64
 }
 

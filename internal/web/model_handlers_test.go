@@ -46,6 +46,10 @@ func (s *stubModelStore) ListDistinctModels(_ context.Context) ([]string, error)
 	return nil, nil
 }
 
+func (s *stubModelStore) GetModelLatencyTimeseries(_ context.Context, _ string) ([]store.ModelLatencyTimeseriesEntry, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

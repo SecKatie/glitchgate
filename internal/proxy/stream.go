@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,10 +37,30 @@ type StreamResult struct {
 	ReasoningTokens          int64
 }
 
+// closeOnCancel starts a goroutine that closes r when ctx is cancelled,
+// unblocking any in-progress reads (e.g. a bufio.Scanner). Returns a cleanup
+// function that must be deferred to prevent a goroutine leak when the stream
+// finishes normally before the context is cancelled.
+func closeOnCancel(ctx context.Context, r io.Closer) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = r.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
+}
+
 // RelaySSEStream reads SSE events from upstream and forwards them to the client,
 // flushing after each event. It captures the full stream and extracts token usage.
-func RelaySSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
+// When ctx is cancelled (e.g. client disconnect), the upstream reader is closed
+// to unblock the scanner and stop consuming provider resources.
+func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
+	stop := closeOnCancel(ctx, upstream)
+	defer stop()
 
 	rc := http.NewResponseController(w)
 
@@ -101,8 +122,10 @@ func RelaySSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*StreamResul
 // RelayOpenAISSEStream reads OpenAI-format SSE events from upstream and forwards
 // them to the client, flushing after each event. It captures the full stream and
 // extracts token usage from the final chunk's usage field.
-func RelayOpenAISSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
+func RelayOpenAISSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
+	stop := closeOnCancel(ctx, upstream)
+	defer stop()
 
 	rc := http.NewResponseController(w)
 
@@ -166,8 +189,10 @@ func RelayOpenAISSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*Strea
 // RelayResponsesSSEStream reads Responses API SSE events from upstream and forwards
 // them to the client, flushing after each event. It captures the full stream and
 // extracts token usage from the response.completed event.
-func RelayResponsesSSEStream(w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
+func RelayResponsesSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
+	stop := closeOnCancel(ctx, upstream)
+	defer stop()
 
 	rc := http.NewResponseController(w)
 

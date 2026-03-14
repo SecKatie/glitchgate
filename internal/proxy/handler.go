@@ -2,6 +2,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -95,17 +96,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ModelRequest: reqBody.Model,
 		IsStreaming:  reqBody.Stream,
 		Start:        start,
-	}, h.routeBuilders(w, r, body, &reqBody), func(providerName string) {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", providerName))
-	}, func(prov provider.Provider) bool {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("Unsupported upstream format %q for provider %s", prov.APIFormat(), prov.Name()))
-		return true
-	}, func() {
-		writeAnthropicError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
-	}, func() {
-		writeAnthropicError(w, http.StatusServiceUnavailable, "api_error", "All upstream providers failed")
-	})
+	}, h.routeBuilders(w, r, body, &reqBody),
+		newPipelineCallbacks(w, writeAnthropicError, "api_error"))
 }
 
 func (h *Handler) handleNonStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
@@ -135,7 +127,7 @@ func (h *Handler) handleNonStreaming(w http.ResponseWriter, resp *provider.Respo
 	}
 }
 
-func (h *Handler) handleStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
+func (h *Handler) handleStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
 	// Forward upstream response headers (e.g. anthropic-beta) before the SSE
 	// relay sets Content-Type and calls WriteHeader. Claude Code validates these
 	// headers before rendering thinking blocks.
@@ -147,7 +139,7 @@ func (h *Handler) handleStreaming(w http.ResponseWriter, resp *provider.Response
 			}
 		}
 	}
-	result, err := RelaySSEStream(w, resp.Stream)
+	result, err := RelaySSEStream(ctx, w, resp.Stream)
 
 	var errDetails *string
 	if err != nil {
@@ -204,7 +196,7 @@ func (h *Handler) routeBuilders(w http.ResponseWriter, r *http.Request,
 				RequestBody: upstreamBody,
 				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
 					if reqBody.Stream {
-						return h.handleStreaming(w, provResp)
+						return h.handleStreaming(r.Context(), w, provResp)
 					}
 					return h.handleNonStreaming(w, provResp)
 				},

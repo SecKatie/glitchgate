@@ -5,6 +5,7 @@ package web
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,21 +34,34 @@ type ModelListItem struct {
 
 // ModelDetailView is the data passed to the model detail page template.
 type ModelDetailView struct {
-	ActiveTab      string
-	CurrentUser    string
-	ModelName      string
-	ProviderName   string
-	ProviderType   string
-	UpstreamModel  string
-	IsVirtual      bool
-	IsWildcard     bool
-	IsUnconfigured bool
-	Fallbacks      []string
-	Pricing        *pricing.Entry
-	HasPricing     bool
-	HasCostData    bool // true when TotalCostUSD is computed (including virtual models)
-	Usage          *store.ModelUsageSummary
-	CurlExample    string
+	ActiveTab         string
+	CurrentUser       string
+	ModelName         string
+	ProviderName      string
+	ProviderType      string
+	UpstreamModel     string
+	IsVirtual         bool
+	IsWildcard        bool
+	IsUnconfigured    bool
+	Fallbacks         []string
+	Pricing           *pricing.Entry
+	HasPricing        bool
+	HasCostData       bool // true when TotalCostUSD is computed (including virtual models)
+	Usage             *store.ModelUsageSummary
+	CurlExample       string
+	LatencyTimeseries []store.ModelLatencyTimeseriesEntry
+	OverallTPS        float64 // overall tokens per second across all data
+	MaxTPS            float64 // chart Y-axis ceiling
+	MinTPS            float64 // chart Y-axis floor
+	ChartPoints       string  // SVG polyline points for the TPS line chart
+	ChartFill         string  // SVG polygon points for the area fill
+	ChartLabels       []ChartLabel
+}
+
+// ChartLabel is a sparse set of X-axis labels for the TPS line chart.
+type ChartLabel struct {
+	X     float64
+	Label string
 }
 
 // resolveModelPricing looks up the provider config for providerName and returns the
@@ -219,12 +233,46 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Error("get model cost pricing groups", "model", modelName, "error", err) // #nosec G706 -- slog key-value pairs are structured and safely escaped; no log injection vector
 		} else {
-			agg := computeAggregateCostBreakdown(groups, h.calc)
+			agg := computeAggregateCostBreakdownWithAliases(groups, h.calc, h.providerNames)
 			if agg.HasAnyPricing {
 				usage.TotalCostUSD = agg.TotalCostUSD
 				view.HasCostData = true
 			}
 		}
+	}
+
+	// Fetch latency timeseries for the performance chart.
+	latency, err := h.store.GetModelLatencyTimeseries(r.Context(), modelName)
+	if err != nil {
+		slog.Error("get model latency timeseries", "model", modelName, "error", err) // #nosec G706 -- slog key-value pairs are structured and safely escaped; no log injection vector
+	} else {
+		view.LatencyTimeseries = latency
+
+		// Compute per-bucket TPS and track min/max for the chart Y-axis.
+		tpsValues := make([]float64, len(latency))
+		view.MinTPS = math.MaxFloat64
+		var totalMs, totalTok int64
+		for i, e := range latency {
+			totalMs += e.TotalLatencyMs
+			totalTok += e.TotalOutputTokens
+			if e.AvgMsPerOutputToken > 0 {
+				tps := 1000.0 / e.AvgMsPerOutputToken
+				tpsValues[i] = tps
+				if tps > view.MaxTPS {
+					view.MaxTPS = tps
+				}
+				if tps < view.MinTPS {
+					view.MinTPS = tps
+				}
+			}
+		}
+		if totalTok > 0 && totalMs > 0 {
+			view.OverallTPS = float64(totalTok) / (float64(totalMs) / 1000.0)
+		}
+		if len(latency) < 2 {
+			view.MinTPS = 0
+		}
+		view.ChartPoints, view.ChartFill, view.ChartLabels = buildTPSChartSVG(latency, tpsValues, view.MinTPS, view.MaxTPS)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -244,4 +292,59 @@ func buildCurlExample(modelName string) string {
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`, modelName)
+}
+
+// buildTPSChartSVG generates SVG polyline/polygon point strings and sparse
+// X-axis labels for the TPS line chart. The SVG viewBox is 600x200.
+func buildTPSChartSVG(entries []store.ModelLatencyTimeseriesEntry, tpsValues []float64, yMin, yMax float64) (points, fill string, labels []ChartLabel) {
+	n := len(entries)
+	if n < 2 {
+		return "", "", nil
+	}
+
+	const (
+		w = 600.0
+		h = 200.0
+	)
+
+	// Add 10% padding above max so the line doesn't touch the top.
+	yRange := yMax - yMin
+	if yRange <= 0 {
+		yRange = 1
+	}
+	paddedMax := yMax + yRange*0.1
+
+	var pts strings.Builder
+	for i, tps := range tpsValues {
+		x := (float64(i) / float64(n-1)) * w
+		y := h - ((tps-yMin)/(paddedMax-yMin))*h
+		if i > 0 {
+			pts.WriteByte(' ')
+		}
+		fmt.Fprintf(&pts, "%.1f,%.1f", x, y)
+	}
+	points = pts.String()
+
+	// Polygon fill: same points plus bottom-right and bottom-left corners.
+	fill = fmt.Sprintf("%s %.1f,%.1f %.1f,%.1f", points, w, h, 0.0, h)
+
+	// Sparse labels: show ~8 evenly spaced labels so they don't overlap.
+	maxLabels := min(8, n)
+	step := float64(n-1) / float64(maxLabels)
+	for i := range maxLabels {
+		idx := int(math.Round(float64(i) * step))
+		if idx >= n {
+			idx = n - 1
+		}
+		x := (float64(idx) / float64(n-1)) * w
+		bucket := entries[idx].Bucket
+		// Format: "MM-DD HH:00" from "YYYY-MM-DD HH"
+		lbl := bucket
+		if len(bucket) >= 13 {
+			lbl = bucket[5:13] + ":00"
+		}
+		labels = append(labels, ChartLabel{X: x, Label: lbl})
+	}
+
+	return points, fill, labels
 }
