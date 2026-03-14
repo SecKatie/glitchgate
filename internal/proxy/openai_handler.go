@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -81,17 +82,8 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ModelRequest: oaiReq.Model,
 		IsStreaming:  oaiReq.Stream,
 		Start:        start,
-	}, h.routeBuilders(w, r, &oaiReq, body), func(providerName string) {
-		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", providerName))
-	}, func(prov provider.Provider) bool {
-		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("Unsupported upstream format %q for provider %s", prov.APIFormat(), prov.Name()))
-		return true
-	}, func() {
-		writeOpenAIError(w, http.StatusBadGateway, "api_error", "Failed to reach upstream provider")
-	}, func() {
-		writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "All upstream providers failed")
-	})
+	}, h.routeBuilders(w, r, &oaiReq, body),
+		newPipelineCallbacks(w, writeOpenAIError, "api_error"))
 }
 
 func (h *OpenAIHandler) handleOpenAINonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
@@ -252,7 +244,7 @@ func (h *OpenAIHandler) buildOpenAINativeRoute(w http.ResponseWriter, r *http.Re
 		RequestBody: rawBody,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
 			if oaiReq.Stream {
-				return h.handleOpenAINativeStreaming(w, provResp)
+				return h.handleOpenAINativeStreaming(r.Context(), w, provResp)
 			}
 			return h.handleOpenAINativeNonStreaming(w, provResp)
 		},
@@ -294,8 +286,8 @@ func (h *OpenAIHandler) handleOpenAINativeNonStreaming(w http.ResponseWriter, re
 	}
 }
 
-func (h *OpenAIHandler) handleOpenAINativeStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
-	result, err := RelayOpenAISSEStream(w, resp.Stream)
+func (h *OpenAIHandler) handleOpenAINativeStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
+	result, err := RelayOpenAISSEStream(ctx, w, resp.Stream)
 
 	var errDetails *string
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"codeberg.org/kglitchy/glitchgate/internal/auth"
@@ -58,7 +59,7 @@ func (h *AuthHandlers) OIDCStartHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	redirectTo := r.URL.Query().Get("redirect_to")
+	redirectTo := sanitizeRedirect(r.URL.Query().Get("redirect_to"))
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 
 	if err := h.store.CreateOIDCState(r.Context(), state, verifier, redirectTo, expiresAt); err != nil {
@@ -152,8 +153,27 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	dest := oidcState.RedirectTo
-	if dest == "" {
+	if dest == "" || !isLocalPath(dest) {
 		dest = "/ui/"
 	}
 	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// sanitizeRedirect returns the redirect target if it is a safe local path,
+// otherwise returns an empty string so callers fall back to the default.
+func sanitizeRedirect(dest string) string {
+	if isLocalPath(dest) {
+		return dest
+	}
+	return ""
+}
+
+// isLocalPath returns true if dest is a relative path that stays on the same
+// origin: starts with exactly one slash, contains no backslashes, and has no
+// authority component (// or scheme:).
+func isLocalPath(dest string) bool {
+	return strings.HasPrefix(dest, "/") &&
+		!strings.HasPrefix(dest, "//") &&
+		!strings.Contains(dest, "\\") &&
+		!strings.Contains(dest, "://")
 }

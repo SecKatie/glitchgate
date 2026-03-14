@@ -62,14 +62,15 @@ type HandlersStore interface {
 
 // Handlers groups the HTTP handlers for the web UI.
 type Handlers struct {
-	store     HandlersStore
-	sessions  *auth.UISessionStore
-	masterKey string
-	templates *TemplateSet
-	calc      *pricing.Calculator
-	oidc      OIDCProvider // nil when OIDC not configured
-	modelList []config.ModelMapping
-	providers []config.ProviderConfig
+	store         HandlersStore
+	sessions      *auth.UISessionStore
+	masterKey     string
+	templates     *TemplateSet
+	calc          *pricing.Calculator
+	oidc          OIDCProvider // nil when OIDC not configured
+	modelList     []config.ModelMapping
+	providers     []config.ProviderConfig
+	providerNames map[string]string
 }
 
 // OIDCProvider is the minimal interface Handlers needs from the OIDC package.
@@ -79,16 +80,17 @@ type OIDCProvider interface {
 }
 
 // NewHandlers creates web UI handlers.
-func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, modelList []config.ModelMapping, providers []config.ProviderConfig) *Handlers {
+func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, modelList []config.ModelMapping, providers []config.ProviderConfig, providerNames map[string]string) *Handlers {
 	return &Handlers{
-		store:     s,
-		sessions:  sessions,
-		masterKey: masterKey,
-		templates: tmpl,
-		calc:      calc,
-		oidc:      oidcProvider,
-		modelList: modelList,
-		providers: providers,
+		store:         s,
+		sessions:      sessions,
+		masterKey:     masterKey,
+		templates:     tmpl,
+		calc:          calc,
+		oidc:          oidcProvider,
+		modelList:     modelList,
+		providers:     providers,
+		providerNames: providerNames,
 	}
 }
 
@@ -137,6 +139,12 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 			return []ConvTurn{*t}
 		},
 		"toFloat64": func(n int64) float64 { return float64(n) },
+		"div": func(a, b float64) float64 {
+			if b == 0 {
+				return 0
+			}
+			return a / b
+		},
 		"barPct": func(value, total float64) float64 {
 			if total <= 0 {
 				return 0

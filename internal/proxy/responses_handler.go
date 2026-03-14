@@ -115,17 +115,8 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ModelRequest: req.Model,
 		IsStreaming:  isStreaming,
 		Start:        start,
-	}, h.routeBuilders(w, r, body, &req, isStreaming), func(providerName string) {
-		writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", providerName))
-	}, func(prov provider.Provider) bool {
-		writeResponsesError(w, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("Unsupported upstream format %q for provider %s", prov.APIFormat(), prov.Name()))
-		return true
-	}, func() {
-		writeResponsesError(w, http.StatusBadGateway, "server_error", "Failed to reach upstream provider")
-	}, func() {
-		writeResponsesError(w, http.StatusServiceUnavailable, "server_error", "All upstream providers failed")
-	})
+	}, h.routeBuilders(w, r, body, &req, isStreaming),
+		newPipelineCallbacks(w, writeResponsesError, "server_error"))
 }
 
 func (h *ResponsesHandler) routeBuilders(
@@ -159,7 +150,7 @@ func (h *ResponsesHandler) routeBuilders(
 				RequestBody: body,
 				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
 					if isStreaming {
-						return h.handleResponsesStreaming(w, provResp)
+						return h.handleResponsesStreaming(r.Context(), w, provResp)
 					}
 					return h.handleResponsesNonStreaming(w, provResp)
 				},
@@ -367,8 +358,8 @@ func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, re
 }
 
 // handleResponsesStreaming relays a Responses API SSE stream.
-func (h *ResponsesHandler) handleResponsesStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
-	result, err := RelayResponsesSSEStream(w, resp.Stream)
+func (h *ResponsesHandler) handleResponsesStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
+	result, err := RelayResponsesSSEStream(ctx, w, resp.Stream)
 
 	var errDetails *string
 	if err != nil {

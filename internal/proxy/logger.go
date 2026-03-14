@@ -36,11 +36,11 @@ type AsyncLogger struct {
 	ch              chan *store.RequestLogEntry
 	store           store.RequestLogWriter
 	done            chan struct{}
+	stopCh          chan struct{} // closed first by Close(); signals Log() to stop sending
 	writeTimeout    time.Duration
 	enqueueTimeout  time.Duration
 	summaryInterval time.Duration
 	bodyMaxBytes    int
-	closed          atomic.Bool
 	closeOnce       sync.Once
 	enqueued        atomic.Uint64
 	persisted       atomic.Uint64
@@ -82,6 +82,7 @@ func NewAsyncLoggerWithOptions(s store.RequestLogWriter, opts AsyncLoggerOptions
 		ch:              make(chan *store.RequestLogEntry, opts.BufferSize),
 		store:           s,
 		done:            make(chan struct{}),
+		stopCh:          make(chan struct{}),
 		writeTimeout:    opts.WriteTimeout,
 		enqueueTimeout:  opts.EnqueueTimeout,
 		summaryInterval: opts.SummaryInterval,
@@ -93,11 +94,6 @@ func NewAsyncLoggerWithOptions(s store.RequestLogWriter, opts AsyncLoggerOptions
 
 // Log enqueues a log entry for async persistence.
 func (l *AsyncLogger) Log(entry *store.RequestLogEntry) {
-	if l.closed.Load() {
-		l.noteDropped(entry.ID, "logger closed")
-		return
-	}
-
 	timer := time.NewTimer(l.enqueueTimeout)
 	defer func() {
 		if !timer.Stop() {
@@ -111,6 +107,8 @@ func (l *AsyncLogger) Log(entry *store.RequestLogEntry) {
 	select {
 	case l.ch <- entry:
 		l.enqueued.Add(1)
+	case <-l.stopCh:
+		l.noteDropped(entry.ID, "logger closed")
 	case <-timer.C:
 		l.noteDropped(entry.ID, "log buffer full")
 	}
@@ -119,8 +117,7 @@ func (l *AsyncLogger) Log(entry *store.RequestLogEntry) {
 // Close signals the logger to drain remaining entries and stop.
 func (l *AsyncLogger) Close() {
 	l.closeOnce.Do(func() {
-		l.closed.Store(true)
-		close(l.ch)
+		close(l.stopCh)
 		<-l.done
 	})
 }
@@ -143,12 +140,23 @@ func (l *AsyncLogger) run() {
 
 	for {
 		select {
-		case entry, ok := <-l.ch:
-			if !ok {
-				l.logSummary()
-				return
+		case entry := <-l.ch:
+			if entry != nil {
+				l.persistEntry(entry)
 			}
-			l.persistEntry(entry)
+		case <-l.stopCh:
+			// Drain any remaining entries that were enqueued before Close().
+			for {
+				select {
+				case entry := <-l.ch:
+					if entry != nil {
+						l.persistEntry(entry)
+					}
+				default:
+					l.logSummary()
+					return
+				}
+			}
 		case <-ticker.C:
 			l.logSummary()
 		}

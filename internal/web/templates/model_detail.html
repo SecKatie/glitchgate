@@ -140,6 +140,39 @@
     font-size: 0.9em;
     padding: 0.5rem 0;
   }
+  .line-chart-wrap {
+    position: relative;
+    width: 100%;
+    margin-bottom: 0.25rem;
+  }
+  .line-chart-wrap svg {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .line-chart-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6rem;
+    color: var(--pico-muted-color);
+    font-variant-numeric: tabular-nums;
+    padding: 0.15rem 0 0 0;
+  }
+  .line-chart-y {
+    position: absolute;
+    right: 4px;
+    font-size: 0.6rem;
+    color: var(--pico-muted-color);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .chart-axis-label {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pico-muted-color);
+    text-align: center;
+  }
 </style>
 {{end}}
 
@@ -181,6 +214,33 @@
     <div class="stat-label">Total Spend</div>
   </div>
 </div>
+
+{{/* ── Performance chart ────────────────────────────────────── */}}
+{{if .LatencyTimeseries}}
+<div class="section-label">Performance</div>
+<div class="stat-grid" style="margin-bottom:1rem">
+  <div class="stat-card">
+    <div class="stat-value">{{if gt .OverallTPS 0.0}}{{printf "%.1f" .OverallTPS}}{{else}}—{{end}}</div>
+    <div class="stat-label">Avg Tokens / sec</div>
+  </div>
+</div>
+{{if .ChartPoints}}
+<figure>
+    <div class="line-chart-wrap">
+        <span class="line-chart-y" style="top:0">{{printf "%.1f" .MaxTPS}} tok/s</span>
+        <span class="line-chart-y" style="bottom:0">{{printf "%.1f" .MinTPS}} tok/s</span>
+        <svg viewBox="0 0 600 200" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="{{.ChartFill}}" fill="var(--pico-primary)" opacity="0.12"/>
+            <polyline points="{{.ChartPoints}}" fill="none" stroke="var(--pico-primary)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+        </svg>
+    </div>
+    <div class="line-chart-labels">
+        {{range .ChartLabels}}<span>{{.Label}}</span>{{end}}
+    </div>
+    <p class="chart-axis-label">Output tokens per second (hourly avg)</p>
+</figure>
+{{end}}
+{{end}}
 
 {{/* ── Pricing ──────────────────────────────────────────────── */}}
 {{if not .IsUnconfigured}}
