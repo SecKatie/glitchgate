@@ -31,7 +31,10 @@ func (c *Calculator) Lookup(providerName, upstreamModel string) (Entry, bool) {
 // Calculate returns the estimated cost for a request given the provider name,
 // upstream model name, and token counts. If the model is not in the pricing
 // table the return value is nil (unknown pricing).
-func (c *Calculator) Calculate(providerName, upstreamModel string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) *float64 {
+// reasoningTokens is a subset of outputTokens and is NOT additive — it is
+// priced at the output rate and included here only for future per-category
+// rate support.
+func (c *Calculator) Calculate(providerName, upstreamModel string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens int64) *float64 { //nolint:revive // reasoningTokens reserved for future per-category rates; currently a subset of outputTokens
 	entry, ok := c.entries[providerName+"/"+upstreamModel]
 	if !ok {
 		return nil

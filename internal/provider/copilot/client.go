@@ -129,6 +129,16 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		if err := json.Unmarshal(body, &chatResp); err == nil && chatResp.Usage != nil {
 			provResp.InputTokens = chatResp.Usage.PromptTokens
 			provResp.OutputTokens = chatResp.Usage.CompletionTokens
+			if chatResp.Usage.PromptTokensDetails != nil {
+				provResp.CacheReadInputTokens = chatResp.Usage.PromptTokensDetails.CachedTokens
+				provResp.InputTokens -= provResp.CacheReadInputTokens
+				if provResp.InputTokens < 0 {
+					provResp.InputTokens = 0
+				}
+			}
+			if chatResp.Usage.CompletionTokensDetails != nil {
+				provResp.ReasoningTokens = chatResp.Usage.CompletionTokensDetails.ReasoningTokens
+			}
 		}
 	}
 

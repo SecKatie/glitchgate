@@ -103,7 +103,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	sessions := auth.NewUISessionStore(runtime.Store)
 	tmpl := web.ParseTemplates(runtime.Timezone)
 
-	webHandlers := web.NewHandlers(runtime.Store, sessions, cfg.MasterKey, runtime.Calculator, tmpl, runtime.OIDCProvider, cfg.ModelList, cfg.Providers)
+	webHandlers := web.NewHandlers(runtime.Store, sessions, cfg.MasterKey, runtime.Calculator, tmpl, runtime.OIDCProvider, cfg.ModelList, cfg.Providers, runtime.ProviderNames)
 	authHandlers := web.NewAuthHandlers(runtime.Store, sessions, runtime.OIDCProvider)
 	costHandlers := web.NewCostHandlers(runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
 	userHandlers := web.NewUserHandlers(runtime.Store, sessions, tmpl)

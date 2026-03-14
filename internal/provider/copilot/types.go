@@ -67,7 +67,19 @@ type ChatCompletionChoice struct {
 
 // ChatCompletionUsage holds token usage from an OpenAI response.
 type ChatCompletionUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
+	PromptTokens            int64                    `json:"prompt_tokens"`
+	CompletionTokens        int64                    `json:"completion_tokens"`
+	TotalTokens             int64                    `json:"total_tokens"`
+	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
+}
+
+// PromptTokensDetails holds the prompt token breakdown.
+type PromptTokensDetails struct {
+	CachedTokens int64 `json:"cached_tokens"`
+}
+
+// CompletionTokensDetails holds the completion token breakdown.
+type CompletionTokensDetails struct {
+	ReasoningTokens int64 `json:"reasoning_tokens"`
 }

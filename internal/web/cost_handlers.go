@@ -15,6 +15,7 @@ import (
 	"codeberg.org/kglitchy/glitchgate/internal/auth"
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"golang.org/x/sync/errgroup"
 )
 
 // CostHandlers groups the HTTP handlers for cost dashboard endpoints.
@@ -242,26 +243,16 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
-	summary, err := h.store.GetCostSummary(r.Context(), params)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	breakdown, err := h.store.GetCostBreakdown(r.Context(), params)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-	if params.GroupBy == "provider" {
-		breakdown = aggregateProviderBreakdown(breakdown, h.providerNames)
-	}
-
 	pricingGroups, err := h.store.GetCostPricingGroups(r.Context(), params)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
+
+	// Derive summary and breakdown from pricing groups in-memory
+	// instead of running separate SQL queries.
+	summary := deriveSummaryFromPricingGroups(pricingGroups)
+	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
 
 	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
 	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, params.GroupBy, h.providerNames)
@@ -516,32 +507,31 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
-	summary, err := h.store.GetCostSummary(r.Context(), params)
-	if err != nil {
+	var (
+		pricingGroups           []store.CostPricingGroup
+		timeseriesPricingGroups []store.CostTimeseriesPricingGroup
+	)
+
+	g, ctx := errgroup.WithContext(r.Context())
+	g.Go(func() error {
+		var err error
+		pricingGroups, err = h.store.GetCostPricingGroups(ctx, params)
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		timeseriesPricingGroups, err = h.store.GetCostTimeseriesPricingGroups(ctx, params)
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	breakdown, err := h.store.GetCostBreakdown(r.Context(), params)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	if params.GroupBy == "provider" {
-		breakdown = aggregateProviderBreakdown(breakdown, h.providerNames)
-	}
-
-	pricingGroups, err := h.store.GetCostPricingGroups(r.Context(), params)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	timeseriesPricingGroups, err := h.store.GetCostTimeseriesPricingGroups(r.Context(), params)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	// Derive summary and breakdown from pricing groups in-memory
+	// instead of running separate SQL queries.
+	summary := deriveSummaryFromPricingGroups(pricingGroups)
+	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
 
 	pricedTimeseries := priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames)
 	aggregatedTimeseries := aggregatePricedTimeseries(pricedTimeseries, "day")
@@ -627,32 +617,30 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
-	summary, err := h.store.GetCostSummary(r.Context(), params)
-	if err != nil {
+	var (
+		pricingGroups           []store.CostPricingGroup
+		timeseriesPricingGroups []store.CostTimeseriesPricingGroup
+	)
+
+	g, ctx := errgroup.WithContext(r.Context())
+	g.Go(func() error {
+		var err error
+		pricingGroups, err = h.store.GetCostPricingGroups(ctx, params)
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		timeseriesPricingGroups, err = h.store.GetCostTimeseriesPricingGroups(ctx, params)
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	breakdown, err := h.store.GetCostBreakdown(r.Context(), params)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	if params.GroupBy == "provider" {
-		breakdown = aggregateProviderBreakdown(breakdown, h.providerNames)
-	}
-
-	pricingGroups, err := h.store.GetCostPricingGroups(r.Context(), params)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	timeseriesPricingGroups, err := h.store.GetCostTimeseriesPricingGroups(r.Context(), params)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	// Derive summary and breakdown from pricing groups in-memory.
+	summary := deriveSummaryFromPricingGroups(pricingGroups)
+	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
 
 	pricedTimeseries := priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames)
 	aggregatedTimeseries := aggregatePricedTimeseries(pricedTimeseries, "day")

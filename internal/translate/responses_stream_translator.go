@@ -369,7 +369,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	w.WriteHeader(http.StatusOK)
 
 	var captured bytes.Buffer
-	var inputTokens, outputTokens, cacheReadTokens int64
+	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
 	var fullText strings.Builder
 	messageID := ""
 	responseID := ""
@@ -401,7 +401,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					"content_index": 0,
 					"text":          finalText,
 				}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
 
 				if err := writeResponsesSSE(w, rc, &captured, "response.content_part.done", map[string]interface{}{
@@ -415,7 +415,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 						"annotations": []interface{}{},
 					},
 				}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
 			}
 
@@ -438,7 +438,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 						"status": "completed",
 					},
 				}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
 			}
 
@@ -480,17 +480,17 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					"usage": completedUsage,
 				},
 			}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 
 			// Write [DONE] sentinel.
 			done := "data: [DONE]\n\n"
 			captured.WriteString(done)
 			if _, err := w.Write([]byte(done)); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 			if err := rc.Flush(); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 			continue
 		}
@@ -514,6 +514,9 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			if chunk.Usage.PromptTokensDetails != nil {
 				cacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
+			if chunk.Usage.CompletionTokensDetails != nil {
+				reasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
+			}
 		}
 
 		// Send response.created on first chunk.
@@ -530,7 +533,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					"output":     []interface{}{},
 				},
 			}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 			sentResponseCreated = true
 		}
@@ -558,7 +561,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					"status":  "in_progress",
 				},
 			}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 			sentOutputItemAdded = true
 		}
@@ -577,7 +580,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 						"annotations": []interface{}{},
 					},
 				}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
 				sentContentPartAdded = true
 			}
@@ -590,12 +593,12 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				"content_index": 0,
 				"delta":         text,
 			}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 		}
 	}
 
-	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), scanner.Err()
+	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), scanner.Err()
 }
 
 // writeResponsesSSE writes a single Responses API SSE event to the client.

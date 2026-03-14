@@ -224,8 +224,11 @@ func (c *Client) extractTokens(body []byte, resp *provider.Response) {
 	// Chat Completions format.
 	var cc struct {
 		Usage *struct {
-			PromptTokens            int64 `json:"prompt_tokens"`
-			CompletionTokens        int64 `json:"completion_tokens"`
+			PromptTokens        int64 `json:"prompt_tokens"`
+			CompletionTokens    int64 `json:"completion_tokens"`
+			PromptTokensDetails *struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 			CompletionTokensDetails *struct {
 				ReasoningTokens int64 `json:"reasoning_tokens"`
 			} `json:"completion_tokens_details"`
@@ -234,6 +237,13 @@ func (c *Client) extractTokens(body []byte, resp *provider.Response) {
 	if err := json.Unmarshal(body, &cc); err == nil && cc.Usage != nil {
 		resp.InputTokens = cc.Usage.PromptTokens
 		resp.OutputTokens = cc.Usage.CompletionTokens
+		if cc.Usage.PromptTokensDetails != nil {
+			resp.CacheReadInputTokens = cc.Usage.PromptTokensDetails.CachedTokens
+			resp.InputTokens -= resp.CacheReadInputTokens
+			if resp.InputTokens < 0 {
+				resp.InputTokens = 0
+			}
+		}
 		if cc.Usage.CompletionTokensDetails != nil {
 			resp.ReasoningTokens = cc.Usage.CompletionTokensDetails.ReasoningTokens
 		}
