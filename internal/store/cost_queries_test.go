@@ -620,3 +620,95 @@ func TestCacheTokenRoundTrip(t *testing.T) {
 	require.Equal(t, int64(173), breakdown[0].CacheCreationTokens)
 	require.Equal(t, int64(57686), breakdown[0].CacheReadTokens)
 }
+
+func TestEscapeLikePattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"plain text", "claude", "claude"},
+		{"percent", "test%model", `test\%model`},
+		{"underscore", "test_model", `test\_model`},
+		{"backslash", `test\model`, `test\\model`},
+		{"combined", `50%_off\deal`, `50\%\_off\\deal`},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, escapeLikePattern(tt.input))
+		})
+	}
+}
+
+func TestGroupFilterLikeEscaping(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	// Create a proxy key and insert logs with tricky model names.
+	err := st.CreateProxyKey(ctx, "pk-esc", "hash-esc", "llmp_sk_esc1", "escape-key")
+	require.NoError(t, err)
+
+	logs := []RequestLogEntry{
+		{
+			ID: "esc-1", ProxyKeyID: "pk-esc",
+			Timestamp:    time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC),
+			SourceFormat: "anthropic", ProviderName: "anthropic",
+			ModelRequested: "test%model", ModelUpstream: "test%model",
+			InputTokens: 100, OutputTokens: 50,
+			LatencyMs: 100, Status: 200,
+			RequestBody: "{}", ResponseBody: "{}",
+		},
+		{
+			ID: "esc-2", ProxyKeyID: "pk-esc",
+			Timestamp:    time.Date(2026, 3, 1, 11, 0, 0, 0, time.UTC),
+			SourceFormat: "anthropic", ProviderName: "anthropic",
+			ModelRequested: "test_model", ModelUpstream: "test_model",
+			InputTokens: 200, OutputTokens: 100,
+			LatencyMs: 100, Status: 200,
+			RequestBody: "{}", ResponseBody: "{}",
+		},
+		{
+			ID: "esc-3", ProxyKeyID: "pk-esc",
+			Timestamp:    time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+			SourceFormat: "anthropic", ProviderName: "anthropic",
+			ModelRequested: "testXmodel", ModelUpstream: "testXmodel",
+			InputTokens: 300, OutputTokens: 150,
+			LatencyMs: 100, Status: 200,
+			RequestBody: "{}", ResponseBody: "{}",
+		},
+	}
+	for _, entry := range logs {
+		require.NoError(t, st.InsertRequestLog(ctx, &entry))
+	}
+
+	t.Run("percent in filter matches only literal percent", func(t *testing.T) {
+		// "test%" as a filter should match "test%model" but NOT "test_model" or "testXmodel".
+		// Without escaping, SQL LIKE "test%%" would match all three.
+		params := CostParams{
+			From:        "2026-03-01 00:00:00",
+			To:          "2026-03-31 23:59:59",
+			GroupBy:     "model",
+			GroupFilter: "test%",
+		}
+		breakdown, err := st.GetCostBreakdown(ctx, params)
+		require.NoError(t, err)
+		require.Len(t, breakdown, 1, "should only match model with literal %%")
+		require.Equal(t, "test%model", breakdown[0].Group)
+	})
+
+	t.Run("underscore in filter matches only literal underscore", func(t *testing.T) {
+		// "test_" as a filter should match "test_model" but NOT "testXmodel".
+		// Without escaping, SQL LIKE "test_%" would match both.
+		params := CostParams{
+			From:        "2026-03-01 00:00:00",
+			To:          "2026-03-31 23:59:59",
+			GroupBy:     "model",
+			GroupFilter: "test_",
+		}
+		breakdown, err := st.GetCostBreakdown(ctx, params)
+		require.NoError(t, err)
+		require.Len(t, breakdown, 1, "should only match model with literal _")
+		require.Equal(t, "test_model", breakdown[0].Group)
+	})
+}

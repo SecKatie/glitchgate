@@ -3,6 +3,9 @@
 package web
 
 import (
+	"slices"
+	"strings"
+
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
@@ -167,6 +170,7 @@ func enrichLogs(logs []store.RequestLogSummary, calc *pricing.Calculator) []LogR
 			CacheWriteTokens: log.CacheCreationInputTokens,
 			CacheReadTokens:  log.CacheReadInputTokens,
 			OutputTokens:     log.OutputTokens,
+			ReasoningTokens:  log.ReasoningTokens,
 		})
 		if ok {
 			cost := priced.TotalCostUSD
@@ -234,6 +238,7 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
 			OutputTokens:     group.OutputTokens,
+			ReasoningTokens:  group.ReasoningTokens,
 		}, providerNames)
 		if !ok {
 			continue
@@ -287,6 +292,7 @@ func computeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, c
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
 			OutputTokens:     group.OutputTokens,
+			ReasoningTokens:  group.ReasoningTokens,
 		}, providerNames)
 		if !ok {
 			if group.InputTokens > 0 || group.OutputTokens > 0 || group.CacheCreationTokens > 0 || group.CacheReadTokens > 0 {
@@ -307,6 +313,89 @@ func computeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, c
 	cb.PricingKnown = cb.HasAnyPricing && !hasUnknownUsage
 	cb.PartialPricing = cb.HasAnyPricing && hasUnknownUsage
 	return cb
+}
+
+// deriveSummaryFromPricingGroups computes CostSummary by summing token counts
+// and request counts across all pricing groups. This avoids a separate SQL query.
+func deriveSummaryFromPricingGroups(groups []store.CostPricingGroup) *store.CostSummary {
+	var s store.CostSummary
+	for _, g := range groups {
+		s.TotalInputTokens += g.InputTokens
+		s.TotalOutputTokens += g.OutputTokens
+		s.TotalCacheCreationTokens += g.CacheCreationTokens
+		s.TotalCacheReadTokens += g.CacheReadTokens
+		s.TotalRequests += g.Requests
+	}
+	return &s
+}
+
+// deriveBreakdownFromPricingGroups aggregates pricing groups into breakdown
+// entries by the given dimension (model, provider, or key). This avoids a
+// separate SQL query since pricing groups are strictly finer-grained.
+func deriveBreakdownFromPricingGroups(groups []store.CostPricingGroup, groupBy string, providerNames map[string]string) []store.CostBreakdownEntry {
+	type accumulator struct {
+		entry store.CostBreakdownEntry
+		order int // preserve first-seen order for stable sorting
+	}
+	byGroup := make(map[string]*accumulator)
+	nextOrder := 0
+
+	for _, g := range groups {
+		var key string
+		switch groupBy {
+		case "key":
+			key = g.ProxyKeyGroup
+			if key == "" {
+				key = g.ProxyKeyPrefix
+			}
+		case "provider":
+			key, _ = providerDisplayName(g.ProviderName, providerNames)
+			if key == "" {
+				key = g.ProviderName
+			}
+		default: // "model"
+			key = g.ModelRequested
+		}
+		if key == "" {
+			continue
+		}
+
+		acc, ok := byGroup[key]
+		if !ok {
+			acc = &accumulator{
+				entry: store.CostBreakdownEntry{Group: key},
+				order: nextOrder,
+			}
+			nextOrder++
+			byGroup[key] = acc
+		}
+		acc.entry.InputTokens += g.InputTokens
+		acc.entry.OutputTokens += g.OutputTokens
+		acc.entry.CacheCreationTokens += g.CacheCreationTokens
+		acc.entry.CacheReadTokens += g.CacheReadTokens
+		acc.entry.Requests += g.Requests
+	}
+
+	entries := make([]store.CostBreakdownEntry, 0, len(byGroup))
+	for _, acc := range byGroup {
+		entries = append(entries, acc.entry)
+	}
+
+	// Sort by request count descending, then group name ascending (matches SQL ORDER BY).
+	slices.SortFunc(entries, func(a, b store.CostBreakdownEntry) int {
+		if a.Requests != b.Requests {
+			if a.Requests > b.Requests {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Group, b.Group)
+	})
+
+	if entries == nil {
+		entries = []store.CostBreakdownEntry{}
+	}
+	return entries
 }
 
 func buildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdownCosts map[string]float64, subscriptions map[string]float64) (map[string]*ProviderSpendComparison, ProviderSpendComparisonSummary) {

@@ -21,6 +21,38 @@ type routePlan struct {
 
 type routeBuilder func(chainAttempt) (*routePlan, bool)
 
+// pipelineCallbacks holds the four error callbacks that executeProxyPipeline
+// needs, built from a format-specific error writer.
+type pipelineCallbacks struct {
+	onMissingProvider   func(string)
+	onUnsupportedFormat func(provider.Provider) bool
+	onNetworkError      func()
+	onExhaustedError    func()
+}
+
+// newPipelineCallbacks builds the four error callbacks parameterised on the
+// format-specific error writer (writeAnthropicError, writeOpenAIError, etc.).
+// serverErrType is the error type used for server-side failures (e.g.
+// "api_error" for Anthropic/OpenAI, "server_error" for Responses API).
+func newPipelineCallbacks(w http.ResponseWriter, writeErr errorWriter, serverErrType string) pipelineCallbacks {
+	return pipelineCallbacks{
+		onMissingProvider: func(name string) {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Provider not configured: %s", name))
+		},
+		onUnsupportedFormat: func(prov provider.Provider) bool {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error",
+				fmt.Sprintf("Unsupported upstream format %q for provider %s", prov.APIFormat(), prov.Name()))
+			return true
+		},
+		onNetworkError: func() {
+			writeErr(w, http.StatusBadGateway, serverErrType, "Failed to reach upstream provider")
+		},
+		onExhaustedError: func() {
+			writeErr(w, http.StatusServiceUnavailable, serverErrType, "All upstream providers failed")
+		},
+	}
+}
+
 type pipelineSpec struct {
 	SourceFormat string
 	ProxyKeyID   string
@@ -130,15 +162,12 @@ func executeProxyPipeline(
 	providers map[string]provider.Provider,
 	spec pipelineSpec,
 	routes map[string]routeBuilder,
-	onMissingProvider func(string),
-	onUnsupportedFormat func(provider.Provider) bool,
-	writeNetworkError func(),
-	writeExhaustedError func(),
+	cbs pipelineCallbacks,
 ) {
-	executeFallbackChain(chain, providers, onMissingProvider, func(attempt chainAttempt) bool {
+	executeFallbackChain(chain, providers, cbs.onMissingProvider, func(attempt chainAttempt) bool {
 		buildRoute, ok := routes[attempt.Provider.APIFormat()]
 		if !ok {
-			return onUnsupportedFormat(attempt.Provider)
+			return cbs.onUnsupportedFormat(attempt.Provider)
 		}
 
 		plan, stop := buildRoute(attempt)
@@ -156,7 +185,7 @@ func executeProxyPipeline(
 			AttemptCount:     attempt.AttemptCount,
 			HasMoreFallbacks: attempt.HasMoreFallbacks,
 			Start:            spec.Start,
-		}, writeNetworkError, writeExhaustedError, func(provResp *provider.Response) handlerResult {
+		}, cbs.onNetworkError, cbs.onExhaustedError, func(provResp *provider.Response) handlerResult {
 			return plan.HandleResponse(w, provResp)
 		})
 	})

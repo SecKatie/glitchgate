@@ -297,6 +297,7 @@ type CostPricingGroup struct {
 	CacheCreationTokens int64
 	CacheReadTokens     int64
 	ReasoningTokens     int64
+	Requests            int64
 }
 
 // CostTimeseriesEntry holds cost data for a single time bucket.
