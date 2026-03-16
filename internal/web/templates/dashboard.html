@@ -59,7 +59,7 @@
     .dash-subsidy-value {
         font-size: 1.5rem;
         font-weight: 700;
-        color: var(--pico-del-color);
+        color: var(--pico-color);
         font-variant-numeric: tabular-nums;
         line-height: 1.1;
     }
@@ -166,6 +166,18 @@
             <span class="dash-hero-stat-value">{{fmtTokens .TotalTokens}}</span>
             <span class="dash-hero-stat-label">Total Tokens</span>
         </div>
+        {{if .MonthlyProjection}}
+        <div class="dash-hero-stat">
+            <span class="dash-hero-stat-value" title="Day {{.MonthlyProjection.DaysElapsed}} of {{.MonthlyProjection.DaysInMonth}} · MTD ${{printf "%.2f" .MonthlyProjection.MTDSpendUSD}}">${{printf "%.2f" .MonthlyProjection.EstMonthlySpendUSD}}</span>
+            <span class="dash-hero-stat-label">Est. This Month</span>
+        </div>
+        {{if .MonthlyProjection.EstMonthlySubsidyUSD}}
+        <div class="dash-hero-stat">
+            <span class="dash-hero-stat-value" title="Projected API cost minus subscription fee">${{printf "%.2f" (deref .MonthlyProjection.EstMonthlySubsidyUSD)}}</span>
+            <span class="dash-hero-stat-label">Est. Monthly Subsidy</span>
+        </div>
+        {{end}}
+        {{end}}
     </div>
 </div>
 
@@ -197,11 +209,11 @@
 </div>
 {{end}}
 
-<!-- Bottom grid: Top Models + Recent Activity -->
+<!-- Bottom grid: Top Models (Today) + Recent Activity -->
 <div class="dash-grid">
     <div class="card dash-card">
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem;">
-            <h4 style="margin-bottom: 0;">Top Models</h4>
+            <h4 style="margin-bottom: 0;">Today's Top Models</h4>
             <a href="/ui/models" style="font-size: 0.85em;">View all &rarr;</a>
         </div>
         {{if .TopModels}}

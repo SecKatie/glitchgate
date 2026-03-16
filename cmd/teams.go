@@ -132,7 +132,7 @@ func runTeamsCreate(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("creating team: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(ctx, "team_created", "", fmt.Sprintf("name=%s id=%s", name, id)); err != nil {
+	if err := st.RecordAuditEvent(ctx, "team_created", "", fmt.Sprintf("name=%s id=%s", name, id), "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 
@@ -154,7 +154,7 @@ func runTeamsDelete(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("deleting team: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(ctx, "team_deleted", "", fmt.Sprintf("id=%s", teamID)); err != nil {
+	if err := st.RecordAuditEvent(ctx, "team_deleted", "", fmt.Sprintf("id=%s", teamID), "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 
@@ -176,7 +176,7 @@ func runTeamsAddMember(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("adding member: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(ctx, "team_member_added", "", fmt.Sprintf("team=%s user=%s", teamID, userID)); err != nil {
+	if err := st.RecordAuditEvent(ctx, "team_member_added", "", fmt.Sprintf("team=%s user=%s", teamID, userID), "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 
@@ -207,7 +207,7 @@ func runTeamsRemoveMember(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("removing member: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(ctx, "team_member_removed", "", fmt.Sprintf("team=%s user=%s", teamID, userID)); err != nil {
+	if err := st.RecordAuditEvent(ctx, "team_member_removed", "", fmt.Sprintf("team=%s user=%s", teamID, userID), "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 

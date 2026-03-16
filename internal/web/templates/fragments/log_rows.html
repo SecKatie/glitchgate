@@ -2,12 +2,12 @@
 {{range .Logs}}
 <tr data-href="/ui/logs/{{.ID}}">
     <td class="mono" style="font-size:0.8rem">{{fmtET .Timestamp "Jan 02 15:04 ET"}}</td>
-    <td>{{.ModelRequested}}{{if .IsStreaming}} <span class="badge badge-stream">SSE</span>{{end}}</td>
+    <td>{{.ModelRequested}}{{if .IsStreaming}} <span class="badge badge-stream" title="Server-sent events (streaming response)">SSE</span>{{end}}</td>
     <td class="mono" style="font-size:0.8rem" title="{{.ProxyKeyLabel}}">{{.ProxyKeyPrefix}}</td>
-    <td><span class="{{if lt .Status 400}}status-ok{{else}}status-err{{end}}">{{.Status}}</span></td>
-    <td>{{sumTokens .InputTokens .CacheCreationInputTokens .CacheReadInputTokens}}</td>
-    <td>{{.OutputTokens}}</td>
-    <td>{{.LatencyMs}}ms</td>
+    <td><span class="{{if lt .Status 400}}status-ok{{else}}status-err{{end}}">{{.Status}}{{if ge .Status 400}} ✕{{end}}</span></td>
+    <td class="num">{{sumTokens .InputTokens .CacheCreationInputTokens .CacheReadInputTokens}}</td>
+    <td class="num">{{.OutputTokens}}</td>
+    <td class="num">{{.LatencyMs}}ms</td>
     <td class="cost">{{if .EstimatedCostUSD}}${{printf "%.6f" (deref .EstimatedCostUSD)}}{{else}}<span class="cost-unknown" title="No pricing configured for this model">n/a</span>{{end}}</td>
     <td><a href="/ui/logs/{{.ID}}">View</a></td>
 </tr>

@@ -34,6 +34,7 @@
     <thead>
         <tr>
             <th>Time</th>
+            <th>Actor</th>
             <th>Action</th>
             <th>Key Prefix</th>
             <th>Detail</th>
@@ -43,6 +44,7 @@
         {{range .Events}}
         <tr>
             <td style="white-space:nowrap">{{fmtET .CreatedAt "Jan 2 3:04 PM"}}</td>
+            <td class="mono">{{if .ActorEmail}}{{.ActorEmail}}{{else}}<span class="cost-unknown">&mdash;</span>{{end}}</td>
             <td class="mono">{{.Action}}</td>
             <td class="mono">{{if .KeyPrefix}}{{.KeyPrefix}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
             <td>{{if .Detail}}{{.Detail}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>

@@ -65,9 +65,19 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 	costParams := costParamsLast30Days(h.tz, "model")
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &costParams)
 
+	// Daily cost params for top models (today only).
+	todayCostParams := costParamsToday(h.tz, "model")
+	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &todayCostParams)
+
+	// Month-to-date params for the monthly spend projection.
+	mtdCostParams := costParamsMonthToDate(h.tz, "model")
+	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &mtdCostParams)
+
 	var (
 		pricingGroups           []store.CostPricingGroup
 		timeseriesPricingGroups []store.CostTimeseriesPricingGroup
+		todayPricingGroups      []store.CostPricingGroup
+		mtdPricingGroups        []store.CostPricingGroup
 		activityStats           *store.ActivityStats
 		budgets                 []store.ApplicableBudget
 	)
@@ -83,6 +93,16 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 	g.Go(func() error {
 		var err error
 		timeseriesPricingGroups, err = h.costStore.GetCostTimeseriesPricingGroups(ctx, costParams)
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		todayPricingGroups, err = h.costStore.GetCostPricingGroups(ctx, todayCostParams)
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		mtdPricingGroups, err = h.costStore.GetCostPricingGroups(ctx, mtdCostParams)
 		return err
 	})
 	g.Go(func() error {
@@ -118,9 +138,9 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 		}
 	}
 
-	// Top 5 models by cost.
-	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, "model", h.providerNames)
-	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, "model", h.providerNames)
+	// Top 5 models by cost (today only).
+	breakdown := deriveBreakdownFromPricingGroups(todayPricingGroups, "model", h.providerNames)
+	breakdownCosts := buildBreakdownCosts(todayPricingGroups, h.calc, "model", h.providerNames)
 	type topModel struct {
 		Name    string
 		CostUSD float64
@@ -149,6 +169,14 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 		h.calc, h.providerNames, h.providerMonthlySubscriptions, 30,
 	)
 
+	// Monthly spend projection from MTD data.
+	mtdCosts := computeAggregateCostBreakdownWithAliases(mtdPricingGroups, h.calc, h.providerNames)
+	var subscriptionCostUSD float64
+	if subsidyAnalysis != nil {
+		subscriptionCostUSD = subsidyAnalysis.SubscriptionCostUSD
+	}
+	monthlyProjection := buildMonthlyProjection(mtdCosts.TotalCostUSD, h.tz, subscriptionCostUSD)
+
 	// Budget status.
 	budgetEntries := BuildBudgetStatusEntries(r.Context(), budgets, h.budgetStore, h.keyStore, h.tz)
 	isGA := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin")
@@ -170,21 +198,22 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 	totalTokens := summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens + summary.TotalOutputTokens
 
 	data := map[string]any{
-		"ActiveTab":       "dashboard",
-		"Title":           "Dashboard",
-		"TokenCosts":      tokenCosts,
-		"Summary":         summary,
-		"TotalTokens":     totalTokens,
-		"Timeseries":      timeseries,
-		"MaxCost":         maxCost,
-		"TopModels":       topModels,
-		"SubsidyAnalysis": subsidyAnalysis,
-		"BudgetEntries":   budgetEntries,
-		"IsGA":            isGA,
-		"IsAdmin":         isAdmin,
-		"ActivityStats":   activityStats,
-		"ErrorPct":        errorPct,
-		"AvgLatencySec":   avgLatencySec,
+		"ActiveTab":         "dashboard",
+		"Title":             "Dashboard",
+		"TokenCosts":        tokenCosts,
+		"Summary":           summary,
+		"TotalTokens":       totalTokens,
+		"Timeseries":        timeseries,
+		"MaxCost":           maxCost,
+		"TopModels":         topModels,
+		"SubsidyAnalysis":   subsidyAnalysis,
+		"MonthlyProjection": monthlyProjection,
+		"BudgetEntries":     budgetEntries,
+		"IsGA":              isGA,
+		"IsAdmin":           isAdmin,
+		"ActivityStats":     activityStats,
+		"ErrorPct":          errorPct,
+		"AvgLatencySec":     avgLatencySec,
 	}
 
 	setNavData(data, sc)

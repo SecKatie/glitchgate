@@ -79,7 +79,7 @@
 <div id="team-message"></div>
 
 {{if .IsGA}}
-<form class="create-team-form" onsubmit="createTeam(event)">
+<form id="create-team-form" class="create-team-form" onsubmit="createTeam(event)">
     <div style="flex:2;min-width:150px">
         <label for="team-name">Team Name</label>
         <input type="text" id="team-name" placeholder="e.g. Engineering" required maxlength="64">
@@ -121,7 +121,7 @@
 </div>
 {{end}}
 {{else}}
-<p style="color:var(--pico-muted-color);text-align:center;padding:2rem 0">No teams yet.{{if .IsGA}} Create one above.{{end}}</p>
+<p style="color:var(--pico-muted-color);text-align:center;padding:2rem 0">No teams yet.{{if .IsGA}} <a href="#create-team-form">Create a team</a>.{{end}}</p>
 {{end}}
 
 <script>

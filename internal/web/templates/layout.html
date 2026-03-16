@@ -333,12 +333,37 @@
             padding: 0.25rem 0.75rem;
             white-space: nowrap;
         }
+        /* Numeric columns: right-align with tabular figures */
+        .num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        /* Danger button (irreversible actions) */
+        .btn-danger {
+            --pico-color: var(--pico-del-color);
+            --pico-border-color: var(--pico-del-color);
+        }
+        /* Dirty-state indicator on filter/update buttons */
+        .btn-dirty {
+            outline: 2px solid var(--pico-primary);
+        }
+        /* Focus ring for keyboard navigation */
+        :focus-visible {
+            outline: 2px solid var(--pico-primary);
+            outline-offset: 2px;
+            border-radius: var(--pico-border-radius);
+        }
+        /* Nav user display */
+        .nav-user {
+            font-size: 0.8em;
+            color: var(--pico-muted-color);
+        }
     </style>
     {{block "head" .}}{{end}}
 </head>
 <body>
     <main class="container">
-        <nav>
+        <nav class="contrast">
             <ul>
                 <li><strong>glitchgate</strong></li>
             </ul>
@@ -347,14 +372,14 @@
                 <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page" class="nav-active"{{end}}>Logs</a></li>
                 <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page" class="nav-active"{{end}}>Costs</a></li>
                 <li><a href="/ui/budgets"{{if eq .ActiveTab "budgets"}} aria-current="page" class="nav-active"{{end}}>Budgets</a></li>
-                <li><a href="/ui/providers"{{if eq .ActiveTab "providers"}} aria-current="page" class="nav-active"{{end}}>Providers</a></li>
-                <li><a href="/ui/models"{{if eq .ActiveTab "models"}} aria-current="page" class="nav-active"{{end}}>Models</a></li>
                 <li><a href="/ui/keys"{{if eq .ActiveTab "keys"}} aria-current="page" class="nav-active"{{end}}>Keys</a></li>
+                <li><a href="/ui/models"{{if eq .ActiveTab "models"}} aria-current="page" class="nav-active"{{end}}>Models</a></li>
+                <li><a href="/ui/providers"{{if eq .ActiveTab "providers"}} aria-current="page" class="nav-active"{{end}}>Providers</a></li>
                 <li><a href="/ui/audit"{{if eq .ActiveTab "audit"}} aria-current="page" class="nav-active"{{end}}>Audit</a></li>
                 <li><a href="/ui/users"{{if eq .ActiveTab "users"}} aria-current="page" class="nav-active"{{end}}>Users</a></li>
                 <li><a href="/ui/teams"{{if eq .ActiveTab "teams"}} aria-current="page" class="nav-active"{{end}}>Teams</a></li>
                 {{if .CurrentUser}}
-                <li><small style="color:var(--pico-muted-color)">{{.CurrentUser}}</small></li>
+                <li><span class="nav-user" title="Logged in as {{.CurrentUser}}">{{.CurrentUser}}</span></li>
                 {{end}}
                 <li>
                     <form method="post" action="/ui/api/logout" style="margin:0">

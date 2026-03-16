@@ -33,6 +33,18 @@
                 <span class="cost-hero-stat-label">API Cost $/MTok</span>
             </div>
             {{end}}
+            {{if .MonthlyProjection}}
+            <div class="cost-hero-stat">
+                <span class="cost-hero-stat-value" title="Day {{.MonthlyProjection.DaysElapsed}} of {{.MonthlyProjection.DaysInMonth}} · MTD ${{printf "%.2f" .MonthlyProjection.MTDSpendUSD}}">${{printf "%.2f" .MonthlyProjection.EstMonthlySpendUSD}}</span>
+                <span class="cost-hero-stat-label">Est. This Month</span>
+            </div>
+            {{if .MonthlyProjection.EstMonthlySubsidyUSD}}
+            <div class="cost-hero-stat">
+                <span class="cost-hero-stat-value" title="Projected API cost minus subscription fee">${{printf "%.2f" (deref .MonthlyProjection.EstMonthlySubsidyUSD)}}</span>
+                <span class="cost-hero-stat-label">Est. Monthly Subsidy</span>
+            </div>
+            {{end}}
+            {{end}}
         </div>
     </div>
 

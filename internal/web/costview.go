@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
@@ -455,6 +456,59 @@ func buildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdo
 	}
 
 	return comparisons, summary
+}
+
+// --------------------------------------------------------------------------
+// Monthly Spend Projection
+// --------------------------------------------------------------------------
+
+// MonthlyProjection holds the current month-to-date spend and a projected
+// full-month figure extrapolated from the current daily burn rate.
+type MonthlyProjection struct {
+	// MTDSpendUSD is the actual API cost from the 1st of the month to now.
+	MTDSpendUSD float64
+	// EstMonthlySpendUSD is the projected full-month API cost at the current rate.
+	EstMonthlySpendUSD float64
+	// DaysElapsed is the number of calendar days elapsed so far this month (including today).
+	DaysElapsed int
+	// DaysInMonth is the total number of days in the current calendar month.
+	DaysInMonth int
+	// EstMonthlySubsidyUSD is the projected monthly API cost minus the fixed monthly
+	// subscription cost. Only set when subscriptionCostUSD > 0. Can be negative if
+	// usage is below the subscription break-even point.
+	EstMonthlySubsidyUSD *float64
+}
+
+// buildMonthlyProjection computes a MonthlyProjection from month-to-date cost.
+// subscriptionCostUSD is the total fixed monthly subscription cost across all
+// configured providers; pass 0 when no subscriptions are configured.
+func buildMonthlyProjection(mtdCost float64, tz *time.Location, subscriptionCostUSD float64) *MonthlyProjection {
+	now := time.Now().In(tz)
+	y, m := now.Year(), now.Month()
+	daysInMonth := time.Date(y, m+1, 1, 0, 0, 0, 0, tz).AddDate(0, 0, -1).Day()
+	daysElapsed := now.Day()
+	if daysElapsed < 1 {
+		daysElapsed = 1
+	}
+
+	mp := &MonthlyProjection{
+		MTDSpendUSD: mtdCost,
+		DaysElapsed: daysElapsed,
+		DaysInMonth: daysInMonth,
+	}
+
+	if daysElapsed >= daysInMonth {
+		mp.EstMonthlySpendUSD = mtdCost
+	} else {
+		mp.EstMonthlySpendUSD = mtdCost * float64(daysInMonth) / float64(daysElapsed)
+	}
+
+	if subscriptionCostUSD > 0 {
+		estSubsidy := mp.EstMonthlySpendUSD - subscriptionCostUSD
+		mp.EstMonthlySubsidyUSD = &estSubsidy
+	}
+
+	return mp
 }
 
 // --------------------------------------------------------------------------

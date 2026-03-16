@@ -121,10 +121,10 @@ func (s *SQLiteStore) UpdateKeyLabel(ctx context.Context, prefix, label string) 
 }
 
 // RecordAuditEvent inserts a new audit trail entry.
-func (s *SQLiteStore) RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error {
-	const query = `INSERT INTO audit_events (action, key_prefix, detail, created_at) VALUES (?, ?, ?, ?)`
+func (s *SQLiteStore) RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error {
+	const query = `INSERT INTO audit_events (action, key_prefix, detail, actor_email, created_at) VALUES (?, ?, ?, ?, ?)`
 
-	_, err := s.db.ExecContext(ctx, query, action, keyPrefix, detail, time.Now().UTC())
+	_, err := s.db.ExecContext(ctx, query, action, keyPrefix, detail, actorEmail, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("record audit event: %w", err)
 	}

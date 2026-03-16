@@ -106,7 +106,7 @@ func (s *keyScopeStoreStub) RevokeProxyKey(_ context.Context, prefix string) err
 	return nil
 }
 
-func (s *keyScopeStoreStub) RecordAuditEvent(_ context.Context, action, keyPrefix, _ string) error {
+func (s *keyScopeStoreStub) RecordAuditEvent(_ context.Context, action, keyPrefix, _, _ string) error {
 	s.auditCalls = append(s.auditCalls, action+":"+keyPrefix)
 	return nil
 }

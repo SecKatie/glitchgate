@@ -129,7 +129,7 @@ func (h *UserHandlers) ChangeRoleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "user.role_changed", "", id+" → "+role); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "user.role_changed", "", id+" → "+role, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 
@@ -178,7 +178,7 @@ func (h *UserHandlers) DeactivateUserHandler(w http.ResponseWriter, r *http.Requ
 		slog.Warn("delete sessions for deactivated user", "error", err)
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "user.deactivated", "", id); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "user.deactivated", "", id, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 
@@ -198,7 +198,7 @@ func (h *UserHandlers) ReactivateUserHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "user.reactivated", "", id); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "user.reactivated", "", id, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 

@@ -18,7 +18,7 @@ import (
 type AuthFlowStore interface {
 	store.OIDCStateStore
 	store.OIDCUserStore
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 }
 
 // AuthHandlers holds OIDC-specific HTTP handlers.
@@ -82,7 +82,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	// IDP reported an error.
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		slog.Warn("OIDC callback: IDP returned an error")
-		if err := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", errParam); err != nil {
+		if err := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", errParam, ""); err != nil {
 			slog.Warn("record audit event", "error", err)
 		}
 		http.Error(w, "Authentication error: "+errParam, http.StatusUnauthorized)
@@ -106,7 +106,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	claims, err := h.provider.Exchange(r.Context(), r.URL.Query().Get("code"), oidcState.PKCEVerifier)
 	if err != nil {
 		slog.Error("OIDCCallbackHandler exchange", "error", err)
-		if auditErr := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", "exchange error"); auditErr != nil {
+		if auditErr := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", "exchange error", ""); auditErr != nil {
 			slog.Warn("record audit event", "error", auditErr)
 		}
 		http.Error(w, "Authentication failed. Please try again.", http.StatusUnauthorized)
@@ -123,7 +123,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 
 	// Deactivated users are rejected before a session is created.
 	if !user.Active {
-		if auditErr := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", "deactivated: "+user.Email); auditErr != nil {
+		if auditErr := h.store.RecordAuditEvent(r.Context(), "oidc.login_failed", "", "deactivated: "+user.Email, ""); auditErr != nil {
 			slog.Warn("record audit event", "error", auditErr)
 		}
 		http.Error(w, "Your account has been deactivated. Contact an administrator.", http.StatusForbidden)
@@ -148,7 +148,7 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 		MaxAge:   28800,
 	})
 
-	if err := h.store.RecordAuditEvent(r.Context(), "oidc.login", "", user.Email); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "oidc.login", "", user.Email, user.Email); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 

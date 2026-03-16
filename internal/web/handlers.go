@@ -58,7 +58,7 @@ type HandlersStore interface {
 	store.ProxyKeyStore
 	store.RequestLogStore
 	store.ModelUsageStore
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 }
 
 // Handlers groups the HTTP handlers for the web UI.
@@ -102,6 +102,22 @@ func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey strin
 		providerMap:   pm,
 		providerNames: providerNames,
 	}
+}
+
+// sessionActorEmail returns the email of the authenticated user for audit logging.
+// For master-key sessions it returns "master_key"; for unauthenticated calls it returns "".
+func sessionActorEmail(ctx context.Context) string {
+	sess := auth.SessionFromContext(ctx)
+	if sess == nil {
+		return ""
+	}
+	if sess.IsMasterKey {
+		return "master_key"
+	}
+	if sess.User != nil {
+		return sess.User.Email
+	}
+	return ""
 }
 
 // templateFuncs returns the shared template function map for the given timezone.
@@ -285,7 +301,7 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if masterKey != h.masterKey {
-		if err := h.store.RecordAuditEvent(r.Context(), "master_key.login_failed", "", ""); err != nil {
+		if err := h.store.RecordAuditEvent(r.Context(), "master_key.login_failed", "", "", ""); err != nil {
 			slog.Warn("record audit event", "error", err)
 		}
 		contentType := r.Header.Get("Content-Type")
@@ -320,7 +336,7 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   28800,
 	})
 
-	if err := h.store.RecordAuditEvent(r.Context(), "master_key.login", "", ""); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "master_key.login", "", "", "master_key"); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 
@@ -346,7 +362,7 @@ func (h *Handlers) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("delete session", "error", delErr)
 		}
 	}
-	if err := h.store.RecordAuditEvent(r.Context(), "session.logout", "", ""); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "session.logout", "", "", sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 	for _, name := range []string{"llmp_session", "session"} {
@@ -725,7 +741,7 @@ func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if sc2 != nil && !sc2.IsMasterKey && sc2.User != nil {
 		auditAction = "key.created_for_user"
 	}
-	if err := h.store.RecordAuditEvent(r.Context(), auditAction, prefix, label); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), auditAction, prefix, label, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 
@@ -812,7 +828,7 @@ func (h *Handlers) RevokeKeyHandler(w http.ResponseWriter, r *http.Request, pref
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "key.revoked", prefix, ""); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "key.revoked", prefix, "", sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 

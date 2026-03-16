@@ -50,7 +50,7 @@ func (s *SQLiteStore) ListAuditEvents(ctx context.Context, params ListAuditParam
 	// Fetch the page.
 	offset := (params.Page - 1) * params.Limit
 	dataQuery := fmt.Sprintf(
-		"SELECT id, action, key_prefix, detail, created_at FROM audit_events %s ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		"SELECT id, action, key_prefix, detail, COALESCE(actor_email, ''), created_at FROM audit_events %s ORDER BY created_at DESC LIMIT ? OFFSET ?",
 		whereClause,
 	)
 	dataArgs := append(args, params.Limit, offset) //nolint:gocritic // intentional append to new slice
@@ -64,7 +64,7 @@ func (s *SQLiteStore) ListAuditEvents(ctx context.Context, params ListAuditParam
 	var events []AuditEvent
 	for rows.Next() {
 		var e AuditEvent
-		if err := rows.Scan(&e.ID, &e.Action, &e.KeyPrefix, &e.Detail, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Action, &e.KeyPrefix, &e.Detail, &e.ActorEmail, &e.CreatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan audit event: %w", err)
 		}
 		events = append(events, e)
