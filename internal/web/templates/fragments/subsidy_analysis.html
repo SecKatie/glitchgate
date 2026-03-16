@@ -1,0 +1,118 @@
+{{define "subsidy_analysis"}}
+{{if .SubsidyAnalysis}}
+{{$sa := .SubsidyAnalysis}}
+<section class="subsidy-analysis">
+    <!-- Hero row: provider loss + secondary stats inline -->
+    <div class="cost-hero" style="border-color: var(--pico-del-color);">
+        <div class="cost-hero-main">
+            <div class="cost-hero-label">Provider Subsidy</div>
+            <div class="cost-hero-value" style="color: var(--pico-del-color);">${{printf "%.2f" $sa.ProviderSubsidyUSD}}</div>
+        </div>
+        <div class="cost-hero-stats">
+            <div class="cost-hero-stat">
+                <span class="cost-hero-stat-value">${{printf "%.2f" $sa.TrueCostUSD}}</span>
+                <span class="cost-hero-stat-label">API Cost</span>
+            </div>
+            <div class="cost-hero-stat">
+                <span class="cost-hero-stat-value">${{printf "%.2f" $sa.SubscriptionCostUSD}}</span>
+                <span class="cost-hero-stat-label">You Paid</span>
+            </div>
+            <div class="cost-hero-stat">
+                <span class="cost-hero-stat-value">{{if $sa.SubsidyPct}}{{printf "%.1f%%" (deref $sa.SubsidyPct)}}{{else}}&mdash;{{end}}</span>
+                <span class="cost-hero-stat-label">Savings</span>
+            </div>
+            {{if .ProviderComparisonSummary.EffectiveTokenCostPerMTok}}
+            <div class="cost-hero-stat">
+                <span class="cost-hero-stat-value">${{printf "%.2f" (deref .ProviderComparisonSummary.EffectiveTokenCostPerMTok)}}</span>
+                <span class="cost-hero-stat-label">Effective $/MTok</span>
+            </div>
+            {{end}}
+            {{if .ProviderComparisonSummary.AverageRealTokenCostPerMTok}}
+            <div class="cost-hero-stat">
+                <span class="cost-hero-stat-value">${{printf "%.2f" (deref .ProviderComparisonSummary.AverageRealTokenCostPerMTok)}}</span>
+                <span class="cost-hero-stat-label">API Cost $/MTok</span>
+            </div>
+            {{end}}
+        </div>
+    </div>
+
+    {{if or $sa.Categories (and $sa.CumulativeData (gt (len $sa.CumulativeData) 1))}}
+    <details style="margin-bottom: 1rem;">
+        <summary>Rate Breakdown &amp; Cumulative Trend</summary>
+
+        {{if $sa.Categories}}
+        <figure style="margin-top: 0.75rem;">
+        <table class="token-detail">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th class="token-detail-value">Tokens</th>
+                    <th class="token-detail-value">API $/MTok</th>
+                    <th class="token-detail-value">Effective $/MTok</th>
+                    <th class="token-detail-value">API Cost</th>
+                    <th class="token-detail-value">You Paid</th>
+                    <th class="token-detail-value">Savings</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{with $sa.TotalInputRate}}
+                <tr class="token-detail-total">
+                    <td>Total Input</td>
+                    <td class="token-detail-value">{{fmtTokens .TotalTokens}}</td>
+                    <td class="token-detail-value"></td>
+                    <td class="token-detail-value"></td>
+                    <td class="token-detail-value token-detail-total-cost">${{printf "%.4f" .APICostUSD}}</td>
+                    <td class="token-detail-value token-detail-total-cost">${{printf "%.4f" .EffectiveCostUSD}}</td>
+                    <td class="token-detail-value">{{if .SavingsPct}}<span class="subsidy-savings" style="font-weight:700">{{printf "%.1f%%" (deref .SavingsPct)}}</span>{{else}}&mdash;{{end}}</td>
+                </tr>
+                {{end}}
+                {{range $sa.InputChildren}}
+                <tr>
+                    <td class="token-detail-child"><span class="token-detail-marker">↳</span>{{.Category}}</td>
+                    <td class="token-detail-value">{{fmtTokens .TotalTokens}}</td>
+                    <td class="token-detail-value">${{printf "%.2f" .APIRatePerMTok}}</td>
+                    <td class="token-detail-value">${{printf "%.2f" .EffRatePerMTok}}</td>
+                    <td class="token-detail-value">${{printf "%.4f" .APICostUSD}}</td>
+                    <td class="token-detail-value">${{printf "%.4f" .EffectiveCostUSD}}</td>
+                    <td class="token-detail-value">{{if .SavingsPct}}<span class="subsidy-savings">{{printf "%.1f%%" (deref .SavingsPct)}}</span>{{else}}&mdash;{{end}}</td>
+                </tr>
+                {{end}}
+                {{with $sa.OutputRate}}
+                <tr class="token-detail-total">
+                    <td>Output</td>
+                    <td class="token-detail-value">{{fmtTokens .TotalTokens}}</td>
+                    <td class="token-detail-value">${{printf "%.2f" .APIRatePerMTok}}</td>
+                    <td class="token-detail-value">${{printf "%.2f" .EffRatePerMTok}}</td>
+                    <td class="token-detail-value token-detail-total-cost">${{printf "%.4f" .APICostUSD}}</td>
+                    <td class="token-detail-value token-detail-total-cost">${{printf "%.4f" .EffectiveCostUSD}}</td>
+                    <td class="token-detail-value">{{if .SavingsPct}}<span class="subsidy-savings" style="font-weight:700">{{printf "%.1f%%" (deref .SavingsPct)}}</span>{{else}}&mdash;{{end}}</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+        </figure>
+        {{end}}
+
+        {{if and $sa.CumulativeData (gt (len $sa.CumulativeData) 1)}}
+        <h4 style="margin-top: 1rem;">Cumulative Provider Subsidy</h4>
+        <figure>
+            <div class="bar-chart subsidy-chart">
+                {{range $sa.CumulativeData}}
+                <div class="bar-col" title="{{.Date}}: Provider loss ${{printf "%.2f" .CumulativeSubsidy}} (API: ${{printf "%.2f" .CumulativeAPICost}}, Sub: ${{printf "%.2f" .CumulativeSubCost}})">
+                    <div class="bar-val">${{printf "%.0f" .CumulativeSubsidy}}</div>
+                    <div class="bar subsidy-bar" style="height: {{if gt $sa.MaxCumulativeSubsidy 0.0}}{{barPct .CumulativeSubsidy $sa.MaxCumulativeSubsidy}}%{{else}}2px{{end}};"></div>
+                </div>
+                {{end}}
+            </div>
+            <div class="bar-labels">
+                {{range $sa.CumulativeData}}
+                <div class="bar-date">{{shortDate .Date}}</div>
+                {{end}}
+            </div>
+        </figure>
+        {{end}}
+    </details>
+    {{end}}
+</section>
+{{end}}
+{{end}}

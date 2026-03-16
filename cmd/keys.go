@@ -77,7 +77,7 @@ type keyStore interface {
 	Close() error
 }
 
-func openStore() (keyStore, error) {
+func openKeyStore() (keyStore, error) {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
@@ -94,7 +94,7 @@ func openStore() (keyStore, error) {
 }
 
 func runKeysCreate(_ *cobra.Command, _ []string) error {
-	st, err := openStore()
+	st, err := openKeyStore()
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func runKeysCreate(_ *cobra.Command, _ []string) error {
 }
 
 func runKeysList(_ *cobra.Command, _ []string) error {
-	st, err := openStore()
+	st, err := openKeyStore()
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func runKeysList(_ *cobra.Command, _ []string) error {
 }
 
 func runKeysDelete(_ *cobra.Command, args []string) error {
-	st, err := openStore()
+	st, err := openKeyStore()
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func runKeysDelete(_ *cobra.Command, args []string) error {
 }
 
 func runKeysUpdate(_ *cobra.Command, args []string) error {
-	st, err := openStore()
+	st, err := openKeyStore()
 	if err != nil {
 		return err
 	}

@@ -43,7 +43,7 @@ func (s *SQLiteStore) GetModelUsageSummary(ctx context.Context, modelName string
 // keyed by model name. Uses resolved_model_name to capture the actual model used after fallback resolution.
 func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error) {
 	const query = `SELECT
-		COALESCE(resolved_model_name, model_requested) AS model_name,
+		COALESCE(NULLIF(resolved_model_name, ''), model_requested) AS model_name,
 		COUNT(*),
 		COALESCE(SUM(input_tokens), 0),
 		COALESCE(SUM(cache_creation_input_tokens), 0),
@@ -52,7 +52,7 @@ func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string
 		COALESCE(MAX(provider_name), ''),
 		COALESCE(MAX(model_upstream), '')
 	FROM request_logs
-	GROUP BY COALESCE(resolved_model_name, model_requested)`
+	GROUP BY COALESCE(NULLIF(resolved_model_name, ''), model_requested)`
 
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {

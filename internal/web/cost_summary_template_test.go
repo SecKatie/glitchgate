@@ -104,7 +104,7 @@ func TestCostSummaryTemplateShowsProviderSubscriptionComparisons(t *testing.T) {
 	require.NoError(t, err)
 	body := rec.Body.String()
 
-	require.Contains(t, body, "Monthly Subscriptions")
+	require.Contains(t, body, "Monthly Subscription")
 	require.Contains(t, body, "Token vs Subscription")
 	require.Contains(t, body, "Effective Subscription $/MTok")
 	require.Contains(t, body, "Avg Real Token $/MTok")

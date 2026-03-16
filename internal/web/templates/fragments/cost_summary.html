@@ -1,44 +1,24 @@
 {{define "cost_summary"}}
-<!-- Summary cards -->
-<div class="summary-cards">
-    <article class="summary-card">
-        <div class="label">{{if eq .GroupBy "provider"}}Est. Token Cost{{else}}Total Cost{{end}}</div>
-        <div class="value">${{printf "%.2f" .TokenCosts.TotalCostUSD}}</div>
-    </article>
-    {{if and (eq .GroupBy "provider") .ProviderComparisonSummary.HasAnySubscription}}
-    <article class="summary-card">
-        <div class="label">Monthly Subscriptions</div>
-        <div class="value">${{printf "%.2f" .ProviderComparisonSummary.TotalSubscriptionCost}}</div>
-    </article>
-    <article class="summary-card">
-        <div class="label">Token vs Subscription</div>
-        <div class="value">{{if .ProviderComparisonSummary.TokenVsSubscriptionPct}}{{printf "%+.1f%%" (deref .ProviderComparisonSummary.TokenVsSubscriptionPct)}}{{else}}—{{end}}</div>
-    </article>
-    <article class="summary-card">
-        <div class="label">Effective Subscription $/MTok</div>
-        <div class="value">{{if .ProviderComparisonSummary.EffectiveTokenCostPerMTok}}${{printf "%.2f" (deref .ProviderComparisonSummary.EffectiveTokenCostPerMTok)}}{{else}}—{{end}}</div>
-    </article>
-    <article class="summary-card">
-        <div class="label">Avg Real Token $/MTok</div>
-        <div class="value">{{if .ProviderComparisonSummary.AverageRealTokenCostPerMTok}}${{printf "%.2f" (deref .ProviderComparisonSummary.AverageRealTokenCostPerMTok)}}{{else}}—{{end}}</div>
-    </article>
-    <article class="summary-card">
-        <div class="label">Effective vs Real $/MTok</div>
-        <div class="value">{{if .ProviderComparisonSummary.EffectiveVsRealPct}}{{printf "%+.1f%%" (deref .ProviderComparisonSummary.EffectiveVsRealPct)}}{{else}}—{{end}}</div>
-    </article>
-    {{end}}
-    <article class="summary-card">
-        <div class="label">Total Requests</div>
-        <div class="value">{{.Summary.TotalRequests}}</div>
-    </article>
-    <article class="summary-card">
-        <div class="label">Total Input Tokens</div>
-        <div class="value">{{fmtTokens .TotalAllInputTokens}}</div>
-    </article>
-    <article class="summary-card">
-        <div class="label">Output Tokens</div>
-        <div class="value">{{fmtTokens .Summary.TotalOutputTokens}}</div>
-    </article>
+<!-- Hero cost + key metrics -->
+<div class="cost-hero">
+    <div class="cost-hero-main">
+        <div class="cost-hero-label">{{if eq .GroupBy "provider"}}Est. Token Cost{{else}}Total Cost{{end}}</div>
+        <div class="cost-hero-value">${{printf "%.2f" .TokenCosts.TotalCostUSD}}</div>
+    </div>
+    <div class="cost-hero-stats">
+        <div class="cost-hero-stat">
+            <span class="cost-hero-stat-value">{{.Summary.TotalRequests}}</span>
+            <span class="cost-hero-stat-label">Requests</span>
+        </div>
+        <div class="cost-hero-stat">
+            <span class="cost-hero-stat-value">{{fmtTokens .TotalAllInputTokens}}</span>
+            <span class="cost-hero-stat-label">Input Tokens</span>
+        </div>
+        <div class="cost-hero-stat">
+            <span class="cost-hero-stat-value">{{fmtTokens .Summary.TotalOutputTokens}}</span>
+            <span class="cost-hero-stat-label">Output Tokens</span>
+        </div>
+    </div>
 </div>
 
 <details style="margin-bottom: 1.5rem;">
@@ -103,6 +83,11 @@
     {{end}}
 </details>
 
+{{if and (eq .GroupBy "provider") .ProviderComparisonSummary.HasAnySubscription}}
+<!-- Subsidy analysis — incorporates subscription comparison -->
+{{template "subsidy_analysis" .}}
+{{end}}
+
 <!-- Daily cost chart -->
 {{if and .Timeseries (gt (len .Timeseries) 1)}}
 <h3>Daily Spend Trend</h3>
@@ -132,15 +117,15 @@
 </p>
 {{end}}
 <figure>
-<table>
+<table class="breakdown-table">
     <thead>
         <tr>
             <th>{{if eq .GroupBy "key"}}API Key{{else if eq .GroupBy "provider"}}Provider{{else}}Model{{end}}</th>
             <th></th>
-            <th>Total Input Tokens</th>
-            <th>Output Tokens</th>
-            <th>Requests</th>
-            <th>{{if eq .GroupBy "provider"}}Est. Token Cost{{else}}Est. Cost{{end}}</th>
+            <th class="sortable" data-col="input_tokens">Total Input Tokens <span class="sort-indicator"></span></th>
+            <th class="sortable" data-col="output_tokens">Output Tokens <span class="sort-indicator"></span></th>
+            <th class="sortable" data-col="requests">Requests <span class="sort-indicator"></span></th>
+            <th class="sortable" data-col="cost">{{if eq .GroupBy "provider"}}Est. Token Cost{{else}}Est. Cost{{end}} <span class="sort-indicator"></span></th>
             {{if eq .GroupBy "provider"}}
             <th>Monthly Subscription</th>
             <th>Token vs Subscription</th>
@@ -159,10 +144,10 @@
                     <span class="breakdown-bar" style="width: {{if gt $.MaxBreakdownRequests 0.0}}{{barPct (toFloat64 .Requests) $.MaxBreakdownRequests}}{{else}}0{{end}}px; min-width: 2px; max-width: 100px;"></span>
                 </div>
             </td>
-            <td>{{fmtTokens (sumTokens .InputTokens .CacheCreationTokens .CacheReadTokens)}}</td>
-            <td>{{fmtTokens .OutputTokens}}</td>
-            <td>{{.Requests}}</td>
-            <td>{{$cost := index $.BreakdownCosts .Group}}{{if $cost}}${{printf "%.4f" $cost}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td data-col="input_tokens" data-value="{{sumTokens .InputTokens .CacheCreationTokens .CacheReadTokens}}">{{fmtTokens (sumTokens .InputTokens .CacheCreationTokens .CacheReadTokens)}}</td>
+            <td data-col="output_tokens" data-value="{{.OutputTokens}}">{{fmtTokens .OutputTokens}}</td>
+            <td data-col="requests" data-value="{{.Requests}}">{{.Requests}}</td>
+            <td data-col="cost" data-value="{{printf "%.6f" (index $.BreakdownCosts .Group)}}">{{$cost := index $.BreakdownCosts .Group}}{{if $cost}}${{printf "%.4f" $cost}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
             {{if eq $.GroupBy "provider"}}
             <td>{{$comparison := index $.ProviderComparisons .Group}}{{if $comparison}}${{printf "%.2f" $comparison.MonthlySubscriptionCost}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
             <td>{{$comparison := index $.ProviderComparisons .Group}}{{if and $comparison $comparison.TokenVsSubscriptionPct}}{{printf "%+.1f%%" (deref $comparison.TokenVsSubscriptionPct)}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>

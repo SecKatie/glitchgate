@@ -32,7 +32,9 @@ Glitchgate acts as a unified API gateway for multiple LLM providers. It accepts 
 - Streaming support (SSE pass-through and synthesis)
 - Async request logging with cost tracking
 - Web UI for logs, costs, model management, and team administration
-- OIDC authentication with role-based access control
+- OIDC authentication with role-based access control (global_admin, team_admin, member)
+- Team management with user assignments
+- Budget enforcement at global, team, user, and API key scopes
 
 ---
 
@@ -71,15 +73,18 @@ glitchgate/
 │   │   └── copilot/             # GitHub Copilot client
 │   ├── translate/               # API format translation
 │   ├── store/                   # SQLite data access layer
-│   │   ├── store.go             # Store interface
+│   │   ├── store.go             # Narrow store interfaces
 │   │   ├── sqlite.go            # SQLiteStore implementation
-│   │   ├── sqlite_*.go          # Narrow interface implementations
+│   │   ├── sqlite_*.go          # Interface implementations
+│   │   ├── budgets.go           # Budget policy helpers
+│   │   ├── oidc_*.go            # OIDC user/state management
 │   │   └── migrations/          # goose migrations
 │   ├── web/                     # Web UI handlers + templates
 │   ├── oidc/                    # OIDC provider wrapper
 │   ├── pricing/                 # Cost calculation
 │   ├── ratelimit/               # Token-bucket rate limiting
-│   └── models/                  # Shared types
+│   ├── models/                  # Shared types
+│   └── budgets/                 # Budget policy enforcement (embedded in store)
 ├── queries/                     # sqlc SQL files
 └── go.mod
 ```

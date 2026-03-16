@@ -26,6 +26,11 @@
     vertical-align: middle;
     margin-left: 0.25em;
   }
+  .upstream-cell {
+    font-family: var(--pico-font-family-monospace);
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+  }
   #model-search { min-width: 16rem; }
 </style>
 {{end}}
@@ -55,11 +60,12 @@
 <table id="models-table">
   <thead>
     <tr>
-      <th data-col="name"   data-type="str" >Model Name</th>
-      <th data-col="prov"   data-type="str" >Provider</th>
-      <th data-col="input"  data-type="num" >Input ($/M)</th>
-      <th data-col="output" data-type="num" >Output ($/M)</th>
-      <th data-col="spend"  data-type="num"  class="cost">Total Spend</th>
+      <th data-col="name"     data-type="str" >Model Name</th>
+      <th data-col="prov"     data-type="str" >Provider</th>
+      <th data-col="upstream" data-type="str" >Upstream Model</th>
+      <th data-col="input"    data-type="num" >Input $/MTok</th>
+      <th data-col="output"   data-type="num" >Output $/MTok</th>
+      <th data-col="spend"    data-type="num"  class="cost">Total Spend</th>
     </tr>
   </thead>
   <tbody>
@@ -69,21 +75,24 @@
       data-name="{{.ModelName}}"
       data-kind="{{if .IsUnconfigured}}unconfigured{{else if .IsVirtual}}virtual{{else if .IsWildcard}}wildcard{{else}}configured{{end}}"
       data-prov="{{if .IsVirtual}}virtual{{else}}{{.ProviderName}} {{.ProviderType}}{{end}}"
+      data-upstream="{{.UpstreamModel}}"
       data-input="{{if .HasPricing}}{{.Pricing.InputPerMillion}}{{else}}-1{{end}}"
       data-output="{{if .HasPricing}}{{.Pricing.OutputPerMillion}}{{else}}-1{{end}}"
       data-spend="{{if .HasPricing}}{{.TotalSpendUSD}}{{else}}-1{{end}}"
       {{if .IsUnconfigured}}style="color:var(--pico-muted-color)"{{end}}
     >
       <td>
-        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>
-        {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span> <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">⎘</button>{{else if not .IsWildcard}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">⎘</button>{{end}}
+        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{if .ModelName}}{{.ModelName}}{{else}}<em style="color:var(--pico-muted-color)">(empty)</em>{{end}}</a>
+        {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span>{{end}}
+        {{if .IsVirtual}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-primary) 15%,transparent);color:var(--pico-primary)">Virtual</span>{{end}}
+        {{if .IsWildcard}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-color) 12%,transparent);color:var(--pico-muted-color)">Wildcard</span>{{end}}
+        {{if and (not .IsWildcard) .ModelName}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
       </td>
-      <td>
-        {{if .IsVirtual}}Virtual{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}—{{end}}
-      </td>
-      <td>{{if .HasPricing}}{{printf "%.4f" .Pricing.InputPerMillion}}{{else}}—{{end}}</td>
-      <td>{{if .HasPricing}}{{printf "%.4f" .Pricing.OutputPerMillion}}{{else}}—{{end}}</td>
-      <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}—{{end}}</td>
+      <td>{{if .IsVirtual}}Virtual{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
+      <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
+      <td>{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}}{{else}}&mdash;{{end}}</td>
+      <td>{{if .HasPricing}}${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
+      <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
     </tr>
     {{end}}
   </tbody>
@@ -102,7 +111,7 @@
     if (type === 'num') {
       var an = parseFloat(a), bn = parseFloat(b);
       if (an === -1 && bn === -1) return 0;
-      if (an === -1) return 1;   // no-price rows sink
+      if (an === -1) return 1;
       if (bn === -1) return -1;
       return an - bn;
     }
@@ -154,15 +163,11 @@
     document.getElementById('no-results').style.display = visible === 0 ? '' : 'none';
   }
 
-  // Wire header clicks.
   document.querySelectorAll('#models-table th[data-col]').forEach(function(th) {
     th.addEventListener('click', function() { sortTable(th.dataset.col, th.dataset.type || 'str'); });
   });
 
-  // Expose for inline oninput/onchange.
   window.filterModels = filterModels;
-
-  // Apply default alphabetical sort.
   sortTable('name', 'str');
 })();
 </script>
