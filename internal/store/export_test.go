@@ -51,7 +51,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 
 	// Export.
 	var buf bytes.Buffer
-	err = src.Export(ctx, &buf)
+	err = src.Export(ctx, &buf, nil)
 	require.NoError(t, err)
 
 	// Verify gzip format (magic bytes).
@@ -76,7 +76,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	defer func() { _ = dst.Close() }()
 	require.NoError(t, dst.Migrate(ctx))
 
-	stats, err := dst.Import(ctx, bytes.NewReader(exported))
+	stats, err := dst.Import(ctx, bytes.NewReader(exported), nil)
 	require.NoError(t, err)
 
 	// Verify stats.
@@ -131,7 +131,7 @@ func TestExportImportWithNewlines(t *testing.T) {
 
 	// Export and re-import.
 	var buf bytes.Buffer
-	require.NoError(t, src.Export(ctx, &buf))
+	require.NoError(t, src.Export(ctx, &buf, nil))
 
 	dstPath := t.TempDir() + "/dest.db"
 	dst, err := NewSQLiteStore(dstPath)
@@ -139,7 +139,7 @@ func TestExportImportWithNewlines(t *testing.T) {
 	defer func() { _ = dst.Close() }()
 	require.NoError(t, dst.Migrate(ctx))
 
-	_, err = dst.Import(ctx, &buf)
+	_, err = dst.Import(ctx, &buf, nil)
 	require.NoError(t, err)
 
 	// Verify the newlines survived the round trip.
@@ -173,7 +173,7 @@ func TestImportSkipsDuplicates(t *testing.T) {
 		time.Now().UTC().Format(time.RFC3339))
 	require.NoError(t, gz.Close())
 
-	stats, err := st.Import(ctx, &buf)
+	stats, err := st.Import(ctx, &buf, nil)
 	require.NoError(t, err)
 
 	// Key should not have been imported (duplicate PK).

@@ -81,7 +81,10 @@ func runDBExport(_ *cobra.Command, args []string) error {
 		w = f
 	}
 
-	if err := st.Export(context.Background(), w); err != nil {
+	progress := func(table string, rows int64) {
+		fmt.Fprintf(os.Stderr, "  %-20s %d rows\n", table, rows)
+	}
+	if err := st.Export(context.Background(), w, progress); err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
 
@@ -104,7 +107,10 @@ func runDBImport(_ *cobra.Command, args []string) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	stats, err := st.Import(context.Background(), f)
+	progress := func(table string, rows int64) {
+		fmt.Fprintf(os.Stderr, "  %-20s %d rows\n", table, rows)
+	}
+	stats, err := st.Import(context.Background(), f, progress)
 	if err != nil {
 		return fmt.Errorf("import: %w", err)
 	}

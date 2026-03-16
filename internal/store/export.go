@@ -27,10 +27,15 @@ var exportTables = []string{
 	"audit_events",
 }
 
+// ProgressFunc is called during export/import to report per-table progress.
+// It receives the table name and the cumulative row count for that table.
+type ProgressFunc func(table string, rows int64)
+
 // Export writes all persistent data as a gzip-compressed SQL dump to w.
 // Each row is emitted as an INSERT OR IGNORE statement so the dump can be
 // loaded into an existing database without conflicting with existing rows.
-func (s *SQLiteStore) Export(ctx context.Context, w io.Writer) error {
+// If progress is non-nil it is called after each table with the row count.
+func (s *SQLiteStore) Export(ctx context.Context, w io.Writer, progress ProgressFunc) error {
 	gz := gzip.NewWriter(w)
 
 	fmt.Fprintln(gz, "-- glitchgate database export")
@@ -40,9 +45,13 @@ func (s *SQLiteStore) Export(ctx context.Context, w io.Writer) error {
 	fmt.Fprintln(gz)
 
 	for _, table := range exportTables {
-		if err := writeTableSQL(ctx, s.db, gz, table); err != nil {
+		n, err := writeTableSQL(ctx, s.db, gz, table)
+		if err != nil {
 			_ = gz.Close()
 			return fmt.Errorf("export table %s: %w", table, err)
+		}
+		if progress != nil {
+			progress(table, n)
 		}
 	}
 	if err := gz.Close(); err != nil {
@@ -55,7 +64,9 @@ func (s *SQLiteStore) Export(ctx context.Context, w io.Writer) error {
 // statements within a transaction. The target database must already have
 // migrations applied. Existing rows with conflicting primary keys are
 // skipped (INSERT OR IGNORE).
-func (s *SQLiteStore) Import(ctx context.Context, r io.Reader) (*ImportStats, error) {
+// If progress is non-nil it is called after each table transition and at
+// completion with the cumulative row count for the previous table.
+func (s *SQLiteStore) Import(ctx context.Context, r io.Reader, progress ProgressFunc) (*ImportStats, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("open gzip: %w", err)
@@ -103,6 +114,14 @@ func (s *SQLiteStore) Import(ctx context.Context, r io.Reader) (*ImportStats, er
 	}()
 
 	stats := &ImportStats{}
+	var currentTable string
+	var currentCount int64
+
+	flushProgress := func() {
+		if progress != nil && currentTable != "" {
+			progress(currentTable, currentCount)
+		}
+	}
 
 	execLine := func(line string) error {
 		line = strings.TrimSpace(line)
@@ -110,12 +129,18 @@ func (s *SQLiteStore) Import(ctx context.Context, r io.Reader) (*ImportStats, er
 			return nil
 		}
 		table := extractTableName(line)
+		if table != currentTable {
+			flushProgress()
+			currentTable = table
+			currentCount = 0
+		}
 		res, execErr := tx.ExecContext(ctx, line)
 		if execErr != nil {
 			return fmt.Errorf("execute SQL for %s: %w", table, execErr)
 		}
 		n, _ := res.RowsAffected()
 		stats.add(table, n)
+		currentCount++
 		return nil
 	}
 
@@ -134,6 +159,7 @@ func (s *SQLiteStore) Import(ctx context.Context, r io.Reader) (*ImportStats, er
 	if err = scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read SQL: %w", err)
 	}
+	flushProgress() // report final table
 
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
@@ -165,22 +191,24 @@ func (s *ImportStats) add(table string, rows int64) {
 	s.Tables = append(s.Tables, TableImportStat{Table: table, Rows: rows})
 }
 
-// writeTableSQL writes INSERT OR IGNORE statements for every row in table.
-func writeTableSQL(ctx context.Context, db *sql.DB, w io.Writer, table string) error {
+// writeTableSQL writes INSERT OR IGNORE statements for every row in table
+// and returns the number of rows written.
+func writeTableSQL(ctx context.Context, db *sql.DB, w io.Writer, table string) (int64, error) {
 	// Table name is from our hardcoded list, not user input.
 	rows, err := db.QueryContext(ctx, "SELECT * FROM "+table) //nolint:gosec // table name from exportTables constant
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = rows.Close() }()
 
 	cols, err := rows.Columns()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	prefix := fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES", table, strings.Join(cols, ", "))
 
+	var count int64
 	for rows.Next() {
 		values := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
@@ -188,7 +216,7 @@ func writeTableSQL(ctx context.Context, db *sql.DB, w io.Writer, table string) e
 			ptrs[i] = &values[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			return err
+			return count, err
 		}
 
 		literals := make([]string, len(values))
@@ -196,10 +224,11 @@ func writeTableSQL(ctx context.Context, db *sql.DB, w io.Writer, table string) e
 			literals[i] = sqlLiteral(v)
 		}
 		if _, err := fmt.Fprintf(w, "%s (%s);\n", prefix, strings.Join(literals, ", ")); err != nil {
-			return err
+			return count, err
 		}
+		count++
 	}
-	return rows.Err()
+	return count, rows.Err()
 }
 
 // sqlLiteral formats a Go value as a SQL literal suitable for an INSERT statement.
