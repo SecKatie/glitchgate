@@ -120,6 +120,8 @@ type MaintenanceStore interface {
 	CleanupExpiredSessions(ctx context.Context) error
 	CleanupExpiredOIDCState(ctx context.Context) error
 	PruneRequestLogs(ctx context.Context, before time.Time, limit int) (int64, error)
+	TrimRequestLogBodies(ctx context.Context, before time.Time, limit int) (int64, error)
+	CountTrimmableLogBodies(ctx context.Context, before time.Time) (int64, error)
 }
 
 // BudgetCheckStore contains the operations needed for budget enforcement and display.
