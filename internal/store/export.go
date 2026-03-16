@@ -228,19 +228,14 @@ func sqlLiteral(v any) string {
 }
 
 // quoteSQL wraps a string in single quotes with proper escaping.
-// Newlines and carriage returns are replaced with char() concatenation
-// so that every SQL statement stays on a single line.
+// Strings containing newlines, carriage returns, or null bytes are encoded
+// as hex via CAST(X'...' AS TEXT) to keep each SQL statement on one line
+// and avoid deeply nested expression trees that exceed SQLite's depth limit.
 func quoteSQL(s string) string {
-	s = strings.ReplaceAll(s, "'", "''")
 	if !strings.ContainsAny(s, "\n\r\x00") {
-		return "'" + s + "'"
+		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 	}
-	// Replace in order: \r\n first (two-char sequence), then lone \n / \r.
-	s = strings.ReplaceAll(s, "\r\n", "' || char(13,10) || '")
-	s = strings.ReplaceAll(s, "\n", "' || char(10) || '")
-	s = strings.ReplaceAll(s, "\r", "' || char(13) || '")
-	s = strings.ReplaceAll(s, "\x00", "' || char(0) || '")
-	return "'" + s + "'"
+	return "CAST(X'" + hex.EncodeToString([]byte(s)) + "' AS TEXT)"
 }
 
 // extractTableName parses the table name from an INSERT OR IGNORE statement.
