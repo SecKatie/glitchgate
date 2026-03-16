@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	"github.com/seckatie/glitchgate/internal/provider"
 	"github.com/stretchr/testify/require"
 )
 

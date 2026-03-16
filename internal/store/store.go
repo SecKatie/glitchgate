@@ -120,10 +120,24 @@ type MaintenanceStore interface {
 	PruneRequestLogs(ctx context.Context, before time.Time, limit int) (int64, error)
 }
 
-// BudgetCheckStore contains the operations needed for pre-flight budget enforcement.
+// BudgetCheckStore contains the operations needed for budget enforcement and display.
 type BudgetCheckStore interface {
 	GetApplicableBudgets(ctx context.Context, proxyKeyID string) ([]ApplicableBudget, error)
 	GetSpendSince(ctx context.Context, scope, scopeID string, since time.Time) (float64, error)
+	GetBudgetsForScope(ctx context.Context, scopeType, userID, teamID string) ([]ApplicableBudget, error)
+}
+
+// BudgetAdminStore contains administrative operations for managing budget limits.
+type BudgetAdminStore interface {
+	SetGlobalBudget(ctx context.Context, limitUSD float64, period string) error
+	ClearGlobalBudget(ctx context.Context) error
+	SetUserBudget(ctx context.Context, userID string, limitUSD float64, period string) error
+	ClearUserBudget(ctx context.Context, userID string) error
+	SetTeamBudget(ctx context.Context, teamID string, limitUSD float64, period string) error
+	ClearTeamBudget(ctx context.Context, teamID string) error
+	SetKeyBudget(ctx context.Context, keyID string, limitUSD float64, period string) error
+	ClearKeyBudget(ctx context.Context, keyID string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
 }
 
 // Store defines all data-access operations required by the proxy. It composes
@@ -144,6 +158,7 @@ type Store interface {
 	OIDCUserStore
 	MaintenanceStore
 	BudgetCheckStore
+	BudgetAdminStore
 
 	Migrate(ctx context.Context) error
 	Close() error

@@ -18,12 +18,12 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/spf13/cobra"
 
-	"codeberg.org/kglitchy/glitchgate/internal/app"
-	"codeberg.org/kglitchy/glitchgate/internal/auth"
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/proxy"
-	"codeberg.org/kglitchy/glitchgate/internal/ratelimit"
-	"codeberg.org/kglitchy/glitchgate/internal/web"
+	"github.com/seckatie/glitchgate/internal/app"
+	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/proxy"
+	"github.com/seckatie/glitchgate/internal/ratelimit"
+	"github.com/seckatie/glitchgate/internal/web"
 )
 
 var serveCmd = &cobra.Command{
@@ -105,7 +105,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	webHandlers := web.NewHandlers(runtime.Store, sessions, cfg.MasterKey, runtime.Calculator, tmpl, runtime.OIDCProvider, cfg.ModelList, cfg.Providers, runtime.ProviderNames)
 	authHandlers := web.NewAuthHandlers(runtime.Store, sessions, runtime.OIDCProvider)
-	costHandlers := web.NewCostHandlers(runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
+	costHandlers := web.NewCostHandlers(runtime.Store, runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
 	userHandlers := web.NewUserHandlers(runtime.Store, sessions, tmpl)
 	teamHandlers := web.NewTeamHandlers(runtime.Store, sessions, tmpl)
 
@@ -145,6 +145,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Get("/api/costs", costHandlers.CostSummaryHandler)
 		r.Get("/api/costs/timeseries", costHandlers.CostTimeseriesHandler)
 		r.Get("/api/costs/fragment", costHandlers.CostSummaryFragmentHandler)
+
+		// Budget management (GA-only for global/user, GA/TA for team).
+		r.With(web.RequireGlobalAdmin).Post("/api/budgets/global", costHandlers.SetGlobalBudgetHandler)
+		r.With(web.RequireGlobalAdmin).Post("/api/budgets/global/clear", costHandlers.ClearGlobalBudgetHandler)
+		r.With(web.RequireGlobalAdmin).Post("/api/budgets/user/{id}", costHandlers.SetUserBudgetHandler)
+		r.With(web.RequireGlobalAdmin).Post("/api/budgets/user/{id}/clear", costHandlers.ClearUserBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/team/{id}", costHandlers.SetTeamBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/team/{id}/clear", costHandlers.ClearTeamBudgetHandler)
 
 		// Models.
 		r.Get("/models", webHandlers.ModelsPage)

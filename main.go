@@ -4,7 +4,7 @@ package main
 import (
 	_ "time/tzdata" // embed IANA timezone data for portable builds
 
-	"codeberg.org/kglitchy/glitchgate/cmd"
+	"github.com/seckatie/glitchgate/cmd"
 )
 
 func main() {

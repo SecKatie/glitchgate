@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 )
 
 // AnthropicToOpenAI translates an Anthropic MessagesResponse into an

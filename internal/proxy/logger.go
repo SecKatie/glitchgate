@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 // AsyncLoggerOptions configures the async request log writer.

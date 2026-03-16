@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 const (

@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/pricing"
 )
 
 func TestCalculate(t *testing.T) {

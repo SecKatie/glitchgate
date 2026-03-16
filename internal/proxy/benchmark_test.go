@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
-	"codeberg.org/kglitchy/glitchgate/internal/proxy"
-	"codeberg.org/kglitchy/glitchgate/internal/translate"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/proxy"
+	"github.com/seckatie/glitchgate/internal/translate"
 )
 
 // BenchmarkRedactRequestBody benchmarks the JSON body redaction function.

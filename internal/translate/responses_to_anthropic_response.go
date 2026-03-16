@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 )
 
 // ResponsesToAnthropicResponse translates a Responses API response body

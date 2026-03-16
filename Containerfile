@@ -25,7 +25,7 @@ FROM alpine:3.21
 # OCI labels
 LABEL org.opencontainers.image.title="glitchgate"
 LABEL org.opencontainers.image.description="LLM API reverse proxy with format translation"
-LABEL org.opencontainers.image.source="https://codeberg.org/kglitchy/glitchgate"
+LABEL org.opencontainers.image.source="https://github.com/seckatie/glitchgate"
 LABEL org.opencontainers.image.licenses="AGPL-3.0"
 
 # Install ca-certificates for HTTPS requests to upstream providers

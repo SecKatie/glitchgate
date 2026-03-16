@@ -9,7 +9,7 @@ import (
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/config"
 )
 
 // Claims holds the identity claims extracted from a verified ID token.

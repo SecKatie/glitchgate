@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/provider/copilot"
 )
 
 var (

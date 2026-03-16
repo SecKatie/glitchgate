@@ -11,7 +11,7 @@ The codebase has solid structure, good test coverage in core paths, working cont
 Release-blocking gaps:
 
 1. ~~A web UI authorization flaw allows scoped users to discover and modify keys they should not control.~~ **FIXED** (2026-03-15).
-2. ~~Budget enforcement is described as a shipped feature, but is not enforced on the proxy request path.~~ **P1 FIXED** (2026-03-15). P2 (budget status dashboard) and P3 (budget management UI) remain.
+2. ~~Budget enforcement is described as a shipped feature, but is not enforced on the proxy request path.~~ **FIXED** (2026-03-15). P1 (enforcement), P2 (dashboard display), and P3 (management UI) complete.
 3. No CI pipeline exists -- lint, test, and security scanning are not automated.
 4. No version embedding -- deployed builds cannot be identified.
 5. Security-critical packages have zero test coverage.
@@ -39,9 +39,9 @@ Resolved 2026-03-15. Changes:
 - `RevokeKeyHandler` refactored to use shared `canMutateKey` helper.
 - 15 new tests cover scope enforcement for update, revoke, listing, and edge cases across all role types.
 
-### ~~2. Budget enforcement is not implemented on the serving path~~ P1 FIXED
+### ~~2. Budget enforcement is not implemented on the serving path~~ FIXED
 
-Resolved 2026-03-15 (P1 enforcement only). Changes:
+Resolved 2026-03-15. Changes:
 
 - Added `cost_usd` column to `request_logs` (migration 023) with covering index for budget queries.
 - Cost is computed at log time via `pricing.Calculator` and stored alongside token counts.
@@ -53,10 +53,9 @@ Resolved 2026-03-15 (P1 enforcement only). Changes:
 - Returns 429 with scope, period, limit, spend, and reset time on violation.
 - 30 new tests cover period calculation, budget checker logic, and store queries.
 
-**Remaining work (non-blocking):**
+**P2 (budget status dashboard)**: Budget utilization displayed on cost dashboard with progress bars, percentage used, and color-coded status indicators (ok/warning/exceeded). Includes reset time display.
 
-- **P2: Budget status dashboard** — Display current spend vs. configured limits on the cost dashboard with visual indicators for approaching/exceeded limits.
-- **P3: Budget management UI** — Web UI for administrators to configure per-key, per-user, per-team, and global budgets. Currently budgets must be set via direct SQL inserts into the budget tables.
+**P3 (budget management UI)**: Web UI for administrators to set/update/clear budget limits at global, user, and team scopes. Inline edit forms on budget status cards with HTMX. GA sees all scopes with edit controls and "Set new budget" form; TA sees team budget with edit; members see read-only status. Input validation enforces positive limits with max 2 decimal places and valid periods. All mutations are audit-logged.
 
 ### 3. No CI pipeline
 
@@ -390,7 +389,7 @@ The app should not be called deployment-ready until all items below are complete
 4. Fix Containerfile `GOARCH` hardcoding.
 5. Fix constant-time master key comparison.
 6. Add tests for auth, oidc, and ratelimit packages.
-7. ~~Implement budget enforcement or remove claims from README.~~ **P1 done. P2/P3 deferred.**
+7. ~~Implement budget enforcement or remove claims from README.~~ **Done (P1/P2/P3).**
 8. Add CSRF tokens and CSP header.
 9. Fix SSE translate stream connection leaks.
 10. Add configurable log level and metrics endpoint.

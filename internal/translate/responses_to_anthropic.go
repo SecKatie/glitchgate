@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 )
 
 // ResponsesToAnthropic translates a Responses API request to an Anthropic MessagesRequest.

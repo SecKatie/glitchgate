@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 var logsCmd = &cobra.Command{

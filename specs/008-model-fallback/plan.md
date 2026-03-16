@@ -9,7 +9,7 @@ Add virtual model entries to `model_list` config. A virtual entry carries a `fal
 
 ## Technical Context
 
-**Language/Version**: Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`)
+**Language/Version**: Go 1.26.1 (module `github.com/seckatie/glitchgate`)
 **Primary Dependencies**: chi/v5, go-resty/v3, cobra+viper, modernc.org/sqlite, goose/v3, testify/require
 **Storage**: SQLite — one new migration (`014_add_fallback_attempts.sql`)
 **Testing**: `go test -race ./...`, table-driven, testify/require

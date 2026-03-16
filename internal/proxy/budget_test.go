@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 func TestPeriodStart(t *testing.T) {
@@ -77,7 +77,7 @@ func TestPeriodStart(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := periodStart(tt.period, tt.now, tt.tz)
+			got := PeriodStart(tt.period, tt.now, tt.tz)
 			require.Equal(t, tt.want, got)
 		})
 	}
@@ -126,7 +126,7 @@ func TestPeriodResetAt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := periodResetAt(tt.period, tt.now, utc)
+			got := PeriodResetAt(tt.period, tt.now, utc)
 			require.Equal(t, tt.want, got)
 		})
 	}
@@ -151,6 +151,10 @@ func (s *budgetStoreStub) GetSpendSince(_ context.Context, scope, scopeID string
 		return 0, s.err
 	}
 	return s.spendMap[scope+":"+scopeID], nil
+}
+
+func (s *budgetStoreStub) GetBudgetsForScope(_ context.Context, _, _, _ string) ([]store.ApplicableBudget, error) {
+	return s.budgets, nil
 }
 
 func TestBudgetChecker_NoBudgets(t *testing.T) {

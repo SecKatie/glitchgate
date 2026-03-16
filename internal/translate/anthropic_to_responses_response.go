@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 )
 
 // AnthropicToResponsesResponse translates an Anthropic Messages response body

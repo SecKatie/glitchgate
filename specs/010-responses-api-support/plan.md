@@ -18,7 +18,7 @@ The approach follows existing patterns: pure translation functions, provider int
 
 ## Technical Context
 
-**Language/Version**: Go 1.26.1 (module `codeberg.org/kglitchy/glitchgate`)
+**Language/Version**: Go 1.26.1 (module `github.com/seckatie/glitchgate`)
 **Primary Dependencies**: chi/v5 (router), go-resty/v3 (upstream calls), cobra+viper (CLI/config), modernc.org/sqlite (storage), goose/v3 (migrations), testify/require (tests)
 **Storage**: SQLite — no schema changes; existing `request_logs` table supports new `source_format` value `"responses"`
 **Testing**: `go test -race ./...` with table-driven tests; contract tests against Responses API schema

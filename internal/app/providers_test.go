@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

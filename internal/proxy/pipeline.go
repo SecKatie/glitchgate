@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/provider"
 )
 
 type responseAdapter func(http.ResponseWriter, *provider.Response) handlerResult

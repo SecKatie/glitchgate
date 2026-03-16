@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
 	"github.com/pressly/goose/v3"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/provider/copilot"
 	_ "modernc.org/sqlite" // SQLite driver (pure Go, no CGO).
 )
 

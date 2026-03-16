@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/auth"
-	"codeberg.org/kglitchy/glitchgate/internal/oidc"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/oidc"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 // AuthFlowStore combines the store operations needed by the OIDC login flow.

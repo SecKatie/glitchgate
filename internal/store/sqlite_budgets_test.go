@@ -215,3 +215,80 @@ func TestGetSpendSince(t *testing.T) {
 		require.Equal(t, 0.0, spend)
 	})
 }
+
+func TestGetBudgetsForScope(t *testing.T) {
+	t.Run("no budgets returns empty", func(t *testing.T) {
+		st := newTestStore(t)
+		budgets, err := st.GetBudgetsForScope(context.Background(), "all", "", "")
+		require.NoError(t, err)
+		require.Empty(t, budgets)
+	})
+
+	t.Run("all scope returns global user and team budgets", func(t *testing.T) {
+		st := newTestStore(t)
+		userID := seedBudgetTestData(t, st)
+		ctx := context.Background()
+
+		_, err := st.db.ExecContext(ctx,
+			`UPDATE global_budget_settings SET limit_usd = 100.0, period = 'monthly', updated_at = datetime('now') WHERE id = 1`)
+		require.NoError(t, err)
+		_, err = st.db.ExecContext(ctx,
+			`INSERT INTO user_budgets (user_id, limit_usd, period, created_at, updated_at) VALUES (?, 20.0, 'daily', datetime('now'), datetime('now'))`, userID)
+		require.NoError(t, err)
+		_, err = st.db.ExecContext(ctx,
+			`INSERT INTO team_budgets (team_id, limit_usd, period, created_at, updated_at) VALUES (?, 50.0, 'weekly', datetime('now'), datetime('now'))`, "team-budget-1")
+		require.NoError(t, err)
+
+		budgets, err := st.GetBudgetsForScope(ctx, "all", "", "")
+		require.NoError(t, err)
+		require.Len(t, budgets, 3)
+	})
+
+	t.Run("user scope returns global and user budgets only", func(t *testing.T) {
+		st := newTestStore(t)
+		userID := seedBudgetTestData(t, st)
+		ctx := context.Background()
+
+		_, err := st.db.ExecContext(ctx,
+			`UPDATE global_budget_settings SET limit_usd = 100.0, period = 'monthly', updated_at = datetime('now') WHERE id = 1`)
+		require.NoError(t, err)
+		_, err = st.db.ExecContext(ctx,
+			`INSERT INTO user_budgets (user_id, limit_usd, period, created_at, updated_at) VALUES (?, 20.0, 'daily', datetime('now'), datetime('now'))`, userID)
+		require.NoError(t, err)
+		_, err = st.db.ExecContext(ctx,
+			`INSERT INTO team_budgets (team_id, limit_usd, period, created_at, updated_at) VALUES (?, 50.0, 'weekly', datetime('now'), datetime('now'))`, "team-budget-1")
+		require.NoError(t, err)
+
+		budgets, err := st.GetBudgetsForScope(ctx, "user", userID, "")
+		require.NoError(t, err)
+		require.Len(t, budgets, 2) // global + user only
+
+		scopes := make(map[string]bool)
+		for _, b := range budgets {
+			scopes[b.Scope] = true
+		}
+		require.True(t, scopes["global"])
+		require.True(t, scopes["user"])
+		require.False(t, scopes["team"])
+	})
+
+	t.Run("team scope returns global team and user budgets", func(t *testing.T) {
+		st := newTestStore(t)
+		userID := seedBudgetTestData(t, st)
+		ctx := context.Background()
+
+		_, err := st.db.ExecContext(ctx,
+			`UPDATE global_budget_settings SET limit_usd = 100.0, period = 'monthly', updated_at = datetime('now') WHERE id = 1`)
+		require.NoError(t, err)
+		_, err = st.db.ExecContext(ctx,
+			`INSERT INTO user_budgets (user_id, limit_usd, period, created_at, updated_at) VALUES (?, 20.0, 'daily', datetime('now'), datetime('now'))`, userID)
+		require.NoError(t, err)
+		_, err = st.db.ExecContext(ctx,
+			`INSERT INTO team_budgets (team_id, limit_usd, period, created_at, updated_at) VALUES (?, 50.0, 'weekly', datetime('now'), datetime('now'))`, "team-budget-1")
+		require.NoError(t, err)
+
+		budgets, err := st.GetBudgetsForScope(ctx, "team", userID, "team-budget-1")
+		require.NoError(t, err)
+		require.Len(t, budgets, 3) // global + team + user
+	})
+}

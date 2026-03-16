@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/kglitchy/glitchgate/internal/app"
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/app"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 var costsCmd = &cobra.Command{

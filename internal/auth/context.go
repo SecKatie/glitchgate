@@ -5,7 +5,7 @@ package auth
 import (
 	"context"
 
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 type contextKey struct{}

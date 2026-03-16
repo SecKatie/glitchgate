@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
-	"codeberg.org/kglitchy/glitchgate/internal/translate"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/translate"
 )
 
 // ConversationData holds the parsed view of a logged request/response pair.
