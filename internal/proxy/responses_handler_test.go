@@ -83,8 +83,11 @@ func newResponsesTestHarness(t *testing.T, upstreamURL string) *responsesTestHar
 		},
 	}
 
+	openaiClient, err := openaiProv.NewClient("openai-resp", upstreamURL, "proxy_key", "test-key", openaiProv.APITypeResponses)
+	require.NoError(t, err)
+
 	providers := map[string]provider.Provider{
-		"openai-resp": openaiProv.NewClient("openai-resp", upstreamURL, "proxy_key", "test-key", openaiProv.APITypeResponses),
+		"openai-resp": openaiClient,
 	}
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
@@ -498,9 +501,14 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
+	primaryClient, err := openaiProv.NewClient("primary", primaryURL, "proxy_key", "key1", openaiProv.APITypeResponses)
+	require.NoError(t, err)
+	secondaryClient, err := openaiProv.NewClient("secondary", secondaryURL, "proxy_key", "key2", openaiProv.APITypeResponses)
+	require.NoError(t, err)
+
 	providers := map[string]provider.Provider{
-		"primary":   openaiProv.NewClient("primary", primaryURL, "proxy_key", "key1", openaiProv.APITypeResponses),
-		"secondary": openaiProv.NewClient("secondary", secondaryURL, "proxy_key", "key2", openaiProv.APITypeResponses),
+		"primary":   primaryClient,
+		"secondary": secondaryClient,
 	}
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})

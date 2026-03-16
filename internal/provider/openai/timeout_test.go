@@ -20,11 +20,12 @@ func TestClientSendRequestAppliesDefaultTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+	client, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+	require.NoError(t, err)
 	client.SetTimeouts(10 * time.Millisecond)
 
 	start := time.Now()
-	_, err := client.SendRequest(context.Background(), &provider.Request{
+	_, err = client.SendRequest(context.Background(), &provider.Request{
 		Body:    []byte(`{"model":"gpt-4.1"}`),
 		Headers: http.Header{},
 	})
@@ -41,14 +42,15 @@ func TestClientSendRequestPreservesCallerDeadline(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+	client, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+	require.NoError(t, err)
 	client.SetTimeouts(2 * time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
-	_, err := client.SendRequest(ctx, &provider.Request{
+	_, err = client.SendRequest(ctx, &provider.Request{
 		Body:    []byte(`{"model":"gpt-4.1"}`),
 		Headers: http.Header{},
 	})
@@ -70,7 +72,8 @@ func TestStreamingRequestHasNoContextDeadline(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+	client, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+	require.NoError(t, err)
 	client.SetTimeouts(time.Second)
 
 	resp, err := client.SendRequest(context.Background(), &provider.Request{

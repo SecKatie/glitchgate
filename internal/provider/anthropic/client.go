@@ -28,8 +28,12 @@ type Client struct {
 	requestTimeout time.Duration
 }
 
-// NewClient creates an Anthropic provider client.
-func NewClient(name, baseURL, authMode, apiKey, defaultVersion string) *Client {
+// NewClient creates an Anthropic provider client. Returns an error if
+// baseURL is not a valid HTTP(S) URL.
+func NewClient(name, baseURL, authMode, apiKey, defaultVersion string) (*Client, error) {
+	if err := provider.ValidateBaseURL(baseURL); err != nil {
+		return nil, fmt.Errorf("anthropic provider %q: %w", name, err)
+	}
 	return &Client{
 		name:           name,
 		baseURL:        strings.TrimRight(baseURL, "/"),
@@ -38,7 +42,7 @@ func NewClient(name, baseURL, authMode, apiKey, defaultVersion string) *Client {
 		defaultVersion: defaultVersion,
 		httpClient:     provider.BuildHTTPClient(),
 		requestTimeout: config.DefaultUpstreamRequestTimeout,
-	}
+	}, nil
 }
 
 // SetTimeouts overrides the default upstream request deadline.

@@ -152,7 +152,7 @@
     <tbody>
         {{range .Providers}}
         <tr data-href="/ui/providers/{{.EncodedName}}">
-            <td class="mono">{{.DisplayName}}</td>
+            <td class="mono"><a href="/ui/providers/{{.EncodedName}}" class="row-link">{{.DisplayName}}</a></td>
             <td>{{.Type}}</td>
             <td>{{.Requests}}</td>
             <td class="cost">{{if .TokenCostUSD}}${{printf "%.2f" .TokenCostUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
