@@ -12,7 +12,7 @@ Release-blocking gaps:
 
 1. ~~A web UI authorization flaw allows scoped users to discover and modify keys they should not control.~~ **FIXED** (2026-03-15).
 2. ~~Budget enforcement is described as a shipped feature, but is not enforced on the proxy request path.~~ **FIXED** (2026-03-15). P1 (enforcement), P2 (dashboard display), and P3 (management UI) complete.
-3. No CI pipeline exists -- lint, test, and security scanning are not automated.
+3. ~~No CI pipeline exists -- lint, test, and security scanning are not automated.~~ **FIXED** (2026-03-15).
 4. No version embedding -- deployed builds cannot be identified.
 5. Security-critical packages have zero test coverage.
 
@@ -57,25 +57,17 @@ Resolved 2026-03-15. Changes:
 
 **P3 (budget management UI)**: Web UI for administrators to set/update/clear budget limits at global, user, and team scopes. Inline edit forms on budget status cards with HTMX. GA sees all scopes with edit controls and "Set new budget" form; TA sees team budget with edit; members see read-only status. Input validation enforces positive limits with max 2 decimal places and valid periods. All mutations are audit-logged.
 
-### 3. No CI pipeline
+### ~~3. No CI pipeline~~ FIXED
 
-Severity: High
+Resolved 2026-03-15. Changes:
 
-Why this blocks deployment:
-
-- CLAUDE.md states "SAST + SCA required in CI and pre-commit."
-- No CI config exists: no `.github/workflows/`, `.forgejo/workflows/`, `.woodpecker.yml`, or pre-commit hooks.
-- Quality gates (`make lint`, `make test`, `make audit`) are not automated on push or PR.
-
-Impact:
-
-- Regressions, security vulnerabilities, and lint failures can be merged without detection.
-- The security scanning requirement is aspirational, not enforced.
-
-Required fix before release:
-
-- Add a CI pipeline that runs `make lint test audit` on every push.
-- Add pre-commit hooks or document the required local workflow.
+- Added `.github/workflows/ci.yml` with 4 parallel jobs: lint, test, audit, build.
+- Lint uses `golangci/golangci-lint-action` matching local `.golangci.yml`.
+- Test runs `go test -race ./...` via `make test`.
+- Audit installs and runs `gosec` (SAST) and `govulncheck` (SCA).
+- Build verifies `CGO_ENABLED=0 go build` succeeds.
+- All jobs trigger on push and pull_request to any branch.
+- Go version auto-tracked from `go.mod` via `go-version-file`.
 
 ### 4. No version embedding
 
@@ -364,7 +356,7 @@ Current maintainability risks:
 - Product claims (README) and actual enforcement behavior are out of sync (budget enforcement).
 - Authorization rules are implemented partly in handlers and partly by convention, making drift easier.
 - Security-critical packages (auth, oidc, ratelimit) have zero test coverage, making refactoring risky.
-- No CI pipeline means quality gates depend entirely on developer discipline.
+- ~~No CI pipeline means quality gates depend entirely on developer discipline.~~ CI added.
 - The logging model couples observability, cost reporting, and auditability to a best-effort async path.
 
 ## Deployment Criteria
@@ -373,7 +365,7 @@ The app should not be called deployment-ready until all items below are complete
 
 - [x] Fix scoped key authorization for list, update, and all related UI paths.
 - [x] Implement real budget enforcement on the proxy path, or remove claims from README.
-- [ ] Add a CI pipeline running lint, test, and security audit on every push.
+- [x] Add a CI pipeline running lint, test, and security audit on every push.
 - [ ] Embed version information in binaries and container images.
 - [ ] Add tests for `internal/auth`, `internal/oidc`, and `internal/ratelimit`.
 - [ ] Fix constant-time master key comparison.
@@ -384,7 +376,7 @@ The app should not be called deployment-ready until all items below are complete
 ## Suggested Remediation Order
 
 1. ~~Fix key-scope authorization bugs and add regression tests.~~ **Done.**
-2. Add CI pipeline (`make lint test audit`).
+2. ~~Add CI pipeline (`make lint test audit`).~~ **Done.**
 3. Embed version information (goreleaser ldflags + cobra subcommand).
 4. Fix Containerfile `GOARCH` hardcoding.
 5. Fix constant-time master key comparison.
