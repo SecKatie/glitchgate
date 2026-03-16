@@ -20,19 +20,21 @@ var dbCmd = &cobra.Command{
 
 var dbExportCmd = &cobra.Command{
 	Use:   "export [file]",
-	Short: "Export database contents to a JSON file",
+	Short: "Export database to a compressed SQL dump (.sql.gz)",
 	Long: `Export all persistent data (keys, logs, users, teams, audit events)
-to a JSON file. Ephemeral data (sessions, OIDC state) is excluded.
+to a gzip-compressed SQL dump. Ephemeral data (sessions, OIDC state) is excluded.
 
-If no file is specified, output is written to stdout.`,
+The dump contains INSERT OR IGNORE statements that can be loaded into an
+existing database without overwriting data. If no file is specified, output
+is written to stdout.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runDBExport,
 }
 
 var dbImportCmd = &cobra.Command{
 	Use:   "import <file>",
-	Short: "Import data from a JSON export into the database",
-	Long: `Import data from a previously exported JSON file into the database.
+	Short: "Import data from a compressed SQL dump (.sql.gz)",
+	Long: `Import data from a previously exported .sql.gz dump into the database.
 Rows with conflicting primary keys are skipped (existing data is preserved).
 
 The target database is determined by the config file (--config flag).`,
