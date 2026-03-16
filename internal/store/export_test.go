@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"testing"
@@ -207,8 +208,8 @@ func TestSqlLiteral(t *testing.T) {
 		{"bool true", true, "1"},
 		{"bool false", false, "0"},
 		{"bytes", []byte{0xde, 0xad}, "X'dead'"},
-		{"string with newline", "line1\nline2", "'line1' || char(10) || 'line2'"},
-		{"string with crlf", "a\r\nb", "'a' || char(13,10) || 'b'"},
+		{"string with newline", "line1\nline2", "CAST(X'" + hex.EncodeToString([]byte("line1\nline2")) + "' AS TEXT)"},
+		{"string with crlf", "a\r\nb", "CAST(X'" + hex.EncodeToString([]byte("a\r\nb")) + "' AS TEXT)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
