@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	"github.com/seckatie/glitchgate/internal/provider"
 )
 
 func TestClient(t *testing.T) {

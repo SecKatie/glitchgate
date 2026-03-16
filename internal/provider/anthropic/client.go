@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/provider"
 )
 
 // Client implements the provider.Provider interface for the Anthropic Messages API.

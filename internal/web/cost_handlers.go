@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,15 +13,20 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/auth"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/go-chi/chi/v5"
+
+	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/proxy"
+	"github.com/seckatie/glitchgate/internal/store"
 	"golang.org/x/sync/errgroup"
 )
 
 // CostHandlers groups the HTTP handlers for cost dashboard endpoints.
 type CostHandlers struct {
 	store                        store.CostQueryStore
+	budgetStore                  store.BudgetCheckStore
+	budgetAdminStore             store.BudgetAdminStore
 	templates                    *TemplateSet
 	tz                           *time.Location
 	calc                         *pricing.Calculator
@@ -31,12 +37,14 @@ type CostHandlers struct {
 // NewCostHandlers creates a new CostHandlers with the given store, template set,
 // display timezone (pass nil or time.UTC for UTC), and provider name map
 // (provider name or legacy raw key → display name). Pass nil if no providers are configured.
-func NewCostHandlers(s store.CostQueryStore, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string, providerMonthlySubscriptions map[string]float64) *CostHandlers {
+func NewCostHandlers(s store.CostQueryStore, bs store.BudgetCheckStore, bas store.BudgetAdminStore, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string, providerMonthlySubscriptions map[string]float64) *CostHandlers {
 	if tz == nil {
 		tz = time.UTC
 	}
 	return &CostHandlers{
 		store:                        s,
+		budgetStore:                  bs,
+		budgetAdminStore:             bas,
 		templates:                    tmpl,
 		tz:                           tz,
 		calc:                         calc,
@@ -453,6 +461,9 @@ type costDashboardData struct {
 	HasIncompleteData         bool
 	GroupBy                   string
 	SubsidyAnalysis           *SubsidyAnalysis
+	BudgetEntries             []BudgetStatusEntry
+	IsGA                      bool // current session is global admin
+	IsAdmin                   bool // current session is global admin or team admin
 	FromDate                  string
 	ToDate                    string
 }
@@ -529,6 +540,21 @@ func (h *CostHandlers) buildCostDashboardData(r *http.Request) (*costDashboardDa
 		daysInRange(fromDate, toDate),
 	)
 
+	// Fetch budget status for the current session scope.
+	var budgetEntries []BudgetStatusEntry
+	sc := auth.SessionFromContext(r.Context())
+	isGA := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin")
+	isAdmin := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin" || sc.Role == "team_admin")
+	if h.budgetStore != nil {
+		scopeType, scopeUserID, scopeTeamID := buildScopeParams(sc)
+		budgets, err := h.budgetStore.GetBudgetsForScope(r.Context(), scopeType, scopeUserID, scopeTeamID)
+		if err != nil {
+			slog.Warn("budget status fetch failed", "error", err)
+		} else {
+			budgetEntries = h.buildBudgetStatusEntries(r.Context(), budgets)
+		}
+	}
+
 	return &costDashboardData{
 		Summary:                   summary,
 		TokenCosts:                tokenCosts,
@@ -542,6 +568,9 @@ func (h *CostHandlers) buildCostDashboardData(r *http.Request) (*costDashboardDa
 		HasIncompleteData:         hasIncompleteData,
 		GroupBy:                   groupBy,
 		SubsidyAnalysis:           subsidyAnalysis,
+		BudgetEntries:             budgetEntries,
+		IsGA:                      isGA,
+		IsAdmin:                   isAdmin,
 		FromDate:                  fromDate,
 		ToDate:                    toDate,
 	}, nil
@@ -563,6 +592,9 @@ func (d *costDashboardData) toTemplateData() map[string]any {
 		"GroupBy":                   d.GroupBy,
 		"TotalAllInputTokens":       d.Summary.TotalInputTokens + d.Summary.TotalCacheCreationTokens + d.Summary.TotalCacheReadTokens,
 		"SubsidyAnalysis":           d.SubsidyAnalysis,
+		"BudgetEntries":             d.BudgetEntries,
+		"IsGA":                      d.IsGA,
+		"IsAdmin":                   d.IsAdmin,
 	}
 }
 
@@ -617,4 +649,237 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 	if err := h.templates.ExecuteNamed(w, "cost_summary", data); err != nil {
 		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
 	}
+}
+
+// buildBudgetStatusEntries computes budget utilization for each configured budget.
+func (h *CostHandlers) buildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBudget) []BudgetStatusEntry {
+	now := time.Now()
+	var entries []BudgetStatusEntry
+
+	for _, b := range budgets {
+		start := proxy.PeriodStart(b.Period, now, h.tz)
+		spend, err := h.budgetStore.GetSpendSince(ctx, b.Scope, b.ScopeID, start)
+		if err != nil {
+			slog.Warn("budget status: failed to get spend", "scope", b.Scope, "error", err)
+			continue
+		}
+
+		remaining := b.LimitUSD - spend
+		if remaining < 0 {
+			remaining = 0
+		}
+		pct := 0.0
+		if b.LimitUSD > 0 {
+			pct = (spend / b.LimitUSD) * 100
+		}
+
+		status := "ok"
+		if pct >= 100 {
+			status = "exceeded"
+		} else if pct >= 80 {
+			status = "warning"
+		}
+
+		resetAt := proxy.PeriodResetAt(b.Period, now, h.tz)
+
+		label := strings.ToUpper(b.Scope[:1]) + b.Scope[1:]
+		if b.ScopeID != "" {
+			label += ": " + b.ScopeID
+		}
+
+		entries = append(entries, BudgetStatusEntry{
+			Scope:          b.Scope,
+			ScopeID:        b.ScopeID,
+			ScopeLabel:     label,
+			Period:         b.Period,
+			LimitUSD:       b.LimitUSD,
+			SpendUSD:       spend,
+			RemainingUSD:   remaining,
+			UtilizationPct: pct,
+			ResetAtFmt:     resetAt.In(h.tz).Format("Jan 2 3:04 PM"),
+			Status:         status,
+		})
+	}
+
+	return entries
+}
+
+// --------------------------------------------------------------------------
+// Budget management handlers (P3)
+// --------------------------------------------------------------------------
+
+var validPeriods = map[string]bool{"daily": true, "weekly": true, "monthly": true}
+
+// parseBudgetForm extracts and validates limit and period from a POST form.
+func parseBudgetForm(r *http.Request) (float64, string, error) {
+	limitStr := strings.TrimSpace(r.FormValue("limit"))
+	period := strings.TrimSpace(r.FormValue("period"))
+
+	if limitStr == "" {
+		return 0, "", fmt.Errorf("limit is required")
+	}
+	if !validPeriods[period] {
+		return 0, "", fmt.Errorf("period must be daily, weekly, or monthly")
+	}
+
+	var limit float64
+	if _, err := fmt.Sscanf(limitStr, "%f", &limit); err != nil {
+		return 0, "", fmt.Errorf("invalid limit value")
+	}
+	if limit <= 0 {
+		return 0, "", fmt.Errorf("limit must be positive (use clear to remove)")
+	}
+	// Enforce max 2 decimal places.
+	rounded := float64(int64(limit*100)) / 100
+	if limit != rounded {
+		return 0, "", fmt.Errorf("limit may have at most 2 decimal places")
+	}
+
+	return limit, period, nil
+}
+
+// renderBudgetFragment re-renders the budget_status fragment after a mutation.
+func (h *CostHandlers) renderBudgetFragment(w http.ResponseWriter, r *http.Request) {
+	sc := auth.SessionFromContext(r.Context())
+	scopeType, scopeUserID, scopeTeamID := buildScopeParams(sc)
+
+	budgets, err := h.budgetStore.GetBudgetsForScope(r.Context(), scopeType, scopeUserID, scopeTeamID)
+	if err != nil {
+		http.Error(w, "Failed to load budgets", http.StatusInternalServerError)
+		return
+	}
+
+	entries := h.buildBudgetStatusEntries(r.Context(), budgets)
+	isGA := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin")
+	isAdmin := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin" || sc.Role == "team_admin")
+
+	data := map[string]any{
+		"BudgetEntries": entries,
+		"IsGA":          isGA,
+		"IsAdmin":       isAdmin,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.templates.ExecuteNamed(w, "budget_status", data); err != nil {
+		slog.Error("render budget fragment", "error", err)
+	}
+}
+
+// SetGlobalBudgetHandler handles POST /ui/api/budgets/global.
+func (h *CostHandlers) SetGlobalBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	limit, period, err := parseBudgetForm(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.budgetAdminStore.SetGlobalBudget(r.Context(), limit, period); err != nil {
+		http.Error(w, "Failed to set global budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.global.set",
+		"", fmt.Sprintf("limit=$%.2f period=%s", limit, period))
+
+	h.renderBudgetFragment(w, r)
+}
+
+// ClearGlobalBudgetHandler handles POST /ui/api/budgets/global/clear.
+func (h *CostHandlers) ClearGlobalBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	if err := h.budgetAdminStore.ClearGlobalBudget(r.Context()); err != nil {
+		http.Error(w, "Failed to clear global budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.global.clear", "", "")
+
+	h.renderBudgetFragment(w, r)
+}
+
+// SetUserBudgetHandler handles POST /ui/api/budgets/user/{id}.
+func (h *CostHandlers) SetUserBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	if userID == "" {
+		http.Error(w, "user ID required", http.StatusBadRequest)
+		return
+	}
+
+	limit, period, err := parseBudgetForm(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.budgetAdminStore.SetUserBudget(r.Context(), userID, limit, period); err != nil {
+		http.Error(w, "Failed to set user budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.user.set",
+		"", fmt.Sprintf("user=%s limit=$%.2f period=%s", userID, limit, period))
+
+	h.renderBudgetFragment(w, r)
+}
+
+// ClearUserBudgetHandler handles POST /ui/api/budgets/user/{id}/clear.
+func (h *CostHandlers) ClearUserBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	if userID == "" {
+		http.Error(w, "user ID required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.budgetAdminStore.ClearUserBudget(r.Context(), userID); err != nil {
+		http.Error(w, "Failed to clear user budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.user.clear",
+		"", fmt.Sprintf("user=%s", userID))
+
+	h.renderBudgetFragment(w, r)
+}
+
+// SetTeamBudgetHandler handles POST /ui/api/budgets/team/{id}.
+func (h *CostHandlers) SetTeamBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "id")
+	if teamID == "" {
+		http.Error(w, "team ID required", http.StatusBadRequest)
+		return
+	}
+
+	limit, period, err := parseBudgetForm(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.budgetAdminStore.SetTeamBudget(r.Context(), teamID, limit, period); err != nil {
+		http.Error(w, "Failed to set team budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.team.set",
+		"", fmt.Sprintf("team=%s limit=$%.2f period=%s", teamID, limit, period))
+
+	h.renderBudgetFragment(w, r)
+}
+
+// ClearTeamBudgetHandler handles POST /ui/api/budgets/team/{id}/clear.
+func (h *CostHandlers) ClearTeamBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "id")
+	if teamID == "" {
+		http.Error(w, "team ID required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.budgetAdminStore.ClearTeamBudget(r.Context(), teamID); err != nil {
+		http.Error(w, "Failed to clear team budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.team.clear",
+		"", fmt.Sprintf("team=%s", teamID))
+
+	h.renderBudgetFragment(w, r)
 }

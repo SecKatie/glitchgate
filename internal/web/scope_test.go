@@ -11,8 +11,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/glitchgate/internal/auth"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 func TestVisibleKeyScope(t *testing.T) {

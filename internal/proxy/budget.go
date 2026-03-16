@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 // BudgetChecker performs pre-flight budget checks before upstream dispatch.
@@ -41,7 +41,7 @@ func (bc *BudgetChecker) Check(ctx context.Context, proxyKeyID string) (*store.B
 
 	now := time.Now()
 	for _, b := range budgets {
-		start := periodStart(b.Period, now, bc.tz)
+		start := PeriodStart(b.Period, now, bc.tz)
 
 		spend, err := bc.store.GetSpendSince(ctx, b.Scope, b.ScopeID, start)
 		if err != nil {
@@ -56,7 +56,7 @@ func (bc *BudgetChecker) Check(ctx context.Context, proxyKeyID string) (*store.B
 				Period:   b.Period,
 				LimitUSD: b.LimitUSD,
 				SpendUSD: spend,
-				ResetAt:  periodResetAt(b.Period, now, bc.tz),
+				ResetAt:  PeriodResetAt(b.Period, now, bc.tz),
 			}, nil
 		}
 	}
@@ -64,8 +64,8 @@ func (bc *BudgetChecker) Check(ctx context.Context, proxyKeyID string) (*store.B
 	return nil, nil
 }
 
-// periodStart returns the start of the current budget period in UTC.
-func periodStart(period string, now time.Time, tz *time.Location) time.Time {
+// PeriodStart returns the start of the current budget period in UTC.
+func PeriodStart(period string, now time.Time, tz *time.Location) time.Time {
 	local := now.In(tz)
 	y, m, d := local.Date()
 
@@ -85,8 +85,8 @@ func periodStart(period string, now time.Time, tz *time.Location) time.Time {
 	}
 }
 
-// periodResetAt returns the start of the next budget period in UTC.
-func periodResetAt(period string, now time.Time, tz *time.Location) time.Time {
+// PeriodResetAt returns the start of the next budget period in UTC.
+func PeriodResetAt(period string, now time.Time, tz *time.Location) time.Time {
 	local := now.In(tz)
 	y, m, d := local.Date()
 

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 	"github.com/stretchr/testify/require"
 )
 

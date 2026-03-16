@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 )
 
 // maxSSELineSize is the maximum size of a single SSE line we support.

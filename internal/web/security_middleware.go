@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"codeberg.org/kglitchy/glitchgate/internal/ratelimit"
+	"github.com/seckatie/glitchgate/internal/ratelimit"
 )
 
 const (

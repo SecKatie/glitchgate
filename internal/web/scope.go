@@ -3,8 +3,8 @@
 package web
 
 import (
-	"codeberg.org/kglitchy/glitchgate/internal/auth"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 type keyScope struct {

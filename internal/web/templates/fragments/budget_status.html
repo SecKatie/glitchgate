@@ -1,0 +1,100 @@
+{{define "budget_status"}}
+<div id="budget-status-section" style="margin-bottom: 1.5rem;">
+    <h4 style="margin-bottom: 0.75rem;">Budget Status</h4>
+    {{if .BudgetEntries}}
+    <div class="grid" style="gap: 0.75rem;">
+        {{range .BudgetEntries}}
+        <div class="card" style="padding: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.25rem;">
+                <strong>{{.ScopeLabel}}</strong>
+                <small style="color: var(--pico-muted-color);">{{.Period}} · resets {{.ResetAtFmt}}</small>
+            </div>
+            <progress value="{{printf "%.0f" .UtilizationPct}}" max="100"
+                style="margin-bottom: 0.25rem;{{if eq .Status "exceeded"}} --pico-progress-color: var(--pico-del-color);{{else if eq .Status "warning"}} --pico-progress-color: var(--pico-color-orange-500, #f59e0b);{{end}}"></progress>
+            <div style="display: flex; justify-content: space-between; font-size: 0.85em;">
+                <span>${{printf "%.2f" .SpendUSD}} / ${{printf "%.2f" .LimitUSD}}</span>
+                <span{{if eq .Status "exceeded"}} style="color: var(--pico-del-color); font-weight: bold;"{{else if eq .Status "warning"}} style="color: var(--pico-color-orange-500, #f59e0b);"{{end}}>{{printf "%.0f" .UtilizationPct}}% used</span>
+            </div>
+            {{if or (and (eq .Scope "global") $.IsGA) (and (eq .Scope "user") $.IsGA) (and (eq .Scope "team") $.IsAdmin)}}
+            <details style="margin-top: 0.5rem; margin-bottom: 0;">
+                <summary style="font-size: 0.85em; cursor: pointer;">Edit</summary>
+                <form hx-post="/ui/api/budgets/{{.Scope}}{{if .ScopeID}}/{{.ScopeID}}{{end}}"
+                      hx-target="#budget-status-section" hx-swap="outerHTML"
+                      style="display: flex; gap: 0.5rem; align-items: flex-end; margin-top: 0.5rem;">
+                    <label style="flex: 1; margin-bottom: 0;">
+                        <small>Limit ($)</small>
+                        <input type="number" name="limit" step="0.01" min="0.01" value="{{printf "%.2f" .LimitUSD}}" required style="margin-bottom: 0; padding: 0.25rem 0.5rem;">
+                    </label>
+                    <label style="flex: 1; margin-bottom: 0;">
+                        <small>Period</small>
+                        <select name="period" required style="margin-bottom: 0; padding: 0.25rem 0.5rem;">
+                            <option value="daily"{{if eq .Period "daily"}} selected{{end}}>Daily</option>
+                            <option value="weekly"{{if eq .Period "weekly"}} selected{{end}}>Weekly</option>
+                            <option value="monthly"{{if eq .Period "monthly"}} selected{{end}}>Monthly</option>
+                        </select>
+                    </label>
+                    <button type="submit" style="margin-bottom: 0; padding: 0.25rem 0.75rem;">Save</button>
+                    <button type="button" style="margin-bottom: 0; padding: 0.25rem 0.75rem;"
+                            hx-post="/ui/api/budgets/{{.Scope}}{{if .ScopeID}}/{{.ScopeID}}{{end}}/clear"
+                            hx-target="#budget-status-section" hx-swap="outerHTML"
+                            class="secondary">Clear</button>
+                </form>
+            </details>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+    {{end}}
+    {{if $.IsGA}}
+    <details style="margin-top: 0.75rem; margin-bottom: 0;">
+        <summary style="font-size: 0.9em; cursor: pointer;">Set new budget</summary>
+        <div style="margin-top: 0.5rem; padding: 0.75rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);">
+            <form id="new-budget-form" style="display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap;">
+                <label style="flex: 1; min-width: 8rem; margin-bottom: 0;">
+                    <small>Scope</small>
+                    <select id="new-budget-scope" required style="margin-bottom: 0; padding: 0.25rem 0.5rem;"
+                            onchange="document.getElementById('new-budget-scope-id').style.display = this.value === 'global' ? 'none' : ''; document.getElementById('new-budget-scope-id').required = this.value !== 'global';">
+                        <option value="global">Global</option>
+                        <option value="user">User</option>
+                        <option value="team">Team</option>
+                    </select>
+                </label>
+                <label style="flex: 1; min-width: 8rem; margin-bottom: 0; display: none;" id="new-budget-scope-id-label">
+                    <small>ID</small>
+                    <input type="text" id="new-budget-scope-id" placeholder="user or team ID" style="margin-bottom: 0; padding: 0.25rem 0.5rem;">
+                </label>
+                <label style="flex: 1; min-width: 6rem; margin-bottom: 0;">
+                    <small>Limit ($)</small>
+                    <input type="number" id="new-budget-limit" name="limit" step="0.01" min="0.01" required style="margin-bottom: 0; padding: 0.25rem 0.5rem;">
+                </label>
+                <label style="flex: 1; min-width: 6rem; margin-bottom: 0;">
+                    <small>Period</small>
+                    <select id="new-budget-period" name="period" required style="margin-bottom: 0; padding: 0.25rem 0.5rem;">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly" selected>Monthly</option>
+                    </select>
+                </label>
+                <button type="button" style="margin-bottom: 0; padding: 0.25rem 0.75rem;"
+                        onclick="(function(){
+                            var scope = document.getElementById('new-budget-scope').value;
+                            var scopeId = document.getElementById('new-budget-scope-id').value;
+                            var url = '/ui/api/budgets/' + scope;
+                            if (scope !== 'global') { url += '/' + encodeURIComponent(scopeId); }
+                            var form = document.getElementById('new-budget-form');
+                            htmx.ajax('POST', url, {target:'#budget-status-section', swap:'outerHTML', values:{limit: document.getElementById('new-budget-limit').value, period: document.getElementById('new-budget-period').value}});
+                        })()">Create</button>
+            </form>
+            <script>
+                document.getElementById('new-budget-scope').addEventListener('change', function() {
+                    var label = document.getElementById('new-budget-scope-id-label');
+                    var input = document.getElementById('new-budget-scope-id');
+                    if (this.value === 'global') { label.style.display = 'none'; input.required = false; }
+                    else { label.style.display = ''; input.required = true; }
+                });
+            </script>
+        </div>
+    </details>
+    {{end}}
+</div>
+{{end}}

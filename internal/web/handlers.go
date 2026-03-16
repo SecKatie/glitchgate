@@ -19,10 +19,10 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
-	"codeberg.org/kglitchy/glitchgate/internal/auth"
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 // TemplateSet holds per-page template clones so that each page can define its

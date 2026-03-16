@@ -1,4 +1,4 @@
-module codeberg.org/kglitchy/glitchgate
+module github.com/seckatie/glitchgate
 
 go 1.26.1
 

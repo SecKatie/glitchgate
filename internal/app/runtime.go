@@ -8,12 +8,12 @@ import (
 	"log/slog"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	oidcpkg "codeberg.org/kglitchy/glitchgate/internal/oidc"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
-	"codeberg.org/kglitchy/glitchgate/internal/proxy"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/config"
+	oidcpkg "github.com/seckatie/glitchgate/internal/oidc"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/provider"
+	"github.com/seckatie/glitchgate/internal/proxy"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 // Runtime holds the composed application dependencies needed by the serve

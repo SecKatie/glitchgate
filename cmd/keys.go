@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	"codeberg.org/kglitchy/glitchgate/internal/auth"
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 var keysCmd = &cobra.Command{

@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 // handlerResult captures the outcome of writing an upstream response to the client.

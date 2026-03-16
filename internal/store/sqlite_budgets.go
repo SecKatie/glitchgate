@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -88,4 +89,62 @@ func (s *SQLiteStore) GetSpendSince(ctx context.Context, scope, scopeID string, 
 		return 0, fmt.Errorf("get spend since for %s: %w", scope, err)
 	}
 	return spend, nil
+}
+
+// GetBudgetsForScope returns configured budgets visible to the given session scope.
+// Global budget is always included. User/team budgets are included based on scope.
+func (s *SQLiteStore) GetBudgetsForScope(ctx context.Context, scopeType, userID, teamID string) ([]ApplicableBudget, error) {
+	var parts []string
+	var args []any
+
+	// Global budget is always visible.
+	parts = append(parts, `SELECT 'global' AS scope, '' AS scope_id, limit_usd, period
+		FROM global_budget_settings WHERE id = 1 AND limit_usd IS NOT NULL`)
+
+	switch scopeType {
+	case "all":
+		// Admin sees all user and team budgets.
+		parts = append(parts, `SELECT 'user', user_id, limit_usd, period
+			FROM user_budgets WHERE limit_usd IS NOT NULL`)
+		parts = append(parts, `SELECT 'team', team_id, limit_usd, period
+			FROM team_budgets WHERE limit_usd IS NOT NULL`)
+	case "team":
+		if teamID != "" {
+			parts = append(parts, `SELECT 'team', team_id, limit_usd, period
+				FROM team_budgets WHERE team_id = ? AND limit_usd IS NOT NULL`)
+			args = append(args, teamID)
+		}
+		if userID != "" {
+			parts = append(parts, `SELECT 'user', user_id, limit_usd, period
+				FROM user_budgets WHERE user_id = ? AND limit_usd IS NOT NULL`)
+			args = append(args, userID)
+		}
+	case "user":
+		if userID != "" {
+			parts = append(parts, `SELECT 'user', user_id, limit_usd, period
+				FROM user_budgets WHERE user_id = ? AND limit_usd IS NOT NULL`)
+			args = append(args, userID)
+		}
+	}
+
+	query := strings.Join(parts, " UNION ALL ")
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get budgets for scope: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var budgets []ApplicableBudget
+	for rows.Next() {
+		var b ApplicableBudget
+		if err := rows.Scan(&b.Scope, &b.ScopeID, &b.LimitUSD, &b.Period); err != nil {
+			return nil, fmt.Errorf("scan budget for scope: %w", err)
+		}
+		budgets = append(budgets, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate budgets for scope: %w", err)
+	}
+	return budgets, nil
 }

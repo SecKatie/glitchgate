@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 // openDB loads config, opens the SQLite store, and runs migrations.

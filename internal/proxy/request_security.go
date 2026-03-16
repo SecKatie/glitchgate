@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/ratelimit"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/ratelimit"
 )
 
 type errorWriter func(http.ResponseWriter, int, string, string)

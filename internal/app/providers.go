@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
-	"codeberg.org/kglitchy/glitchgate/internal/provider/copilot"
-	openaiprov "codeberg.org/kglitchy/glitchgate/internal/provider/openai"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/provider"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/copilot"
+	openaiprov "github.com/seckatie/glitchgate/internal/provider/openai"
 )
 
 const defaultOpenAIBaseURL = "https://api.openai.com"

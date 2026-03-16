@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 type tokenUsage struct {
@@ -713,4 +713,18 @@ func buildSubsidyTimeseries(
 	}
 
 	return entries
+}
+
+// BudgetStatusEntry holds budget utilization data for dashboard display.
+type BudgetStatusEntry struct {
+	Scope          string
+	ScopeID        string
+	ScopeLabel     string
+	Period         string
+	LimitUSD       float64
+	SpendUSD       float64
+	RemainingUSD   float64
+	UtilizationPct float64
+	ResetAtFmt     string
+	Status         string // "ok", "warning", "exceeded"
 }

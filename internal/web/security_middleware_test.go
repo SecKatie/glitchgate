@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/glitchgate/internal/ratelimit"
+	"github.com/seckatie/glitchgate/internal/ratelimit"
 )
 
 func TestSecurityHeadersMiddleware(t *testing.T) {

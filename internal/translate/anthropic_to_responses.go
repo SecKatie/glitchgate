@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 )
 
 // AnthropicToResponses translates an Anthropic MessagesRequest to a Responses API request.

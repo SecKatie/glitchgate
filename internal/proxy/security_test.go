@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"codeberg.org/kglitchy/glitchgate/internal/proxy"
-	"codeberg.org/kglitchy/glitchgate/internal/ratelimit"
-	"codeberg.org/kglitchy/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/proxy"
+	"github.com/seckatie/glitchgate/internal/ratelimit"
+	"github.com/seckatie/glitchgate/internal/store"
 )
 
 func TestAnthropicProxy_RejectsOversizedBody(t *testing.T) {

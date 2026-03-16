@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/kglitchy/glitchgate/internal/config"
-	"codeberg.org/kglitchy/glitchgate/internal/pricing"
-	"codeberg.org/kglitchy/glitchgate/internal/provider"
-	anthropic "codeberg.org/kglitchy/glitchgate/internal/provider/anthropic"
-	"codeberg.org/kglitchy/glitchgate/internal/translate"
+	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/pricing"
+	"github.com/seckatie/glitchgate/internal/provider"
+	anthropic "github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/translate"
 )
 
 // providerNameFor returns the configured provider name used for runtime
