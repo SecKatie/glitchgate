@@ -24,7 +24,7 @@
         <input type="date" name="to" id="to" value="{{.To}}">
     </div>
     <div>
-        <button type="submit" style="height:2.5rem;margin-bottom:0">Filter</button>
+        <button type="submit" class="mb-0" style="height:2.5rem">Filter</button>
     </div>
 </form>
 
@@ -43,11 +43,11 @@
     <tbody>
         {{range .Events}}
         <tr>
-            <td style="white-space:nowrap">{{fmtET .CreatedAt "Jan 2 3:04 PM"}}</td>
+            <td class="nowrap">{{fmtTz .CreatedAt "Jan 2 3:04 PM"}}</td>
             <td class="mono">{{if .ActorEmail}}{{.ActorEmail}}{{else}}<span class="cost-unknown">&mdash;</span>{{end}}</td>
             <td class="mono">{{.Action}}</td>
-            <td class="mono">{{if .KeyPrefix}}{{.KeyPrefix}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
-            <td>{{if .Detail}}{{.Detail}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td class="mono">{{if .KeyPrefix}}{{.KeyPrefix}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+            <td>{{if .Detail}}{{.Detail}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
         </tr>
         {{end}}
     </tbody>

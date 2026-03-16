@@ -141,14 +141,14 @@
             <td data-col="input_tokens" data-value="{{sumTokens .InputTokens .CacheCreationTokens .CacheReadTokens}}">{{fmtTokens (sumTokens .InputTokens .CacheCreationTokens .CacheReadTokens)}}</td>
             <td data-col="output_tokens" data-value="{{.OutputTokens}}">{{fmtTokens .OutputTokens}}</td>
             <td data-col="requests" data-value="{{.Requests}}">{{.Requests}}</td>
-            <td data-col="cost" data-value="{{printf "%.6f" (index $.BreakdownCosts .Group)}}">{{$cost := index $.BreakdownCosts .Group}}{{if $cost}}${{printf "%.4f" $cost}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td data-col="cost" data-value="{{printf "%.6f" (index $.BreakdownCosts .Group)}}">{{$cost := index $.BreakdownCosts .Group}}{{if $cost}}${{printf "%.4f" $cost}}{{else}}<span class="muted-dash">—</span>{{end}}</td>
         </tr>
         {{end}}
     </tbody>
 </table>
 </figure>
 {{if .HasIncompleteData}}
-<small style="color:var(--pico-muted-color)">* Some requests have incomplete token data (logged before token tracking was enabled).</small>
+<small class="text-muted">* Some requests have incomplete token data (logged before token tracking was enabled).</small>
 {{end}}
 {{else}}
 <p>No cost data found for this date range.</p>

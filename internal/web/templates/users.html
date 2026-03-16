@@ -4,25 +4,6 @@
 
 {{define "head"}}
 <style>
-    .role-badge {
-        display: inline-block;
-        padding: 0.15em 0.5em;
-        border-radius: 4px;
-        font-size: 0.8em;
-        font-weight: 600;
-    }
-    .role-global_admin {
-        background: var(--pico-del-color);
-        color: #fff;
-    }
-    .role-team_admin {
-        background: var(--pico-ins-color);
-        color: #fff;
-    }
-    .role-member {
-        background: var(--pico-muted-border-color);
-        color: var(--pico-color);
-    }
     .status-active {
         color: var(--pico-ins-color);
         font-weight: 600;
@@ -47,7 +28,7 @@
 {{end}}
 
 {{define "content"}}
-<h3>Users</h3>
+<h2>Users</h2>
 
 <div id="user-message"></div>
 
@@ -72,7 +53,7 @@
             <td>
                 <span class="role-badge role-{{.Role}}">{{.Role}}</span>
             </td>
-            <td>{{if .TeamName}}{{deref .TeamName}}{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td>{{if .TeamName}}{{deref .TeamName}}{{else}}<span class="muted-dash">—</span>{{end}}</td>
             <td>
                 {{if .Active}}
                 <span class="status-active">Active</span>
@@ -80,7 +61,7 @@
                 <span class="status-inactive">Inactive</span>
                 {{end}}
             </td>
-            <td>{{if .LastSeenAt}}<span class="mono" style="font-size:0.85em">{{deref .LastSeenAt}}</span>{{else}}<span style="color:var(--pico-muted-color)">—</span>{{end}}</td>
+            <td>{{if .LastSeenAt}}<span class="mono text-sm-muted">{{deref .LastSeenAt}}</span>{{else}}<span class="muted-dash">—</span>{{end}}</td>
             <td class="action-cell">
                 <select id="role-select-{{.ID}}" aria-label="Change role">
                     <option value="global_admin"{{if eq .Role "global_admin"}} selected{{end}}>global_admin</option>
@@ -105,22 +86,22 @@
     </tbody>
 </table>
 {{else}}
-<p style="color:var(--pico-muted-color);text-align:center;padding:2rem 0">No users found. Invite users via OIDC or add them from your identity provider.</p>
+<div class="empty-state">
+    <strong>No users found</strong>
+    <p>Users are created automatically when they sign in via OIDC. Configure an identity provider to get started.</p>
+</div>
 {{end}}
 
 <script>
 function showMessage(msg, isError) {
-    var el = document.getElementById('user-message');
-    el.innerHTML = '<div style="padding:0.5rem 1rem;border-radius:var(--pico-border-radius);margin-bottom:1rem;background:'
-        + (isError ? 'var(--pico-del-color)' : 'var(--pico-ins-color)')
-        + ';color:#fff">' + msg + '</div>';
-    setTimeout(function() { el.innerHTML = ''; }, 4000);
+    showFlash(document.getElementById('user-message'), msg, isError);
 }
 
 function submitRole(id) {
     var sel = document.getElementById('role-select-' + id);
     var role = sel.value;
-    fetch('/ui/api/users/' + id + '/role', {
+    var btn = sel.parentElement.querySelector('button');
+    fetchWithLoading(btn, '/ui/api/users/' + id + '/role', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: 'role=' + encodeURIComponent(role)
@@ -140,7 +121,8 @@ function submitRole(id) {
 
 function confirmDeactivate(id, email) {
     if (!confirm('Deactivate user ' + email + '? They will be immediately signed out.')) return;
-    fetch('/ui/api/users/' + id + '/deactivate', {method: 'POST'})
+    var btn = document.querySelector('#user-row-' + id + ' .action-cell button[title="Deactivate user"]');
+    fetchWithLoading(btn, '/ui/api/users/' + id + '/deactivate', {method: 'POST'})
         .then(function(r) {
             if (r.ok) {
                 showMessage('User deactivated.', false);
@@ -153,7 +135,8 @@ function confirmDeactivate(id, email) {
 
 function confirmReactivate(id, email) {
     if (!confirm('Reactivate user ' + email + '?')) return;
-    fetch('/ui/api/users/' + id + '/reactivate', {method: 'POST'})
+    var btn = document.querySelector('#user-row-' + id + ' .action-cell button[title="Reactivate user"]');
+    fetchWithLoading(btn, '/ui/api/users/' + id + '/reactivate', {method: 'POST'})
         .then(function(r) {
             if (r.ok) {
                 showMessage('User reactivated.', false);

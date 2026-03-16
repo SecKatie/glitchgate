@@ -186,7 +186,12 @@
 {{end}}
 
 {{define "content"}}
-<p style="margin-bottom:1rem"><a href="/ui/models" onclick="if(history.length>1){event.preventDefault();history.back()}">← Back to Models</a></p>
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+        <li><a href="/ui/models">Models</a></li>
+        <li>{{.ModelName}}</li>
+    </ol>
+</nav>
 
 <div class="model-header">
   <h2>{{.ModelName}}</h2>

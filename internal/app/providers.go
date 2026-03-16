@@ -10,10 +10,13 @@ import (
 	"github.com/seckatie/glitchgate/internal/provider"
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 	"github.com/seckatie/glitchgate/internal/provider/copilot"
+	"github.com/seckatie/glitchgate/internal/provider/gemini"
 	openaiprov "github.com/seckatie/glitchgate/internal/provider/openai"
+	"github.com/seckatie/glitchgate/internal/provider/vertex"
 )
 
 const defaultOpenAIBaseURL = "https://api.openai.com"
+const defaultGeminiBaseURL = gemini.DefaultBaseURL
 
 // ProviderRegistry compiles configured provider clients, pricing tables, and
 // legacy provider-name aliases into one runtime dependency.
@@ -146,6 +149,27 @@ func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (prov
 		}
 		client.SetTimeouts(requestTimeout)
 		return client, nil
+	case "gemini":
+		client, err := gemini.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey)
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: %w", pc.Name, err)
+		}
+		client.SetTimeouts(requestTimeout)
+		return client, nil
+	case "vertex_claude":
+		client, err := vertex.NewClient(pc.Name, pc.Project, pc.Region, pc.CredentialsFile, pc.DefaultVersion)
+		if err != nil {
+			return nil, fmt.Errorf("vertex_claude provider %q: %w", pc.Name, err)
+		}
+		client.SetTimeouts(requestTimeout)
+		return client, nil
+	case "vertex_gemini":
+		client, err := vertex.NewGeminiClient(pc.Name, pc.Project, pc.Region, pc.CredentialsFile)
+		if err != nil {
+			return nil, fmt.Errorf("vertex_gemini provider %q: %w", pc.Name, err)
+		}
+		client.SetTimeouts(requestTimeout)
+		return client, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type %q for provider %q", pc.Type, pc.Name)
 	}
@@ -170,6 +194,12 @@ func defaultPricingForProvider(pc config.ProviderConfig) map[string]pricing.Entr
 		case pricing.IsSegmentURL(baseURL):
 			return pricing.SegmentDefaults
 		}
+	case "gemini":
+		return pricing.GeminiDefaults
+	case "vertex_claude":
+		return pricing.AnthropicDefaults
+	case "vertex_gemini":
+		return pricing.GeminiDefaults
 	}
 
 	return nil
@@ -197,6 +227,10 @@ func effectiveBaseURL(pc config.ProviderConfig) string {
 	case "openai", "openai_responses":
 		if pc.BaseURL == "" {
 			return defaultOpenAIBaseURL
+		}
+	case "gemini":
+		if pc.BaseURL == "" {
+			return defaultGeminiBaseURL
 		}
 	}
 	return pc.BaseURL

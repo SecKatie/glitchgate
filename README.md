@@ -2,11 +2,12 @@
 
 A self-hosted reverse proxy for LLM APIs with request logging, cost monitoring, team management, and a lightweight web UI.
 
-Routes requests to upstream providers, logs all traffic to a local SQLite database, and calculates per-request costs. Supports Anthropic, OpenAI, and GitHub Copilot upstreams with automatic format translation between API formats.
+Routes requests to upstream providers, logs all traffic to a local SQLite database, and calculates per-request costs. Supports Anthropic, OpenAI, Gemini, GitHub Copilot, and Vertex AI upstreams with automatic format translation between API formats.
 
 ## Features
 
-- **Multi-Provider Proxy**: Route requests to Anthropic, OpenAI, and GitHub Copilot upstreams
+- **Multi-Provider Proxy**: Route requests to Anthropic, OpenAI, Gemini, GitHub Copilot, and Vertex AI upstreams
+- **Gemini Support**: Route to the Gemini Developer API or Vertex AI Gemini with native format translation
 - **Universal API Format**: Clients can use Anthropic, OpenAI Chat Completions, or OpenAI Responses API format regardless of upstream provider
 - **Full 3×3 Translation Matrix**: Seamless conversion between all three API formats
 - **Authentication**: OIDC/SSO support with user accounts and role-based access (global_admin, team_admin, member)
@@ -56,6 +57,4 @@ make generate   # sqlc generate
 
 - [ ] **Provider health monitoring** — track errors on a provider and automatically enter temporary cooldown after 429/503 responses before retrying
 - [ ] **Per-key UI login** — proxy API key holders can sign in to the web UI to view their own logs and spend
-- [ ] **Google GenAI support** — proxy requests to the Google Gemini API with logging and cost attribution
-- [ ] **Vertex AI support** — proxy requests to Google Cloud Vertex AI, covering both Gemini models and Anthropic models (Claude on Vertex) with logging and cost attribution
 - [ ] **Tiered pricing support** — some models charge different rates above a token threshold (e.g., OpenAI's models billed at higher rates beyond context limits). The `pricing.Entry` struct currently holds a single rate; extend it to support threshold-based tiers so cost calculations remain accurate for long-context requests.

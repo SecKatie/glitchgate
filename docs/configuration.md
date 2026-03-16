@@ -89,9 +89,26 @@ providers:
     auth_mode: "proxy_key"
     api_key: "${OPENAI_API_KEY}"
 
+  - name: "gemini"
+    type: "gemini"
+    auth_mode: "proxy_key"
+    api_key: "${GEMINI_API_KEY}"
+    # base_url: "https://generativelanguage.googleapis.com"  # optional default
+
   - name: "copilot"
     type: "github_copilot"
     # token_dir: "~/.config/glitchgate/copilot/"  # optional; default shown
+
+  - name: "vertex-claude"
+    type: "vertex_claude"
+    project: "my-gcp-project"
+    region: "us-east5"
+    # credentials_file: "/path/to/sa.json"  # optional; omit for ADC
+
+  - name: "vertex-gemini"
+    type: "vertex_gemini"
+    project: "my-gcp-project"
+    # region: "us-central1"  # optional; defaults to "us-central1"
 
 model_list:
   - model_name: "claude-sonnet"
@@ -119,12 +136,15 @@ model_list:
 | Field             | Required | Description |
 |-------------------|----------|-------------|
 | `name`            | Yes      | Unique identifier, referenced by `model_list` |
-| `type`            | No       | `anthropic` (default), `github_copilot`, `openai`, `openai_responses` |
-| `base_url`        | Depends  | Required for `anthropic`. Defaults to `https://api.openai.com` for `openai`/`openai_responses`. Not used by `github_copilot` |
-| `auth_mode`       | Depends  | `proxy_key` or `forward`. Not used by `github_copilot` |
+| `type`            | No       | `anthropic` (default), `github_copilot`, `openai`, `openai_responses`, `gemini`, `vertex_claude`, `vertex_gemini` |
+| `base_url`        | Depends  | Required for `anthropic`. Defaults to `https://api.openai.com` for `openai`/`openai_responses`, and `https://generativelanguage.googleapis.com` for `gemini`. Not used by `github_copilot`, `vertex_claude`, or `vertex_gemini` |
+| `auth_mode`       | Depends  | `proxy_key` or `forward`. Not used by `github_copilot`, `vertex_claude`, or `vertex_gemini` |
 | `api_key`         | Depends  | For `proxy_key` mode. Supports `${ENV_VAR}` expansion |
 | `default_version` | No       | Sets `anthropic-version` header when client omits it. `anthropic` only |
 | `token_dir`       | No       | Token storage for `github_copilot`. Default: `~/.config/glitchgate/copilot/` |
+| `credentials_file`| No       | Path to GCP service account JSON for `vertex_claude`/`vertex_gemini`. Omit to use Application Default Credentials (ADC). Supports `~` and `${ENV_VAR}` |
+| `project`         | Depends  | GCP project ID. Required for `vertex_claude` and `vertex_gemini` |
+| `region`          | Depends  | GCP region (e.g. `us-east5`). Required for `vertex_claude`. Defaults to `us-central1` for `vertex_gemini` |
 | `stream`          | No       | `false` forces non-streaming upstream even when client requests streaming (proxy synthesizes SSE). Omit to follow client preference |
 | `monthly_subscription_cost` | No | Optional monthly provider subscription cost in USD, used by the cost dashboard to compare flat subscription spend against token-based usage |
 
@@ -141,6 +161,11 @@ providers:
     type: "anthropic"
     base_url: "https://api.anthropic.com"
     auth_mode: "forward"
+
+  # Or forward the client's Gemini Developer API key.
+  - name: "gemini-forward"
+    type: "gemini"
+    auth_mode: "forward"
 ```
 
 ### OpenAI Provider
@@ -156,11 +181,11 @@ Both default `base_url` to `https://api.openai.com`, making them compatible with
 
 Any client format can route to any upstream provider type — the proxy handles all translation:
 
-| Client → Upstream    | Anthropic   | OpenAI Chat  | OpenAI Responses |
-|----------------------|-------------|--------------|-----------------|
-| **Anthropic**        | Passthrough | Translate    | Translate        |
-| **Chat Completions** | Translate   | Passthrough  | Translate        |
-| **Responses API**    | Translate   | Translate    | Passthrough      |
+| Client → Upstream    | Anthropic   | OpenAI Chat  | OpenAI Responses | Native Gemini |
+|----------------------|-------------|--------------|-----------------|---------------|
+| **Anthropic**        | Passthrough | Translate    | Translate        | Translate     |
+| **Chat Completions** | Translate   | Passthrough  | Translate        | Translate     |
+| **Responses API**    | Translate   | Translate    | Passthrough      | Translate     |
 
 ### GitHub Copilot Provider
 
@@ -212,6 +237,114 @@ glitchgate auth copilot --name copilot-personal
 #### Token Storage
 
 Tokens are stored in `token_dir` with `0600` permissions. The short-lived Copilot session token is refreshed automatically.
+
+### Vertex Claude Provider
+
+Routes Claude model requests through Google Cloud Vertex AI. Authentication uses GCP OAuth2 credentials (service account JSON or Application Default Credentials). The proxy manages token refresh automatically.
+
+#### Setup
+
+```yaml
+providers:
+  - name: "vertex-claude"
+    type: "vertex_claude"
+    project: "my-gcp-project"
+    region: "us-east5"
+    # credentials_file: "/path/to/service-account.json"  # optional; omit for ADC
+
+model_list:
+  - model_name: "vertex-sonnet"
+    provider: "vertex-claude"
+    upstream_model: "claude-sonnet-4-6-20250514"
+  - model_name: "vertex/*"         # wildcard: vertex/<model> → vertex-claude
+    provider: "vertex-claude"
+```
+
+#### Authentication
+
+**Application Default Credentials (ADC)** — If `credentials_file` is omitted, the provider uses ADC, which checks (in order):
+
+1. `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+2. `~/.config/gcloud/application_default_credentials.json` (from `gcloud auth application-default login`)
+3. GCE/GKE metadata server (when running on Google Cloud)
+
+**Service account JSON** — Set `credentials_file` to the path of a service account key file. The service account needs the `Vertex AI User` role (`roles/aiplatform.user`).
+
+#### Pricing
+
+Built-in Anthropic pricing is applied automatically. Override with `metadata` on individual model entries if Vertex pricing differs.
+
+#### Notes
+
+- The proxy constructs Vertex AI URLs from `project` and `region` — no `base_url` needed
+- Streaming uses Vertex's `streamRawPredict` endpoint; non-streaming uses `rawPredict`
+- The `model` field is stripped from the request body (Vertex expects it in the URL path)
+- `anthropic_version` is injected into the request body automatically (Vertex requires it there rather than as a header)
+
+### Vertex Gemini Provider
+
+Routes Gemini model requests through Google Cloud Vertex AI using the native `generateContent`/`streamGenerateContent` endpoints. Shares the same GCP OAuth2 authentication as the Vertex Claude provider.
+
+The native endpoints require only the standard `Vertex AI User` role (`roles/aiplatform.user`), unlike the OpenAI-compatible endpoint which requires `aiplatform.endpoints.predict`.
+
+#### Setup
+
+```yaml
+providers:
+  - name: "vertex-gemini"
+    type: "vertex_gemini"
+    project: "my-gcp-project"
+    region: "us-central1"  # defaults to "us-central1"
+    # credentials_file: "/path/to/service-account.json"  # optional; omit for ADC
+
+model_list:
+  - model_name: "gemini-flash"
+    provider: "vertex-gemini"
+    upstream_model: "google/gemini-2.5-flash"
+  - model_name: "vg/*"         # wildcard: vg/<model> → vertex-gemini
+    provider: "vertex-gemini"
+```
+
+#### Pricing
+
+Built-in pricing for Gemini 3.1, 3, 2.5, and 2.0 models is applied automatically. Override with `metadata` on individual model entries.
+
+#### Notes
+
+- Uses native Gemini endpoints (`generateContent` / `streamGenerateContent?alt=sse`)
+- Model names use the `google/` prefix (e.g. `google/gemini-2.5-flash`, `google/gemini-3-pro-preview`)
+- The `google/` prefix is stripped from the model name when constructing the URL path
+- Translation between client API format and native Gemini format is handled automatically
+
+### Gemini Provider
+
+Routes Gemini model requests through the Gemini Developer API using `X-Goog-Api-Key` authentication.
+
+#### Setup
+
+```yaml
+providers:
+  - name: "gemini"
+    type: "gemini"
+    auth_mode: "proxy_key"
+    api_key: "${GEMINI_API_KEY}"
+    # base_url: "https://generativelanguage.googleapis.com"  # optional default
+
+model_list:
+  - model_name: "gemini-flash"
+    provider: "gemini"
+    upstream_model: "gemini-2.5-flash"
+  - model_name: "gem/*"        # wildcard: gem/<model> → gemini
+    provider: "gemini"
+```
+
+#### Notes
+
+- Uses native Gemini endpoints (`generateContent` / `streamGenerateContent?alt=sse`)
+- Supports `auth_mode: proxy_key` with a configured `api_key`
+- Supports `auth_mode: forward` by forwarding the incoming `X-Goog-Api-Key` header upstream
+- Accepts upstream model names with or without the `google/` prefix; the provider strips it before building the URL
+- Built-in Gemini pricing defaults are applied automatically for known Gemini models
 
 ## Security and Operational Controls
 
@@ -431,6 +564,35 @@ model_list:
     upstream_model: "claude-sonnet-4-6"
   - model_name: "gc/*"
     provider: "copilot"
+```
+
+### Anthropic + Vertex AI Claude
+
+```yaml
+master_key: "change-me"
+
+providers:
+  - name: "anthropic"
+    base_url: "https://api.anthropic.com"
+    auth_mode: "proxy_key"
+    api_key: "${ANTHROPIC_API_KEY}"
+    default_version: "2023-06-01"
+  - name: "vertex-claude"
+    type: "vertex_claude"
+    project: "my-gcp-project"
+    region: "us-east5"
+
+model_list:
+  - model_name: "claude-sonnet"
+    provider: "anthropic"
+    upstream_model: "claude-sonnet-4-6"
+  - model_name: "vertex/*"
+    provider: "vertex-claude"
+  - model_name: "resilient-sonnet"
+    fallbacks: ["claude-sonnet", "vertex-sonnet"]
+  - model_name: "vertex-sonnet"
+    provider: "vertex-claude"
+    upstream_model: "claude-sonnet-4-6-20250514"
 ```
 
 ### Environment-Only (no config file)

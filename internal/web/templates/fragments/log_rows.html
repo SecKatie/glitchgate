@@ -1,7 +1,7 @@
 {{define "log_rows"}}
 {{range .Logs}}
 <tr data-href="/ui/logs/{{.ID}}">
-    <td class="mono" style="font-size:0.8rem"><a href="/ui/logs/{{.ID}}" class="row-link">{{fmtET .Timestamp "Jan 02 15:04 ET"}}</a></td>
+    <td class="mono" style="font-size:0.8rem"><a href="/ui/logs/{{.ID}}" class="row-link">{{fmtTz .Timestamp "Jan 02 15:04"}} {{tzAbbrev}}</a></td>
     <td>{{.ModelRequested}}{{if .IsStreaming}} <span class="badge badge-stream" title="Server-sent events (streaming response)">SSE</span>{{end}}</td>
     <td class="mono" style="font-size:0.8rem" title="{{.ProxyKeyLabel}}">{{.ProxyKeyPrefix}}</td>
     <td><span class="{{if lt .Status 400}}status-ok{{else}}status-err{{end}}">{{.Status}}{{if ge .Status 400}} ✕{{end}}</span></td>

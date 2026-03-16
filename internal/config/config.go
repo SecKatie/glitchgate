@@ -82,12 +82,15 @@ func (c *Config) OIDCEnabled() bool {
 // ProviderConfig describes an upstream LLM provider endpoint.
 type ProviderConfig struct {
 	Name                    string   `mapstructure:"name"                      yaml:"name"`
-	Type                    string   `mapstructure:"type"                      yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses"
+	Type                    string   `mapstructure:"type"                      yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses", "gemini", "vertex_claude", "vertex_gemini"
 	BaseURL                 string   `mapstructure:"base_url"                  yaml:"base_url"`
 	AuthMode                string   `mapstructure:"auth_mode"                 yaml:"auth_mode"` // "proxy_key" or "forward"
 	APIKey                  string   `mapstructure:"api_key"                   yaml:"api_key"`
 	DefaultVersion          string   `mapstructure:"default_version"           yaml:"default_version"`
 	TokenDir                string   `mapstructure:"token_dir"                 yaml:"token_dir"`                           // github_copilot: OAuth token storage directory
+	CredentialsFile         string   `mapstructure:"credentials_file"          yaml:"credentials_file"`                    // vertex_claude: path to service account JSON; empty = ADC
+	Project                 string   `mapstructure:"project"                   yaml:"project"`                             // vertex_claude: GCP project ID
+	Region                  string   `mapstructure:"region"                    yaml:"region"`                              // vertex_claude: GCP region (e.g. "us-east5")
 	Stream                  *bool    `mapstructure:"stream"                    yaml:"stream,omitempty"`                    // nil = follow client; false = force non-streaming upstream
 	MonthlySubscriptionCost *float64 `mapstructure:"monthly_subscription_cost" yaml:"monthly_subscription_cost,omitempty"` // optional provider-level monthly spend baseline in USD
 }
@@ -227,6 +230,10 @@ func Load(configFile string) (*Config, error) {
 		if cfg.Providers[i].Type == "github_copilot" {
 			cfg.Providers[i].TokenDir = expandTilde(cfg.Providers[i].TokenDir)
 		}
+		// Expand paths for vertex providers.
+		if cfg.Providers[i].Type == "vertex_claude" || cfg.Providers[i].Type == "vertex_gemini" {
+			cfg.Providers[i].CredentialsFile = expandTilde(cfg.Providers[i].CredentialsFile)
+		}
 	}
 
 	if cfg.MasterKey == "" {
@@ -238,6 +245,10 @@ func Load(configFile string) (*Config, error) {
 	}
 
 	if err := validateCopilotProviders(cfg.Providers); err != nil {
+		return nil, err
+	}
+
+	if err := validateVertexProviders(cfg.Providers); err != nil {
 		return nil, err
 	}
 
@@ -456,6 +467,29 @@ func validateCopilotProviders(providers []ProviderConfig) error {
 			)
 		}
 		seen[p.TokenDir] = p.Name
+	}
+	return nil
+}
+
+// validateVertexProviders checks that vertex_claude and vertex_gemini providers
+// have the required project field, and that credentials_file (if set) exists.
+// Region is required for vertex_claude; for vertex_gemini it defaults to "us-central1".
+func validateVertexProviders(providers []ProviderConfig) error {
+	for _, p := range providers {
+		if p.Type != "vertex_claude" && p.Type != "vertex_gemini" {
+			continue
+		}
+		if p.Project == "" {
+			return fmt.Errorf("provider %q: project is required for %s providers", p.Name, p.Type)
+		}
+		if p.Type == "vertex_claude" && p.Region == "" {
+			return fmt.Errorf("provider %q: region is required for vertex_claude providers", p.Name)
+		}
+		if p.CredentialsFile != "" {
+			if _, err := os.Stat(p.CredentialsFile); err != nil {
+				return fmt.Errorf("provider %q: credentials_file %q: %w", p.Name, p.CredentialsFile, err)
+			}
+		}
 	}
 	return nil
 }

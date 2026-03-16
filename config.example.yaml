@@ -42,6 +42,12 @@ providers:
   #   auth_mode: proxy_key
   #   api_key: "${OPENAI_API_KEY}"
 
+  # Example: Gemini Developer API
+  # - name: gemini
+  #   type: gemini
+  #   auth_mode: proxy_key
+  #   api_key: "${GEMINI_API_KEY}"
+
   # Example: GitHub Copilot
   # - name: copilot
   #   type: github_copilot

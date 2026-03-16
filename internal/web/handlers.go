@@ -125,10 +125,18 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 	if tz == nil {
 		tz = time.UTC
 	}
+	fmtInTz := func(t time.Time, layout string) string {
+		return t.In(tz).Format(layout)
+	}
+	// Compute the abbreviation once (using current time for DST awareness).
+	tzAbbrev := func() string {
+		abbr, _ := time.Now().In(tz).Zone()
+		return abbr
+	}
 	return template.FuncMap{
-		"fmtET": func(t time.Time, layout string) string {
-			return t.In(tz).Format(layout)
-		},
+		"fmtTz":    fmtInTz,
+		"fmtET":    fmtInTz, // legacy alias
+		"tzAbbrev": tzAbbrev,
 		"not": func(b bool) bool { return !b },
 		"deref": func(p any) any {
 			switch v := p.(type) {

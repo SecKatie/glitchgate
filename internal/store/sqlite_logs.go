@@ -7,6 +7,33 @@ import (
 	"time"
 )
 
+// fmtTime formats a time.Time as RFC3339Nano in UTC for consistent SQLite
+// storage. Using a canonical string format ensures lexicographic ORDER BY
+// works correctly (Go's time.Time.String() format does not sort properly).
+func fmtTime(t time.Time) string {
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// normalizeToDate appends end-of-day if the value is a bare date (YYYY-MM-DD)
+// so that "to" filters include the entire day. Also normalizes space-separated
+// datetime formats to RFC3339 for consistent comparison.
+func normalizeToDate(v string) string {
+	if len(v) == 10 { // bare date like "2026-03-16"
+		return v + "T23:59:59.999999999Z"
+	}
+	return normalizeTimestamp(v)
+}
+
+// normalizeTimestamp converts space-separated datetime formats to RFC3339 so
+// that string comparisons against RFC3339 timestamps work correctly.
+// Handles: "2026-03-10 00:00:00" → "2026-03-10T00:00:00Z"
+func normalizeTimestamp(v string) string {
+	if len(v) >= 19 && v[10] == ' ' {
+		return v[:10] + "T" + v[11:19] + "Z"
+	}
+	return v
+}
+
 // --------------------------------------------------------------------------
 // Request log operations
 // --------------------------------------------------------------------------
@@ -41,7 +68,7 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 	_, err := s.db.ExecContext(ctx, query,
 		entry.ID,
 		entry.ProxyKeyID,
-		entry.Timestamp,
+		fmtTime(entry.Timestamp),
 		entry.SourceFormat,
 		entry.ProviderName,
 		entry.ModelRequested,
@@ -84,7 +111,7 @@ func (s *SQLiteStore) PruneRequestLogs(ctx context.Context, before time.Time, li
 			LIMIT ?
 		)`
 
-	res, err := s.db.ExecContext(ctx, query, before, limit)
+	res, err := s.db.ExecContext(ctx, query, fmtTime(before), limit)
 	if err != nil {
 		return 0, fmt.Errorf("prune request logs: %w", err)
 	}
@@ -117,7 +144,7 @@ func (s *SQLiteStore) TrimRequestLogBodies(ctx context.Context, before time.Time
 			LIMIT ?
 		)`
 
-	res, err := s.db.ExecContext(ctx, query, before, limit)
+	res, err := s.db.ExecContext(ctx, query, fmtTime(before), limit)
 	if err != nil {
 		return 0, fmt.Errorf("trim request log bodies: %w", err)
 	}
@@ -140,7 +167,7 @@ func (s *SQLiteStore) CountTrimmableLogBodies(ctx context.Context, before time.T
 		AND request_body != '[trimmed]'`
 
 	var count int64
-	if err := s.db.QueryRowContext(ctx, query, before).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, query, fmtTime(before)).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count trimmable log bodies: %w", err)
 	}
 	return count, nil
@@ -179,11 +206,11 @@ func (s *SQLiteStore) ListRequestLogs(ctx context.Context, params ListLogsParams
 	}
 	if params.From != "" {
 		where = append(where, "rl.timestamp >= ?")
-		args = append(args, params.From)
+		args = append(args, normalizeTimestamp(params.From))
 	}
 	if params.To != "" {
 		where = append(where, "rl.timestamp <= ?")
-		args = append(args, params.To)
+		args = append(args, normalizeToDate(params.To))
 	}
 
 	// Scope filtering.
@@ -354,11 +381,11 @@ func (s *SQLiteStore) CountLogsSince(ctx context.Context, sinceID string, params
 	}
 	if params.From != "" {
 		where = append(where, "rl.timestamp >= ?")
-		args = append(args, params.From)
+		args = append(args, normalizeTimestamp(params.From))
 	}
 	if params.To != "" {
 		where = append(where, "rl.timestamp <= ?")
-		args = append(args, params.To)
+		args = append(args, normalizeToDate(params.To))
 	}
 
 	whereClause := "WHERE " + strings.Join(where, " AND ")

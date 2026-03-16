@@ -100,11 +100,11 @@
 <div class="filter-bar">
   <label>
     Search
-    <input id="model-search" type="search" placeholder="Filter by name…" oninput="filterModels()" style="margin-bottom:0">
+    <input id="model-search" type="search" placeholder="Filter by name…" oninput="filterModels()" class="mb-0">
   </label>
   <label>
     Type
-    <select id="model-kind" onchange="filterModels()" style="margin-bottom:0">
+    <select id="model-kind" onchange="filterModels()" class="mb-0">
       <option value="">All</option>
       <option value="configured">Configured</option>
       <option value="unconfigured">Seen in logs</option>
@@ -112,7 +112,7 @@
       <option value="wildcard">Wildcard</option>
     </select>
   </label>
-  <small id="model-count" style="color:var(--pico-muted-color);align-self:center"></small>
+  <small id="model-count" class="text-muted" style="align-self:center"></small>
 </div>
 
 <table id="models-table">
@@ -127,13 +127,13 @@
   </thead>
   <tbody>
     {{range .Models}}
-    {{if or .IsWildcard .IsVirtual}}
+    {{if or .IsWildcard .IsVirtual .IsLogGroup}}
     {{/* ── Group header row ────────────────────────────────────── */}}
     {{$parent := .}}
     <tr class="group-header"
       data-group="{{.EncodedName}}"
       data-name="{{.ModelName}}"
-      data-kind="{{if .IsVirtual}}virtual{{else}}wildcard{{end}}"
+      data-kind="{{if .IsLogGroup}}unconfigured{{else if .IsVirtual}}virtual{{else}}wildcard{{end}}"
       data-prov="{{if .IsVirtual}}virtual{{else}}{{.ProviderName}} {{.ProviderType}}{{end}}"
       data-upstream=""
       data-pricing="-1"
@@ -141,9 +141,10 @@
     >
       <td>
         <span class="expand-icon">&#9654;</span>
-        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>
+        {{if .IsLogGroup}}<span style="color:var(--pico-muted-color)">{{.ModelName}}</span>{{else}}<a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>{{end}}
         {{if .IsVirtual}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-primary) 15%,transparent);color:var(--pico-primary)">Virtual</span>{{end}}
         {{if .IsWildcard}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-color) 12%,transparent);color:var(--pico-muted-color)">Wildcard</span>{{end}}
+        {{if .IsLogGroup}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">Log only</span>{{end}}
         {{if gt .ChildCount 0}}<span class="child-count">{{.ChildCount}} {{if .IsVirtual}}fallback{{if gt .ChildCount 1}}s{{end}}{{else}}model{{if gt .ChildCount 1}}s{{end}}{{end}}</span>{{end}}
       </td>
       <td>{{if .IsVirtual}}&mdash;{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
@@ -260,6 +261,10 @@
 
     var groups = getGroups();
     groups.sort(function(a, b) {
+      // Pin the "Seen in logs" group to the bottom regardless of sort.
+      var aLog = a.header.dataset.kind === 'unconfigured' && a.header.classList.contains('group-header');
+      var bLog = b.header.dataset.kind === 'unconfigured' && b.header.classList.contains('group-header');
+      if (aLog !== bLog) return aLog ? 1 : -1;
       return cmp(val(a.header, col), val(b.header, col), type, sortDir);
     });
 
@@ -353,6 +358,9 @@
 </script>
 
 {{else}}
-<p>No models configured. Add entries to <code>model_list</code> in your config.</p>
+<div class="empty-state">
+    <strong>No models configured</strong>
+    <p>Add entries to <code>model_list</code> in your <code>config.yaml</code> to define model routing and pricing.</p>
+</div>
 {{end}}
 {{end}}

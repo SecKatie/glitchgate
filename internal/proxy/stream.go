@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/translate"
 )
 
 // maxSSELineSize is the maximum size of a single SSE line we support.
@@ -401,6 +403,327 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 		OutputTokens:             resp.Usage.OutputTokens,
 		CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
 		CacheReadInputTokens:     resp.Usage.CacheReadInputTokens,
+	}, nil
+}
+
+// SynthesizeOpenAISSE writes a complete Chat Completions response as
+// Server-Sent Events to w. It is used when the upstream was called without
+// streaming but the client expects OpenAI-format SSE.
+func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionResponse) (*StreamResult, error) {
+	rc := http.NewResponseController(w)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	var captured bytes.Buffer
+
+	writeChunk := func(chunk *translate.ChatCompletionResponse) error {
+		data, err := json.Marshal(chunk)
+		if err != nil {
+			return err
+		}
+		line := "data: " + string(data) + "\n\n"
+		captured.WriteString(line)
+		if _, err := w.Write([]byte(line)); err != nil {
+			return err
+		}
+		return rc.Flush()
+	}
+
+	if resp == nil {
+		resp = &translate.ChatCompletionResponse{
+			ID:      "chatcmpl-gemini",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+		}
+	}
+
+	created := resp.Created
+	if created == 0 {
+		created = time.Now().Unix()
+	}
+	model := resp.Model
+	if model == "" {
+		model = "unknown"
+	}
+	id := resp.ID
+	if id == "" {
+		id = "chatcmpl-gemini"
+	}
+
+	var message *translate.ChatMessage
+	var finishReason *string
+	if len(resp.Choices) > 0 {
+		message = resp.Choices[0].Message
+		finishReason = resp.Choices[0].FinishReason
+	}
+	if message == nil {
+		message = &translate.ChatMessage{Role: "assistant"}
+	}
+
+	initial := &translate.ChatCompletionResponse{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []translate.Choice{{
+			Index: 0,
+			Delta: &translate.ChatMessage{Role: "assistant"},
+		}},
+	}
+	if err := writeChunk(initial); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+
+	if text, ok := message.Content.(string); ok && text != "" {
+		if err := writeChunk(&translate.ChatCompletionResponse{
+			ID:      id,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   model,
+			Choices: []translate.Choice{{
+				Index: 0,
+				Delta: &translate.ChatMessage{Content: text},
+			}},
+		}); err != nil {
+			return &StreamResult{Body: captured.Bytes()}, err
+		}
+	}
+
+	for _, tc := range message.ToolCalls {
+		if err := writeChunk(&translate.ChatCompletionResponse{
+			ID:      id,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   model,
+			Choices: []translate.Choice{{
+				Index: 0,
+				Delta: &translate.ChatMessage{
+					ToolCalls: []translate.ToolCall{tc},
+				},
+			}},
+		}); err != nil {
+			return &StreamResult{Body: captured.Bytes()}, err
+		}
+	}
+
+	if err := writeChunk(&translate.ChatCompletionResponse{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []translate.Choice{{
+			Index:        0,
+			Delta:        &translate.ChatMessage{},
+			FinishReason: finishReason,
+		}},
+	}); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+
+	done := "data: [DONE]\n\n"
+	captured.WriteString(done)
+	if _, err := w.Write([]byte(done)); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+	if err := rc.Flush(); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+
+	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
+	if resp.Usage != nil {
+		inputTokens = resp.Usage.PromptTokens
+		outputTokens = resp.Usage.CompletionTokens
+		if resp.Usage.PromptTokensDetails != nil {
+			cacheReadTokens = resp.Usage.PromptTokensDetails.CachedTokens
+		}
+		if resp.Usage.CompletionTokensDetails != nil {
+			reasoningTokens = resp.Usage.CompletionTokensDetails.ReasoningTokens
+		}
+	}
+	return &StreamResult{
+		Body:                 captured.Bytes(),
+		InputTokens:          inputTokens,
+		OutputTokens:         outputTokens,
+		CacheReadInputTokens: cacheReadTokens,
+		ReasoningTokens:      reasoningTokens,
+	}, nil
+}
+
+// SynthesizeResponsesSSE writes a complete Responses API response as
+// Server-Sent Events to w. It is used when the upstream was called without
+// streaming but the client expects Responses-format SSE.
+func SynthesizeResponsesSSE(w http.ResponseWriter, resp *translate.ResponsesResponse) (*StreamResult, error) {
+	rc := http.NewResponseController(w)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	var captured bytes.Buffer
+
+	writeEvent := func(event string, payload any) error {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		line := fmt.Sprintf("event: %s\ndata: %s\n\n", event, data)
+		captured.WriteString(line)
+		if _, err := w.Write([]byte(line)); err != nil {
+			return err
+		}
+		return rc.Flush()
+	}
+
+	if resp == nil {
+		resp = &translate.ResponsesResponse{
+			ID:     "resp_gemini",
+			Object: "response",
+			Status: "completed",
+		}
+	}
+
+	respID := resp.ID
+	if respID == "" {
+		respID = "resp_gemini"
+	}
+	model := resp.Model
+	if model == "" {
+		model = "unknown"
+	}
+
+	if err := writeEvent("response.created", map[string]any{
+		"type": "response.created",
+		"response": map[string]any{
+			"id":     respID,
+			"object": "response",
+			"status": "in_progress",
+			"model":  model,
+		},
+	}); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+
+	for outputIndex, item := range resp.Output {
+		switch item.Type {
+		case "message":
+			if err := writeEvent("response.output_item.added", map[string]any{
+				"type":         "response.output_item.added",
+				"output_index": outputIndex,
+				"item": map[string]any{
+					"id":      item.ID,
+					"type":    "message",
+					"status":  "in_progress",
+					"role":    item.Role,
+					"content": []any{},
+				},
+			}); err != nil {
+				return &StreamResult{Body: captured.Bytes()}, err
+			}
+			for contentIndex, content := range item.Content {
+				if content.Type != "output_text" {
+					continue
+				}
+				if err := writeEvent("response.content_part.added", map[string]any{
+					"type":          "response.content_part.added",
+					"item_id":       item.ID,
+					"output_index":  outputIndex,
+					"content_index": contentIndex,
+					"part":          map[string]any{"type": "output_text", "text": ""},
+				}); err != nil {
+					return &StreamResult{Body: captured.Bytes()}, err
+				}
+				if err := writeEvent("response.output_text.delta", map[string]any{
+					"type":          "response.output_text.delta",
+					"item_id":       item.ID,
+					"output_index":  outputIndex,
+					"content_index": contentIndex,
+					"delta":         content.Text,
+				}); err != nil {
+					return &StreamResult{Body: captured.Bytes()}, err
+				}
+				if err := writeEvent("response.output_text.done", map[string]any{
+					"type":          "response.output_text.done",
+					"item_id":       item.ID,
+					"output_index":  outputIndex,
+					"content_index": contentIndex,
+					"text":          content.Text,
+				}); err != nil {
+					return &StreamResult{Body: captured.Bytes()}, err
+				}
+				if err := writeEvent("response.content_part.done", map[string]any{
+					"type":          "response.content_part.done",
+					"item_id":       item.ID,
+					"output_index":  outputIndex,
+					"content_index": contentIndex,
+					"part":          map[string]any{"type": "output_text", "text": content.Text},
+				}); err != nil {
+					return &StreamResult{Body: captured.Bytes()}, err
+				}
+			}
+			if err := writeEvent("response.output_item.done", map[string]any{
+				"type":         "response.output_item.done",
+				"output_index": outputIndex,
+				"item":         item,
+			}); err != nil {
+				return &StreamResult{Body: captured.Bytes()}, err
+			}
+		case "function_call":
+			if err := writeEvent("response.output_item.added", map[string]any{
+				"type":         "response.output_item.added",
+				"output_index": outputIndex,
+				"item":         item,
+			}); err != nil {
+				return &StreamResult{Body: captured.Bytes()}, err
+			}
+			if err := writeEvent("response.output_item.done", map[string]any{
+				"type":         "response.output_item.done",
+				"output_index": outputIndex,
+				"item":         item,
+			}); err != nil {
+				return &StreamResult{Body: captured.Bytes()}, err
+			}
+		}
+	}
+
+	if err := writeEvent("response.completed", map[string]any{
+		"type":     "response.completed",
+		"response": resp,
+	}); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+
+	done := "data: [DONE]\n\n"
+	captured.WriteString(done)
+	if _, err := w.Write([]byte(done)); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+	if err := rc.Flush(); err != nil {
+		return &StreamResult{Body: captured.Bytes()}, err
+	}
+
+	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
+	if resp.Usage != nil {
+		inputTokens = resp.Usage.InputTokens
+		outputTokens = resp.Usage.OutputTokens
+		if resp.Usage.InputTokensDetails != nil {
+			cacheReadTokens = resp.Usage.InputTokensDetails.CachedTokens
+		}
+		if resp.Usage.OutputTokensDetails != nil {
+			reasoningTokens = resp.Usage.OutputTokensDetails.ReasoningTokens
+		}
+	}
+	return &StreamResult{
+		Body:                 captured.Bytes(),
+		InputTokens:          inputTokens,
+		OutputTokens:         outputTokens,
+		CacheReadInputTokens: cacheReadTokens,
+		ReasoningTokens:      reasoningTokens,
 	}, nil
 }
 

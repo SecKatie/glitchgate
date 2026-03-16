@@ -36,11 +36,11 @@ func buildCostFilter(params CostParams, forceKeyJoin bool, modelFilterCol string
 
 	if params.From != "" {
 		conditions = append(conditions, "rl.timestamp >= ?")
-		args = append(args, params.From)
+		args = append(args, normalizeTimestamp(params.From))
 	}
 	if params.To != "" {
 		conditions = append(conditions, "rl.timestamp <= ?")
-		args = append(args, params.To)
+		args = append(args, normalizeToDate(params.To))
 	}
 	if params.KeyPrefix != "" {
 		conditions = append(conditions, "pk.key_prefix = ?")

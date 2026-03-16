@@ -3,129 +3,6 @@
 {{define "title"}}Providers — glitchgate{{end}}
 
 {{define "head"}}
-<style>
-    .cost-hero {
-        display: flex;
-        align-items: center;
-        gap: 2rem;
-        margin-bottom: 1.5rem;
-        padding: 1rem 1.5rem;
-        border: 1px solid var(--pico-muted-border-color);
-        border-radius: var(--pico-border-radius);
-    }
-    .cost-hero-main {
-        flex-shrink: 0;
-    }
-    .cost-hero-label {
-        font-size: 0.8rem;
-        color: var(--pico-muted-color);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-    .cost-hero-value {
-        font-size: 2.25rem;
-        font-weight: 700;
-        color: var(--pico-primary);
-        font-variant-numeric: tabular-nums;
-        line-height: 1.1;
-    }
-    .cost-hero-stats {
-        display: flex;
-        gap: 1.5rem;
-        flex-wrap: wrap;
-        border-left: 1px solid var(--pico-muted-border-color);
-        padding-left: 2rem;
-    }
-    .cost-hero-stat {
-        display: flex;
-        flex-direction: column;
-    }
-    .cost-hero-stat-value {
-        font-size: 1.1rem;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-    }
-    .cost-hero-stat-label {
-        font-size: 0.75rem;
-        color: var(--pico-muted-color);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-    @media (max-width: 600px) {
-        .cost-hero {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 1rem;
-        }
-        .cost-hero-stats {
-            border-left: none;
-            padding-left: 0;
-            border-top: 1px solid var(--pico-muted-border-color);
-            padding-top: 1rem;
-        }
-    }
-    .bar-chart {
-        display: flex;
-        align-items: flex-end;
-        gap: 2px;
-        height: 160px;
-        padding: 0 0 0.25rem 0;
-        border-bottom: 1px solid var(--pico-muted-border-color);
-        margin-bottom: 0.25rem;
-    }
-    .bar-chart .bar-col {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        height: 100%;
-        justify-content: flex-end;
-        min-width: 0;
-    }
-    .bar-chart .bar {
-        width: 80%;
-        max-width: 36px;
-        background: var(--pico-primary);
-        border-radius: 2px 2px 0 0;
-        min-height: 2px;
-        transition: opacity 0.15s;
-    }
-    .bar-chart .bar:hover {
-        opacity: 0.75;
-    }
-    .bar-chart .bar-val {
-        font-size: 0.55rem;
-        color: var(--pico-muted-color);
-        margin-bottom: 2px;
-        white-space: nowrap;
-        font-variant-numeric: tabular-nums;
-    }
-    .bar-labels {
-        display: flex;
-        gap: 2px;
-    }
-    .bar-labels .bar-date {
-        flex: 1;
-        text-align: center;
-        font-size: 0.55rem;
-        color: var(--pico-muted-color);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        min-width: 0;
-    }
-    .subsidy-analysis {
-        margin-bottom: 1rem;
-        padding: 1rem 0 0;
-    }
-    .subsidy-chart .subsidy-bar {
-        background: var(--pico-del-color);
-    }
-    .subsidy-savings {
-        color: var(--pico-ins-color);
-        font-weight: 600;
-    }
-</style>
 {{end}}
 
 {{define "content"}}
@@ -155,9 +32,9 @@
             <td class="mono"><a href="/ui/providers/{{.EncodedName}}" class="row-link">{{.DisplayName}}</a></td>
             <td>{{.Type}}</td>
             <td>{{.Requests}}</td>
-            <td class="cost">{{if .TokenCostUSD}}${{printf "%.2f" .TokenCostUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
-            <td class="cost">{{if .HasSubscription}}${{printf "%.2f" .MonthlySubscriptionUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
-            <td class="cost">{{if .SavingsPct}}{{printf "%+.1f%%" (deref .SavingsPct)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .TokenCostUSD}}${{printf "%.2f" .TokenCostUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .HasSubscription}}${{printf "%.2f" .MonthlySubscriptionUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .SavingsPct}}{{printf "%+.1f%%" (deref .SavingsPct)}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
         </tr>
         {{end}}
     </tbody>

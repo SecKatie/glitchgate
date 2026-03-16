@@ -26,13 +26,21 @@ func NewTeamHandlers(st store.TeamAdminStore, sessions *auth.UISessionStore, tmp
 	return &TeamHandlers{store: st, sessions: sessions, templates: tmpl}
 }
 
+// teamMember is the template projection for a team member.
+type teamMember struct {
+	ID    string
+	Email string
+	Role  string
+}
+
 // teamWithMembers is the JSON/template projection for a team.
 type teamWithMembers struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	MemberCount int    `json:"member_count"`
-	CreatedAt   string `json:"created_at"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	MemberCount int          `json:"member_count"`
+	Members     []teamMember `json:"members"`
+	CreatedAt   string       `json:"created_at"`
 }
 
 // TeamsPage renders the team management page.
@@ -92,11 +100,16 @@ func (h *TeamHandlers) listTeamsForSession(r *http.Request, sc *auth.UISessionCo
 			if team.ID != *sc.TeamID {
 				continue
 			}
+			members, err := h.fetchMembers(r, team.ID)
+			if err != nil {
+				return nil, err
+			}
 			return []teamWithMembers{{
 				ID:          team.ID,
 				Name:        team.Name,
 				Description: team.Description,
 				MemberCount: team.MemberCount,
+				Members:     members,
 				CreatedAt:   team.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			}}, nil
 		}
@@ -106,15 +119,37 @@ func (h *TeamHandlers) listTeamsForSession(r *http.Request, sc *auth.UISessionCo
 	// GA / master key: all teams.
 	result := make([]teamWithMembers, 0, len(teams))
 	for _, t := range teams {
+		members, err := h.fetchMembers(r, t.ID)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, teamWithMembers{
 			ID:          t.ID,
 			Name:        t.Name,
 			Description: t.Description,
 			MemberCount: t.MemberCount,
+			Members:     members,
 			CreatedAt:   t.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	return result, nil
+}
+
+// fetchMembers returns a template-friendly member list for a team.
+func (h *TeamHandlers) fetchMembers(r *http.Request, teamID string) ([]teamMember, error) {
+	users, err := h.store.ListTeamMembers(r.Context(), teamID)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]teamMember, 0, len(users))
+	for _, u := range users {
+		members = append(members, teamMember{
+			ID:    u.ID,
+			Email: u.Email,
+			Role:  u.Role,
+		})
+	}
+	return members, nil
 }
 
 // CreateTeamHandler creates a new team.

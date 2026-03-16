@@ -223,6 +223,9 @@ func (h *Handler) routeBuilders(w http.ResponseWriter, r *http.Request,
 		"responses": func(attempt chainAttempt) (*routePlan, bool) {
 			return h.buildResponsesProviderRoute(w, r, body, reqBody, &attempt.Mapping)
 		},
+		"gemini": func(attempt chainAttempt) (*routePlan, bool) {
+			return h.buildGeminiProviderRoute(w, r, body, reqBody, &attempt.Mapping)
+		},
 	}
 }
 
@@ -530,5 +533,170 @@ func (h *Handler) handleResponsesProviderStreaming(w http.ResponseWriter, resp *
 		Body:                     result.Body,
 		ErrDetails:               errDetails,
 		IsStreaming:              true,
+	}
+}
+
+// buildGeminiProviderRoute handles Anthropic-format requests that need to be
+// sent to a native Gemini (Vertex AI) provider. It translates Anthropic→Gemini
+// on request and Gemini→Anthropic on response.
+func (h *Handler) buildGeminiProviderRoute(w http.ResponseWriter, r *http.Request,
+	body []byte, reqBody *struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}, mapping *config.DispatchTarget,
+) (*routePlan, bool) {
+	var anthReq anthropic.MessagesRequest
+	if err := json.Unmarshal(body, &anthReq); err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "Invalid JSON in request body")
+		return nil, true
+	}
+
+	anthReq.Model = mapping.UpstreamModel
+	gemReq, err := translate.AnthropicToGeminiRequest(&anthReq)
+	if err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
+		return nil, true
+	}
+
+	// Check if this provider forces non-streaming upstream calls.
+	forceNonStream := false
+	if provCfg, cfgErr := h.cfg.FindProvider(mapping.Provider); cfgErr == nil && provCfg.Stream != nil && !*provCfg.Stream {
+		forceNonStream = true
+	}
+
+	gemBody, err := json.Marshal(gemReq)
+	if err != nil {
+		writeAnthropicError(w, http.StatusInternalServerError, "api_error", "Internal server error")
+		return nil, true
+	}
+
+	return &routePlan{
+		ProviderRequest: &provider.Request{
+			Body:        gemBody,
+			Headers:     r.Header.Clone(),
+			Model:       mapping.UpstreamModel,
+			IsStreaming: reqBody.Stream && !forceNonStream,
+		},
+		RequestBody: body,
+		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			switch {
+			case reqBody.Stream && forceNonStream:
+				return h.handleGeminiProviderForcedStream(w, provResp, reqBody.Model)
+			case reqBody.Stream:
+				return h.handleGeminiProviderStreaming(w, provResp, reqBody.Model)
+			default:
+				return h.handleGeminiProviderNonStreaming(w, provResp, reqBody.Model)
+			}
+		},
+	}, false
+}
+
+func (h *Handler) handleGeminiProviderNonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.StatusCode >= 400 {
+		s := string(resp.Body)
+		writeAnthropicError(w, resp.StatusCode, "api_error", s)
+		return handlerResult{
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
+		}
+	}
+
+	anthResp := translate.GeminiToAnthropicResponse(resp.Body, modelRequested)
+	anthBody, err := json.Marshal(anthResp)
+	if err != nil {
+		writeAnthropicError(w, http.StatusInternalServerError, "api_error", "Internal server error")
+		s := "Internal server error"
+		return handlerResult{Status: http.StatusInternalServerError, ErrDetails: &s}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(anthBody); err != nil {
+		slog.Warn("write Anthropic response", "error", err)
+	}
+	return handlerResult{
+		InputTokens:          resp.InputTokens,
+		OutputTokens:         resp.OutputTokens,
+		CacheReadInputTokens: resp.CacheReadInputTokens,
+		ReasoningTokens:      resp.ReasoningTokens,
+		Status:               http.StatusOK,
+		Body:                 anthBody,
+	}
+}
+
+func (h *Handler) handleGeminiProviderStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.Stream == nil {
+		return h.handleGeminiProviderForcedStream(w, resp, modelRequested)
+	}
+
+	result, err := translate.GeminiSSEToAnthropicSSE(w, resp.Stream, modelRequested)
+
+	var errDetails *string
+	if err != nil {
+		errDetails = streamRelayErrorDetails(err)
+		if errDetails != nil {
+			slog.Warn("gemini stream relay error", "error", err)
+		}
+	}
+
+	status := resp.StatusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return handlerResult{
+		InputTokens:              result.InputTokens,
+		OutputTokens:             result.OutputTokens,
+		CacheCreationInputTokens: result.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.CacheReadInputTokens,
+		ReasoningTokens:          result.ReasoningTokens,
+		Status:                   status,
+		Body:                     result.Body,
+		ErrDetails:               errDetails,
+		IsStreaming:              true,
+	}
+}
+
+// handleGeminiProviderForcedStream handles client streaming requests when the
+// provider config has stream:false. It fetches a non-streaming Gemini response
+// and synthesizes Anthropic SSE events for the client.
+func (h *Handler) handleGeminiProviderForcedStream(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.StatusCode >= 400 {
+		s := string(resp.Body)
+		writeAnthropicError(w, resp.StatusCode, "api_error", s)
+		return handlerResult{
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
+			IsStreaming:          true,
+		}
+	}
+
+	anthResp := translate.GeminiToAnthropicResponse(resp.Body, modelRequested)
+	result, err := SynthesizeAnthropicSSE(w, anthResp)
+
+	var errDetails *string
+	if err != nil {
+		s := fmt.Sprintf("stream synthesis error: %v", err)
+		errDetails = &s
+		slog.Warn("stream synthesis error", "error", err)
+	}
+	return handlerResult{
+		InputTokens:          resp.InputTokens,
+		OutputTokens:         resp.OutputTokens,
+		CacheReadInputTokens: resp.CacheReadInputTokens,
+		ReasoningTokens:      resp.ReasoningTokens,
+		Status:               http.StatusOK,
+		Body:                 result.Body,
+		ErrDetails:           errDetails,
+		IsStreaming:          true,
 	}
 }

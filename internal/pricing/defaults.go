@@ -173,6 +173,102 @@ var SegmentDefaults = map[string]Entry{
 	},
 }
 
+// GeminiDefaults holds pricing for Gemini models on native Gemini upstreams.
+// Applied for providers with type "gemini" and "vertex_gemini".
+// Values are USD per million tokens (standard tier, <=200K context) as of 2026-03-16.
+var GeminiDefaults = map[string]Entry{
+	// Gemini 3.1
+	"google/gemini-3.1-pro-preview": {
+		InputPerMillion:     2.00,
+		OutputPerMillion:    12.00,
+		CacheReadPerMillion: 0.20,
+	},
+	"google/gemini-3.1-flash-lite-preview": {
+		InputPerMillion:     0.25,
+		OutputPerMillion:    1.50,
+		CacheReadPerMillion: 0.03,
+	},
+	// Gemini 3
+	"google/gemini-3-pro-preview": {
+		InputPerMillion:     2.00,
+		OutputPerMillion:    12.00,
+		CacheReadPerMillion: 0.20,
+	},
+	"google/gemini-3-flash-preview": {
+		InputPerMillion:     0.50,
+		OutputPerMillion:    3.00,
+		CacheReadPerMillion: 0.05,
+	},
+	// Gemini 2.5
+	"google/gemini-2.5-pro": {
+		InputPerMillion:     1.25,
+		OutputPerMillion:    10.00,
+		CacheReadPerMillion: 0.13,
+	},
+	"google/gemini-2.5-flash": {
+		InputPerMillion:     0.30,
+		OutputPerMillion:    2.50,
+		CacheReadPerMillion: 0.03,
+	},
+	"google/gemini-2.5-flash-lite": {
+		InputPerMillion:     0.10,
+		OutputPerMillion:    0.40,
+		CacheReadPerMillion: 0.01,
+	},
+	// Gemini 2.0
+	"google/gemini-2.0-flash": {
+		InputPerMillion:  0.15,
+		OutputPerMillion: 0.60,
+	},
+	"google/gemini-2.0-flash-lite": {
+		InputPerMillion:  0.075,
+		OutputPerMillion: 0.30,
+	},
+	"gemini-3.1-pro-preview": {
+		InputPerMillion:     2.00,
+		OutputPerMillion:    12.00,
+		CacheReadPerMillion: 0.20,
+	},
+	"gemini-3.1-flash-lite-preview": {
+		InputPerMillion:     0.25,
+		OutputPerMillion:    1.50,
+		CacheReadPerMillion: 0.03,
+	},
+	"gemini-3-pro-preview": {
+		InputPerMillion:     2.00,
+		OutputPerMillion:    12.00,
+		CacheReadPerMillion: 0.20,
+	},
+	"gemini-3-flash-preview": {
+		InputPerMillion:     0.50,
+		OutputPerMillion:    3.00,
+		CacheReadPerMillion: 0.05,
+	},
+	"gemini-2.5-pro": {
+		InputPerMillion:     1.25,
+		OutputPerMillion:    10.00,
+		CacheReadPerMillion: 0.13,
+	},
+	"gemini-2.5-flash": {
+		InputPerMillion:     0.30,
+		OutputPerMillion:    2.50,
+		CacheReadPerMillion: 0.03,
+	},
+	"gemini-2.5-flash-lite": {
+		InputPerMillion:     0.10,
+		OutputPerMillion:    0.40,
+		CacheReadPerMillion: 0.01,
+	},
+	"gemini-2.0-flash": {
+		InputPerMillion:  0.15,
+		OutputPerMillion: 0.60,
+	},
+	"gemini-2.0-flash-lite": {
+		InputPerMillion:  0.075,
+		OutputPerMillion: 0.30,
+	},
+}
+
 const (
 	officialOpenAIHost      = "api.openai.com"
 	officialChatGPTHost     = "chatgpt.com"

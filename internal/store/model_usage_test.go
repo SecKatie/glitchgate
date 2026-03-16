@@ -154,21 +154,21 @@ func TestGetModelLatencyTimeseries(t *testing.T) {
 		require.Len(t, entries, 3)
 
 		// Hour 1 (10:00): 1000ms / 200 tokens = 5.0 ms/tok, 1 request
-		require.Equal(t, "2026-03-01 10", entries[0].Bucket)
+		require.Equal(t, "2026-03-01T10", entries[0].Bucket)
 		require.Equal(t, int64(1000), entries[0].TotalLatencyMs)
 		require.Equal(t, int64(200), entries[0].TotalOutputTokens)
 		require.Equal(t, int64(1), entries[0].Requests)
 		require.InDelta(t, 5.0, entries[0].AvgMsPerOutputToken, 0.01)
 
 		// Hour 2 (14:00): 1500ms / 300 tokens = 5.0 ms/tok, 1 request
-		require.Equal(t, "2026-03-01 14", entries[1].Bucket)
+		require.Equal(t, "2026-03-01T14", entries[1].Bucket)
 		require.Equal(t, int64(1500), entries[1].TotalLatencyMs)
 		require.Equal(t, int64(300), entries[1].TotalOutputTokens)
 		require.Equal(t, int64(1), entries[1].Requests)
 		require.InDelta(t, 5.0, entries[1].AvgMsPerOutputToken, 0.01)
 
 		// Hour 3 (08:00 next day): 800ms / 100 tokens = 8.0 ms/tok, 1 request (lt-4 excluded)
-		require.Equal(t, "2026-03-02 08", entries[2].Bucket)
+		require.Equal(t, "2026-03-02T08", entries[2].Bucket)
 		require.Equal(t, int64(800), entries[2].TotalLatencyMs)
 		require.Equal(t, int64(100), entries[2].TotalOutputTokens)
 		require.Equal(t, int64(1), entries[2].Requests)
