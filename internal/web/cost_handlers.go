@@ -104,41 +104,6 @@ type pricedTimeseriesEntry struct {
 	Requests int64
 }
 
-func providerComparisonEffective(comparison *ProviderSpendComparison) *float64 {
-	if comparison == nil {
-		return nil
-	}
-	return comparison.EffectiveTokenCostPerMTok
-}
-
-func providerComparisonAverageReal(comparison *ProviderSpendComparison) *float64 {
-	if comparison == nil {
-		return nil
-	}
-	return comparison.AverageRealTokenCostPerMTok
-}
-
-func providerComparisonEffectiveMinusReal(comparison *ProviderSpendComparison) *float64 {
-	if comparison == nil {
-		return nil
-	}
-	return comparison.EffectiveMinusRealCostPerMTok
-}
-
-func providerComparisonTokenVsSubscriptionPct(comparison *ProviderSpendComparison) *float64 {
-	if comparison == nil {
-		return nil
-	}
-	return comparison.TokenVsSubscriptionPct
-}
-
-func providerComparisonEffectiveVsRealPct(comparison *ProviderSpendComparison) *float64 {
-	if comparison == nil {
-		return nil
-	}
-	return comparison.EffectiveVsRealPct
-}
-
 // --------------------------------------------------------------------------
 // Helper: parse cost query parameters
 // --------------------------------------------------------------------------
@@ -206,6 +171,24 @@ func startOfDay(t time.Time, tz *time.Location) time.Time {
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, tz)
 }
 
+// daysInRange returns the number of days between two date strings (inclusive).
+// Falls back to 30 if either date fails to parse.
+func daysInRange(from, to string) int {
+	fromT, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return 30
+	}
+	toT, err := time.Parse("2006-01-02", to)
+	if err != nil {
+		return 30
+	}
+	days := int(toT.Sub(fromT).Hours()/24) + 1
+	if days < 1 {
+		return 1
+	}
+	return days
+}
+
 func (h *CostHandlers) costParamsForRequest(r *http.Request) store.CostParams {
 	params := h.parseCostParams(r)
 	h.applyProviderFilter(&params)
@@ -260,41 +243,29 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 
 	bd := make([]costBreakdownEntryJSON, len(breakdown))
 	for i, e := range breakdown {
-		var monthlySubscriptionCostUSD *float64
-		var tokenMinusSubscriptionUSD *float64
-		if comparison, ok := providerComparisons[e.Group]; ok {
-			monthly := comparison.MonthlySubscriptionCost
-			delta := comparison.TokenMinusSubscriptionUSD
-			monthlySubscriptionCostUSD = &monthly
-			tokenMinusSubscriptionUSD = &delta
-		}
 		bd[i] = costBreakdownEntryJSON{
-			Group:                         e.Group,
-			CostUSD:                       breakdownCosts[e.Group],
-			InputTokens:                   e.InputTokens,
-			OutputTokens:                  e.OutputTokens,
-			CacheCreationTokens:           e.CacheCreationTokens,
-			CacheReadTokens:               e.CacheReadTokens,
-			Requests:                      e.Requests,
-			MonthlySubscriptionCostUSD:    monthlySubscriptionCostUSD,
-			TokenMinusSubscriptionUSD:     tokenMinusSubscriptionUSD,
-			TokenVsSubscriptionPct:        providerComparisonTokenVsSubscriptionPct(providerComparisons[e.Group]),
-			EffectiveTokenCostPerMTok:     providerComparisonEffective(providerComparisons[e.Group]),
-			AverageRealTokenCostPerMTok:   providerComparisonAverageReal(providerComparisons[e.Group]),
-			EffectiveMinusRealCostPerMTok: providerComparisonEffectiveMinusReal(providerComparisons[e.Group]),
-			EffectiveVsRealPct:            providerComparisonEffectiveVsRealPct(providerComparisons[e.Group]),
+			Group:               e.Group,
+			CostUSD:             breakdownCosts[e.Group],
+			InputTokens:         e.InputTokens,
+			OutputTokens:        e.OutputTokens,
+			CacheCreationTokens: e.CacheCreationTokens,
+			CacheReadTokens:     e.CacheReadTokens,
+			Requests:            e.Requests,
+		}
+		if pc, ok := providerComparisons[e.Group]; ok {
+			monthly := pc.MonthlySubscriptionCost
+			delta := pc.TokenMinusSubscriptionUSD
+			bd[i].MonthlySubscriptionCostUSD = &monthly
+			bd[i].TokenMinusSubscriptionUSD = &delta
+			bd[i].TokenVsSubscriptionPct = pc.TokenVsSubscriptionPct
+			bd[i].EffectiveTokenCostPerMTok = pc.EffectiveTokenCostPerMTok
+			bd[i].AverageRealTokenCostPerMTok = pc.AverageRealTokenCostPerMTok
+			bd[i].EffectiveMinusRealCostPerMTok = pc.EffectiveMinusRealCostPerMTok
+			bd[i].EffectiveVsRealPct = pc.EffectiveVsRealPct
 		}
 	}
 
-	// Strip time portion from params for the response.
-	fromDate := r.URL.Query().Get("from")
-	if fromDate == "" {
-		fromDate = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
-	}
-	toDate := r.URL.Query().Get("to")
-	if toDate == "" {
-		toDate = time.Now().In(h.tz).Format("2006-01-02")
-	}
+	fromDate, toDate := h.defaultDateRange(r)
 
 	resp := costSummaryResponse{
 		TotalCostUSD:             tokenCosts.TotalCostUSD,
@@ -353,14 +324,7 @@ func (h *CostHandlers) CostTimeseriesHandler(w http.ResponseWriter, r *http.Requ
 		data[i] = costTimeseriesEntryJSON(e)
 	}
 
-	fromDate := r.URL.Query().Get("from")
-	if fromDate == "" {
-		fromDate = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
-	}
-	toDate := r.URL.Query().Get("to")
-	if toDate == "" {
-		toDate = time.Now().In(h.tz).Format("2006-01-02")
-	}
+	fromDate, toDate := h.defaultDateRange(r)
 
 	resp := costTimeseriesResponse{
 		Interval: interval,
@@ -446,48 +410,6 @@ func aggregatePricedTimeseries(entries []pricedTimeseriesEntry, interval string)
 	return buckets
 }
 
-func aggregateProviderBreakdown(entries []store.CostBreakdownEntry, providerNames map[string]string) []store.CostBreakdownEntry {
-	if len(entries) == 0 || len(providerNames) == 0 {
-		return entries
-	}
-
-	combined := make(map[string]store.CostBreakdownEntry, len(entries))
-	for _, entry := range entries {
-		name, _ := providerDisplayName(entry.Group, providerNames)
-
-		agg := combined[name]
-		agg.Group = name
-		agg.InputTokens += entry.InputTokens
-		agg.OutputTokens += entry.OutputTokens
-		agg.CacheCreationTokens += entry.CacheCreationTokens
-		agg.CacheReadTokens += entry.CacheReadTokens
-		agg.Requests += entry.Requests
-		combined[name] = agg
-	}
-
-	result := make([]store.CostBreakdownEntry, 0, len(combined))
-	for _, entry := range combined {
-		result = append(result, entry)
-	}
-
-	slices.SortFunc(result, func(a, b store.CostBreakdownEntry) int {
-		switch {
-		case a.Requests > b.Requests:
-			return -1
-		case a.Requests < b.Requests:
-			return 1
-		case a.Group < b.Group:
-			return -1
-		case a.Group > b.Group:
-			return 1
-		default:
-			return 0
-		}
-	})
-
-	return result
-}
-
 func providerDisplayName(rawKey string, providerNames map[string]string) (string, bool) {
 	if providerNames == nil {
 		return rawKey, false
@@ -499,11 +421,46 @@ func providerDisplayName(rawKey string, providerNames map[string]string) (string
 }
 
 // --------------------------------------------------------------------------
-// T052: GET /ui/costs — render full cost dashboard page
+// Shared cost dashboard data computation
 // --------------------------------------------------------------------------
 
-// CostsPageHandler renders the full cost dashboard HTML page.
-func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) {
+// defaultDateRange returns from/to date strings from query params, defaulting
+// to the last 30 days in the handler's timezone.
+func (h *CostHandlers) defaultDateRange(r *http.Request) (fromDate, toDate string) {
+	fromDate = r.URL.Query().Get("from")
+	if fromDate == "" {
+		fromDate = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
+	}
+	toDate = r.URL.Query().Get("to")
+	if toDate == "" {
+		toDate = time.Now().In(h.tz).Format("2006-01-02")
+	}
+	return fromDate, toDate
+}
+
+// costDashboardData holds all the computed data needed by both the full cost
+// dashboard page and the HTMX cost summary fragment.
+type costDashboardData struct {
+	Summary                   *store.CostSummary
+	TokenCosts                *AggregateCostBreakdown
+	Breakdown                 []store.CostBreakdownEntry
+	BreakdownCosts            map[string]float64
+	ProviderComparisons       map[string]*ProviderSpendComparison
+	ProviderComparisonSummary ProviderSpendComparisonSummary
+	Timeseries                []pricedTimeseriesEntry
+	MaxCost                   float64
+	MaxBreakdownRequests      int64
+	HasIncompleteData         bool
+	GroupBy                   string
+	SubsidyAnalysis           *SubsidyAnalysis
+	FromDate                  string
+	ToDate                    string
+}
+
+// buildCostDashboardData fetches pricing groups from the store and computes
+// all derived data for the cost dashboard. Used by both the full page handler
+// and the HTMX fragment handler.
+func (h *CostHandlers) buildCostDashboardData(r *http.Request) (*costDashboardData, error) {
 	params := h.costParamsForRequest(r)
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
 
@@ -524,17 +481,15 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		return err
 	})
 	if err := g.Wait(); err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 
-	// Derive summary and breakdown from pricing groups in-memory
-	// instead of running separate SQL queries.
 	summary := deriveSummaryFromPricingGroups(pricingGroups)
 	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
 
-	pricedTimeseries := priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames)
-	aggregatedTimeseries := aggregatePricedTimeseries(pricedTimeseries, "day")
+	aggregatedTimeseries := aggregatePricedTimeseries(
+		priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames), "day",
+	)
 
 	var maxCost float64
 	for _, e := range aggregatedTimeseries {
@@ -549,25 +504,11 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	fromDate := r.URL.Query().Get("from")
-	if fromDate == "" {
-		fromDate = time.Now().In(h.tz).AddDate(0, 0, -30).Format("2006-01-02")
-	}
-	toDate := r.URL.Query().Get("to")
-	if toDate == "" {
-		toDate = time.Now().In(h.tz).Format("2006-01-02")
-	}
-
 	groupBy := r.URL.Query().Get("group_by")
 	if groupBy == "" {
 		groupBy = "model"
 	}
-	groupFilter := r.URL.Query().Get("filter")
-	if groupBy == "key" && groupFilter == "" {
-		groupFilter = r.URL.Query().Get("key")
-	}
 
-	// Check for incomplete data (rows with 0 tokens but requests).
 	hasIncompleteData := false
 	for _, e := range breakdown {
 		if e.InputTokens == 0 && e.OutputTokens == 0 && e.Requests > 0 {
@@ -580,26 +521,75 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
 	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
 
-	data := map[string]any{
-		"ActiveTab":                 "costs",
-		"Title":                     "Cost Dashboard",
-		"Summary":                   summary,
-		"TokenCosts":                tokenCosts,
-		"Breakdown":                 breakdown,
-		"BreakdownCosts":            breakdownCosts,
-		"ProviderComparisons":       providerComparisons,
-		"ProviderComparisonSummary": providerComparisonSummary,
-		"Timeseries":                aggregatedTimeseries,
-		"MaxCost":                   maxCost,
-		"MaxBreakdownRequests":      float64(maxBreakdownRequests),
-		"HasIncompleteData":         hasIncompleteData,
-		"From":                      fromDate,
-		"To":                        toDate,
-		"GroupBy":                   groupBy,
-		"GroupFilter":               groupFilter,
-		"TotalAllInputTokens":       summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
-		"ProviderNames":             h.providerNames,
+	fromDate, toDate := h.defaultDateRange(r)
+
+	subsidyAnalysis := buildSubsidyAnalysis(
+		pricingGroups, timeseriesPricingGroups,
+		h.calc, h.providerNames, h.providerMonthlySubscriptions,
+		daysInRange(fromDate, toDate),
+	)
+
+	return &costDashboardData{
+		Summary:                   summary,
+		TokenCosts:                tokenCosts,
+		Breakdown:                 breakdown,
+		BreakdownCosts:            breakdownCosts,
+		ProviderComparisons:       providerComparisons,
+		ProviderComparisonSummary: providerComparisonSummary,
+		Timeseries:                aggregatedTimeseries,
+		MaxCost:                   maxCost,
+		MaxBreakdownRequests:      maxBreakdownRequests,
+		HasIncompleteData:         hasIncompleteData,
+		GroupBy:                   groupBy,
+		SubsidyAnalysis:           subsidyAnalysis,
+		FromDate:                  fromDate,
+		ToDate:                    toDate,
+	}, nil
+}
+
+// toTemplateData converts the computed dashboard data to a template data map.
+func (d *costDashboardData) toTemplateData() map[string]any {
+	return map[string]any{
+		"Summary":                   d.Summary,
+		"TokenCosts":                d.TokenCosts,
+		"Breakdown":                 d.Breakdown,
+		"BreakdownCosts":            d.BreakdownCosts,
+		"ProviderComparisons":       d.ProviderComparisons,
+		"ProviderComparisonSummary": d.ProviderComparisonSummary,
+		"Timeseries":                d.Timeseries,
+		"MaxCost":                   d.MaxCost,
+		"MaxBreakdownRequests":      float64(d.MaxBreakdownRequests),
+		"HasIncompleteData":         d.HasIncompleteData,
+		"GroupBy":                   d.GroupBy,
+		"TotalAllInputTokens":       d.Summary.TotalInputTokens + d.Summary.TotalCacheCreationTokens + d.Summary.TotalCacheReadTokens,
+		"SubsidyAnalysis":           d.SubsidyAnalysis,
 	}
+}
+
+// --------------------------------------------------------------------------
+// T052: GET /ui/costs — render full cost dashboard page
+// --------------------------------------------------------------------------
+
+// CostsPageHandler renders the full cost dashboard HTML page.
+func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) {
+	dd, err := h.buildCostDashboardData(r)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	data := dd.toTemplateData()
+	data["ActiveTab"] = "costs"
+	data["Title"] = "Cost Dashboard"
+	data["From"] = dd.FromDate
+	data["To"] = dd.ToDate
+	data["ProviderNames"] = h.providerNames
+
+	groupFilter := r.URL.Query().Get("filter")
+	if dd.GroupBy == "key" && groupFilter == "" {
+		groupFilter = r.URL.Query().Get("key")
+	}
+	data["GroupFilter"] = groupFilter
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "costs.html", data); err != nil {
@@ -614,82 +604,14 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 // CostSummaryFragmentHandler renders only the cost breakdown table as an
 // HTMX partial, used when filters change without a full page reload.
 func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http.Request) {
-	params := h.costParamsForRequest(r)
-	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &params)
-
-	var (
-		pricingGroups           []store.CostPricingGroup
-		timeseriesPricingGroups []store.CostTimeseriesPricingGroup
-	)
-
-	g, ctx := errgroup.WithContext(r.Context())
-	g.Go(func() error {
-		var err error
-		pricingGroups, err = h.store.GetCostPricingGroups(ctx, params)
-		return err
-	})
-	g.Go(func() error {
-		var err error
-		timeseriesPricingGroups, err = h.store.GetCostTimeseriesPricingGroups(ctx, params)
-		return err
-	})
-	if err := g.Wait(); err != nil {
+	dd, err := h.buildCostDashboardData(r)
+	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// Derive summary and breakdown from pricing groups in-memory.
-	summary := deriveSummaryFromPricingGroups(pricingGroups)
-	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
-
-	pricedTimeseries := priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames)
-	aggregatedTimeseries := aggregatePricedTimeseries(pricedTimeseries, "day")
-
-	var maxCost float64
-	for _, e := range aggregatedTimeseries {
-		if e.CostUSD > maxCost {
-			maxCost = e.CostUSD
-		}
-	}
-	var maxBreakdownRequests int64
-	for _, e := range breakdown {
-		if e.Requests > maxBreakdownRequests {
-			maxBreakdownRequests = e.Requests
-		}
-	}
-
-	groupBy := r.URL.Query().Get("group_by")
-	if groupBy == "" {
-		groupBy = "model"
-	}
-
-	hasIncompleteData := false
-	for _, e := range breakdown {
-		if e.InputTokens == 0 && e.OutputTokens == 0 && e.Requests > 0 {
-			hasIncompleteData = true
-			break
-		}
-	}
-
-	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
-	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
-	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
-
-	data := map[string]any{
-		"Summary":                   summary,
-		"TokenCosts":                tokenCosts,
-		"Breakdown":                 breakdown,
-		"BreakdownCosts":            breakdownCosts,
-		"ProviderComparisons":       providerComparisons,
-		"ProviderComparisonSummary": providerComparisonSummary,
-		"Timeseries":                aggregatedTimeseries,
-		"MaxCost":                   maxCost,
-		"MaxBreakdownRequests":      float64(maxBreakdownRequests),
-		"HasIncompleteData":         hasIncompleteData,
-		"GroupBy":                   groupBy,
-		"TotalAllInputTokens":       summary.TotalInputTokens + summary.TotalCacheCreationTokens + summary.TotalCacheReadTokens,
-		"ProviderNames":             h.providerNames,
-	}
+	data := dd.toTemplateData()
+	data["ProviderNames"] = h.providerNames
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteNamed(w, "cost_summary", data); err != nil {

@@ -4,6 +4,7 @@ package web
 
 import (
 	"slices"
+	"sort"
 	"strings"
 
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
@@ -454,4 +455,262 @@ func buildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdo
 	}
 
 	return comparisons, summary
+}
+
+// --------------------------------------------------------------------------
+// Subscription Subsidy Analysis
+// --------------------------------------------------------------------------
+
+// SubsidyAnalysis holds data for the hero subsidy section of the cost dashboard.
+// Only populated when at least one provider has a configured subscription.
+type SubsidyAnalysis struct {
+	ProviderSubsidyUSD  float64  // token_cost - subscription_cost (what providers "lost")
+	TrueCostUSD         float64  // what user would pay at API rates
+	SubscriptionCostUSD float64  // what user actually pays
+	SubsidyPct          *float64 // savings as % of API cost: (API - Sub) / API * 100
+
+	TotalTokens    int64
+	TotalInputRate SubsidyCategoryRate // aggregate: Input + Cache Write + Cache Read
+	OutputRate     SubsidyCategoryRate // Output category (duplicated for easy template access)
+	Categories     []SubsidyCategoryRate
+	// InputChildren holds only Input, Cache Write, Cache Read for the indented rows.
+	InputChildren        []SubsidyCategoryRate
+	CumulativeData       []SubsidyCumulativeEntry
+	MaxCumulativeSubsidy float64 // for bar height scaling in chart
+}
+
+// SubsidyCategoryRate compares effective subscription rate to API rate for a
+// single token category (Input, Cache Write, Cache Read, Output).
+type SubsidyCategoryRate struct {
+	Category         string
+	TotalTokens      int64
+	APICostUSD       float64
+	EffectiveCostUSD float64 // subscription allocated proportionally by API cost share
+	APIRatePerMTok   float64
+	EffRatePerMTok   float64
+	SavingsPct       *float64 // (API - Eff) / API * 100
+}
+
+// SubsidyCumulativeEntry tracks daily running totals for the cumulative
+// provider subsidy chart.
+type SubsidyCumulativeEntry struct {
+	Date               string
+	DailyAPICost       float64
+	DailySubAllocation float64
+	CumulativeAPICost  float64
+	CumulativeSubCost  float64
+	CumulativeSubsidy  float64 // cumulative(API - Sub), positive = provider losing
+}
+
+// buildSubsidyAnalysis constructs the subsidy analysis from existing pricing
+// groups and timeseries data. Returns nil if no subscriptions are configured
+// or no matching usage data exists.
+func buildSubsidyAnalysis(
+	pricingGroups []store.CostPricingGroup,
+	timeseriesPricingGroups []store.CostTimeseriesPricingGroup,
+	calc *pricing.Calculator,
+	providerNames map[string]string,
+	subscriptions map[string]float64,
+	numDaysInRange int,
+) *SubsidyAnalysis {
+	if len(subscriptions) == 0 || calc == nil || numDaysInRange <= 0 {
+		return nil
+	}
+
+	// Accumulate per-category API costs and token counts for subscription providers.
+	type categoryAccum struct {
+		tokens int64
+		cost   float64
+	}
+	categories := map[string]*categoryAccum{
+		"Input":       {},
+		"Cache Write": {},
+		"Cache Read":  {},
+		"Output":      {},
+	}
+	var totalAPICost float64
+	matchedSubscriptions := make(map[string]float64) // display name → monthly cost
+
+	for _, g := range pricingGroups {
+		displayName, _ := providerDisplayName(g.ProviderName, providerNames)
+		if displayName == "" {
+			displayName = g.ProviderName
+		}
+
+		if _, ok := subscriptions[displayName]; !ok {
+			continue
+		}
+		matchedSubscriptions[displayName] = subscriptions[displayName]
+
+		priced, _, ok := lookupPricedUsageWithAliases(calc, g.ProviderName, g.ModelUpstream, tokenUsage{
+			InputTokens:      g.InputTokens,
+			CacheWriteTokens: g.CacheCreationTokens,
+			CacheReadTokens:  g.CacheReadTokens,
+			OutputTokens:     g.OutputTokens,
+			ReasoningTokens:  g.ReasoningTokens,
+		}, providerNames)
+		if !ok {
+			continue
+		}
+
+		categories["Input"].tokens += g.InputTokens
+		categories["Input"].cost += priced.InputCostUSD
+		categories["Cache Write"].tokens += g.CacheCreationTokens
+		categories["Cache Write"].cost += priced.CacheWriteCostUSD
+		categories["Cache Read"].tokens += g.CacheReadTokens
+		categories["Cache Read"].cost += priced.CacheReadCostUSD
+		categories["Output"].tokens += g.OutputTokens
+		categories["Output"].cost += priced.OutputCostUSD
+		totalAPICost += priced.TotalCostUSD
+	}
+
+	if len(matchedSubscriptions) == 0 || totalAPICost == 0 {
+		return nil
+	}
+
+	var totalSubscriptionCost float64
+	for _, cost := range matchedSubscriptions {
+		totalSubscriptionCost += cost
+	}
+
+	subsidy := totalAPICost - totalSubscriptionCost
+
+	sa := &SubsidyAnalysis{
+		ProviderSubsidyUSD:  subsidy,
+		TrueCostUSD:         totalAPICost,
+		SubscriptionCostUSD: totalSubscriptionCost,
+		SubsidyPct:          percentDelta(subsidy, totalAPICost),
+	}
+
+	// Build per-category rates with proportional subscription allocation.
+	categoryOrder := []string{"Input", "Cache Write", "Cache Read", "Output"}
+	for _, name := range categoryOrder {
+		cat := categories[name]
+		if cat.tokens == 0 {
+			continue
+		}
+
+		// Allocate subscription proportionally based on API cost share.
+		effectiveCost := 0.0
+		if totalAPICost > 0 {
+			effectiveCost = totalSubscriptionCost * (cat.cost / totalAPICost)
+		}
+
+		apiRate := cat.cost * 1_000_000 / float64(cat.tokens)
+		effRate := effectiveCost * 1_000_000 / float64(cat.tokens)
+
+		var savingsPct *float64
+		if apiRate > 0 {
+			pct := (apiRate - effRate) / apiRate * 100
+			savingsPct = &pct
+		}
+
+		sa.Categories = append(sa.Categories, SubsidyCategoryRate{
+			Category:         name,
+			TotalTokens:      cat.tokens,
+			APICostUSD:       cat.cost,
+			EffectiveCostUSD: effectiveCost,
+			APIRatePerMTok:   apiRate,
+			EffRatePerMTok:   effRate,
+			SavingsPct:       savingsPct,
+		})
+	}
+
+	// Build aggregated Total Input and Output rows, plus InputChildren for the template hierarchy.
+	for _, cat := range sa.Categories {
+		sa.TotalTokens += cat.TotalTokens
+		if cat.Category == "Output" {
+			sa.OutputRate = cat
+		} else {
+			sa.InputChildren = append(sa.InputChildren, cat)
+			sa.TotalInputRate.TotalTokens += cat.TotalTokens
+			sa.TotalInputRate.APICostUSD += cat.APICostUSD
+			sa.TotalInputRate.EffectiveCostUSD += cat.EffectiveCostUSD
+		}
+	}
+	sa.TotalInputRate.Category = "Total Input"
+	if sa.TotalInputRate.APICostUSD > 0 {
+		pct := (sa.TotalInputRate.APICostUSD - sa.TotalInputRate.EffectiveCostUSD) / sa.TotalInputRate.APICostUSD * 100
+		sa.TotalInputRate.SavingsPct = &pct
+	}
+
+	sa.CumulativeData = buildSubsidyTimeseries(
+		timeseriesPricingGroups, calc, providerNames,
+		matchedSubscriptions, totalSubscriptionCost, numDaysInRange,
+	)
+	for _, entry := range sa.CumulativeData {
+		if entry.CumulativeSubsidy > sa.MaxCumulativeSubsidy {
+			sa.MaxCumulativeSubsidy = entry.CumulativeSubsidy
+		}
+	}
+
+	return sa
+}
+
+// buildSubsidyTimeseries produces daily cumulative subsidy entries from
+// timeseries pricing groups, filtering to only subscription providers.
+func buildSubsidyTimeseries(
+	groups []store.CostTimeseriesPricingGroup,
+	calc *pricing.Calculator,
+	providerNames map[string]string,
+	matchedSubscriptions map[string]float64,
+	totalSubscriptionCost float64,
+	numDaysInRange int,
+) []SubsidyCumulativeEntry {
+	if len(groups) == 0 {
+		return nil
+	}
+
+	dailySubAllocation := totalSubscriptionCost / float64(numDaysInRange)
+
+	// Aggregate daily API costs for subscription providers.
+	dailyCosts := make(map[string]float64)
+	for _, g := range groups {
+		displayName, _ := providerDisplayName(g.ProviderName, providerNames)
+		if displayName == "" {
+			displayName = g.ProviderName
+		}
+		if _, ok := matchedSubscriptions[displayName]; !ok {
+			continue
+		}
+
+		priced, _, ok := lookupPricedUsageWithAliases(calc, g.ProviderName, g.ModelUpstream, tokenUsage{
+			InputTokens:      g.InputTokens,
+			CacheWriteTokens: g.CacheCreationTokens,
+			CacheReadTokens:  g.CacheReadTokens,
+			OutputTokens:     g.OutputTokens,
+		}, providerNames)
+		if !ok {
+			continue
+		}
+		dailyCosts[g.Date] += priced.TotalCostUSD
+	}
+
+	if len(dailyCosts) == 0 {
+		return nil
+	}
+
+	// Sort dates and build cumulative entries.
+	dates := make([]string, 0, len(dailyCosts))
+	for d := range dailyCosts {
+		dates = append(dates, d)
+	}
+	sort.Strings(dates)
+
+	entries := make([]SubsidyCumulativeEntry, 0, len(dates))
+	var cumAPICost, cumSubCost float64
+	for _, date := range dates {
+		cumAPICost += dailyCosts[date]
+		cumSubCost += dailySubAllocation
+		entries = append(entries, SubsidyCumulativeEntry{
+			Date:               date,
+			DailyAPICost:       dailyCosts[date],
+			DailySubAllocation: dailySubAllocation,
+			CumulativeAPICost:  cumAPICost,
+			CumulativeSubCost:  cumSubCost,
+			CumulativeSubsidy:  cumAPICost - cumSubCost,
+		})
+	}
+
+	return entries
 }

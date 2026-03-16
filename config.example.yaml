@@ -1,0 +1,70 @@
+# Glitchgate Configuration Example
+# Copy this file to config.yaml and customize for your deployment
+
+# Required: Master key for proxy authentication (or set GLITCHGATE_MASTER_KEY env var)
+# Generate with: openssl rand -hex 32
+master_key: "your-secure-master-key-here"
+
+# Server settings
+listen: ":4000"
+database_path: "/data/glitchgate.db"
+log_path: "/data/glitchgate.log"
+timezone: "UTC"
+
+# Rate limiting
+login_rate_limit_per_minute: 10
+login_rate_limit_burst: 5
+proxy_rate_limit_per_minute: 120
+proxy_rate_limit_burst: 30
+proxy_ip_rate_limit_per_minute: 240
+proxy_ip_rate_limit_burst: 60
+
+# Request logging
+request_log_retention: "720h"  # 30 days
+request_log_prune_interval: "1h"
+request_log_prune_batch_size: 1000
+request_log_body_max_bytes: 4194304  # 4MB
+
+# Upstream LLM providers
+providers:
+  # Example: Anthropic
+  - name: anthropic
+    type: anthropic
+    base_url: https://api.anthropic.com
+    auth_mode: proxy_key
+    api_key: "${ANTHROPIC_API_KEY}"
+    default_version: "2023-06-01"
+
+  # Example: OpenAI
+  # - name: openai
+  #   type: openai
+  #   base_url: https://api.openai.com/v1
+  #   auth_mode: proxy_key
+  #   api_key: "${OPENAI_API_KEY}"
+
+  # Example: GitHub Copilot
+  # - name: copilot
+  #   type: github_copilot
+  #   auth_mode: forward
+  #   token_dir: "/data/copilot_tokens"
+
+# Model mappings (client-facing name -> upstream provider/model)
+model_list:
+  # Direct mappings
+  - model_name: claude-sonnet-4-6
+    provider: anthropic
+    upstream_model: claude-sonnet-4-6-20251001
+
+  # Virtual model with fallback chain
+  # - model_name: smart-model
+  #   fallbacks:
+  #     - claude-opus
+  #     - gpt-4
+
+# OIDC Authentication (optional - enables web UI login)
+# oidc:
+#   issuer_url: "https://auth.example.com"
+#   client_id: "glitchgate"
+#   client_secret: "${OIDC_CLIENT_SECRET}"
+#   redirect_url: "https://glitchgate.example.com/ui/auth/callback"
+#   scopes: ["openid", "email", "profile"]

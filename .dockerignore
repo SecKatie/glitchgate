@@ -1,0 +1,48 @@
+# Build artifacts
+glitchgate
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+coverage.out
+
+# Go module cache (if vendored)
+/vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directory (for local development)
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Config with secrets
+config.yaml
+config.yml
+!config.example.yaml
+
+# Logs
+*.log
+
+# sqlc generated (keep these in repo, but ignore if regenerating)
+# internal/store/db/
+
+# Temporary files
+/tmp/
+tmp/

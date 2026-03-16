@@ -1,0 +1,44 @@
+services:
+  glitchgate:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: glitchgate:latest
+    container_name: glitchgate
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      # Persistent data directory
+      - ./data:/data:Z
+      # Mount config file (create from config.example.yaml first)
+      - ./config.yaml:/data/config.yaml:ro,Z
+    environment:
+      # Required if not in config.yaml:
+      # - GLITCHGATE_MASTER_KEY=your-secure-master-key
+      # Optional: override any config value via env vars
+      # - GLITCHGATE_LISTEN=:4000
+      # - GLITCHGATE_DATABASE_PATH=/data/glitchgate.db
+      # - GLITCHGATE_LOG_PATH=/data/glitchgate.log
+      - GLITCHGATE_TIMEZONE=UTC
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      - glitchgate
+
+networks:
+  glitchgate:
+    driver: bridge

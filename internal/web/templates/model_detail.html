@@ -14,6 +14,10 @@
   .model-header h2 {
     margin: 0;
   }
+  .model-header .copy-btn {
+    font-size: 0.5em;
+    vertical-align: middle;
+  }
   .model-meta {
     color: var(--pico-muted-color);
     font-size: 0.9em;
@@ -123,6 +127,11 @@
   .fallback-item:nth-child(3)::before { content: "③"; color: var(--pico-muted-color); }
   .fallback-item:nth-child(4)::before { content: "④"; color: var(--pico-muted-color); }
   .fallback-item:nth-child(5)::before { content: "⑤"; color: var(--pico-muted-color); }
+  .upstream-cell {
+    font-family: var(--pico-font-family-monospace);
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+  }
   .example-header {
     display: flex;
     align-items: center;
@@ -181,21 +190,23 @@
 
 <div class="model-header">
   <h2>{{.ModelName}}</h2>
+  <button class="copy-btn outline secondary" onclick="copyText(this, '{{.ModelName}}')">Copy</button>
   {{if .IsUnconfigured}}<span class="badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span>{{end}}
   {{if .IsVirtual}}<span class="badge badge-virtual">Virtual</span>{{end}}
   {{if .IsWildcard}}<span class="badge badge-wildcard">Wildcard</span>{{end}}
 </div>
 {{if not .IsVirtual}}
 <p class="model-meta">
-  {{if .UpstreamModel}}Upstream: <code>{{.UpstreamModel}}</code> &nbsp;·&nbsp; {{end}}
-  {{if .ProviderName}}<span class="provider-pill">{{.ProviderName}} <span class="provider-type">{{.ProviderType}}</span></span>{{if .IsUnconfigured}} <span style="color:var(--pico-muted-color);font-size:0.85em">· seen in logs</span>{{end}}{{else}}<span style="color:var(--pico-muted-color);font-size:0.9em">Not in model_list config</span>{{end}}
+  {{if .ProviderName}}<span class="provider-pill">{{.ProviderName}} <span class="provider-type">{{.ProviderType}}</span></span>{{end}}
+  {{if .UpstreamModel}} &rarr; <code>{{.UpstreamModel}}</code>{{end}}
+  {{if and .IsUnconfigured (eq .ProviderName "")}}<span style="color:var(--pico-muted-color);font-size:0.9em">Not in model_list config</span>{{end}}
 </p>
 {{else}}
-<p class="model-meta">Routes across a fallback chain of {{len .Fallbacks}} model{{if gt (len .Fallbacks) 1}}s{{end}}</p>
+<p class="model-meta">Virtual model with {{len .Fallbacks}} fallback{{if gt (len .Fallbacks) 1}}s{{end}} &mdash; requests try each in order until one succeeds</p>
 {{end}}
 
-{{/* ── Usage stats ─────────────────────────────────────────── */}}
-<div class="section-label">Usage</div>
+{{/* ── Spend summary ───────────────────────────────────────── */}}
+<div class="section-label">Spend Summary</div>
 <div class="stat-grid">
   <div class="stat-card">
     <div class="stat-value">{{.Usage.RequestCount}}</div>
@@ -214,6 +225,37 @@
     <div class="stat-label">Total Spend</div>
   </div>
 </div>
+
+{{/* ── Pricing (non-virtual only — virtual models show pricing in fallback table) */}}
+{{if not .IsVirtual}}
+<div class="section-label">Pricing</div>
+{{if .HasPricing}}
+<div class="pricing-grid">
+  <div class="pricing-card">
+    <div class="pricing-card-label">Input</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.InputPerMillion}}</div>
+    <div class="pricing-card-unit">per MTok</div>
+  </div>
+  <div class="pricing-card">
+    <div class="pricing-card-label">Output</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.OutputPerMillion}}</div>
+    <div class="pricing-card-unit">per MTok</div>
+  </div>
+  <div class="pricing-card">
+    <div class="pricing-card-label">Cache Write</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.CacheWritePerMillion}}</div>
+    <div class="pricing-card-unit">per MTok</div>
+  </div>
+  <div class="pricing-card">
+    <div class="pricing-card-label">Cache Read</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.CacheReadPerMillion}}</div>
+    <div class="pricing-card-unit">per MTok</div>
+  </div>
+</div>
+{{else}}
+<p class="no-pricing">No pricing data available for this model.</p>
+{{end}}
+{{end}}
 
 {{/* ── Performance chart ────────────────────────────────────── */}}
 {{if .LatencyTimeseries}}
@@ -242,53 +284,51 @@
 {{end}}
 {{end}}
 
-{{/* ── Pricing ──────────────────────────────────────────────── */}}
-{{if not .IsUnconfigured}}
-<div class="section-label">Pricing</div>
-{{if .HasPricing}}
-<div class="pricing-grid">
-  <div class="pricing-card">
-    <div class="pricing-card-label">Input</div>
-    <div class="pricing-card-value">${{printf "%.4f" .Pricing.InputPerMillion}}</div>
-    <div class="pricing-card-unit">per million tokens</div>
-  </div>
-  <div class="pricing-card">
-    <div class="pricing-card-label">Output</div>
-    <div class="pricing-card-value">${{printf "%.4f" .Pricing.OutputPerMillion}}</div>
-    <div class="pricing-card-unit">per million tokens</div>
-  </div>
-  <div class="pricing-card">
-    <div class="pricing-card-label">Cache Write</div>
-    <div class="pricing-card-value">${{printf "%.4f" .Pricing.CacheWritePerMillion}}</div>
-    <div class="pricing-card-unit">per million tokens</div>
-  </div>
-  <div class="pricing-card">
-    <div class="pricing-card-label">Cache Read</div>
-    <div class="pricing-card-value">${{printf "%.4f" .Pricing.CacheReadPerMillion}}</div>
-    <div class="pricing-card-unit">per million tokens</div>
-  </div>
-</div>
-{{else}}
-<p class="no-pricing">No pricing data available for this model.</p>
-{{end}}
-{{end}}
-
 {{/* ── Fallback chain (virtual models only) ────────────────── */}}
 {{if .IsVirtual}}
 <div class="section-label">Fallback Chain</div>
+{{if .FallbackDetails}}
+<figure>
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Model</th>
+      <th>Provider</th>
+      <th>Upstream Model</th>
+      <th>Input $/MTok</th>
+      <th>Output $/MTok</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range $i, $fb := .FallbackDetails}}
+    <tr>
+      <td>{{add $i 1}}</td>
+      <td><a href="/ui/models/{{$fb.EncodedName}}">{{$fb.ModelName}}</a></td>
+      <td>{{if $fb.ProviderName}}{{$fb.ProviderName}} ({{$fb.ProviderType}}){{else}}&mdash;{{end}}</td>
+      <td class="upstream-cell">{{if $fb.UpstreamModel}}{{$fb.UpstreamModel}}{{else}}&mdash;{{end}}</td>
+      <td>{{if $fb.HasPricing}}${{printf "%.2f" $fb.Pricing.InputPerMillion}}{{else}}&mdash;{{end}}</td>
+      <td>{{if $fb.HasPricing}}${{printf "%.2f" $fb.Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+</figure>
+{{else}}
 <div class="fallback-chain" style="margin-bottom:2rem">
   {{range .Fallbacks}}
   <div class="fallback-item"><code>{{.}}</code></div>
   {{end}}
 </div>
 {{end}}
+{{end}}
 
 {{/* ── Example request ─────────────────────────────────────── */}}
 <div class="section-label">Example Request</div>
 <div class="example-header">
   <span style="font-size:0.85em;color:var(--pico-muted-color)">Anthropic Messages API</span>
-  <button class="copy-btn outline secondary" onclick="copyText(this, document.getElementById('curl-example').textContent)">⎘ Copy</button>
+  <button class="copy-btn outline secondary" onclick="copyText(this, document.getElementById('curl-example').textContent)">Copy</button>
 </div>
 <pre class="curl-block"><code id="curl-example">{{.CurlExample}}</code></pre>
-<p style="margin-top:0.5rem"><small>The OpenAI-compatible endpoint (<code>/v1/chat/completions</code>) is also supported with the same proxy key.</small></p>
+<p style="margin-top:0.5rem"><small>The OpenAI-compatible endpoint (<code>/v1/chat/completions</code>) and Responses API (<code>/v1/responses</code>) also work with the same proxy key.</small></p>
 {{end}}

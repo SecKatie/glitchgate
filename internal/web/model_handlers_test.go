@@ -67,6 +67,14 @@ func testProviders() []config.ProviderConfig {
 	}
 }
 
+func testProviderMap() map[string]config.ProviderConfig {
+	pm := make(map[string]config.ProviderConfig)
+	for _, p := range testProviders() {
+		pm[p.Name] = p
+	}
+	return pm
+}
+
 // ---------------------------------------------------------------------------
 // T009: buildModelList unit tests
 // ---------------------------------------------------------------------------
@@ -81,18 +89,19 @@ func TestBuildModelList(t *testing.T) {
 	}
 	calc := makeTestCalc(providerName, "claude-sonnet-4-20250514", knownEntry)
 	emptyCalc := pricing.NewCalculator(map[string]pricing.Entry{})
-	providers := testProviders()
+	providerMap := testProviderMap()
 
 	t.Run("direct model with known pricing", func(t *testing.T) {
 		models := []config.ModelMapping{
 			{ModelName: "claude-sonnet", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		}
-		items := buildModelList(models, providers, calc)
+		items := buildModelList(models, providerMap, calc)
 		require.Len(t, items, 1)
 		item := items[0]
 		require.Equal(t, "claude-sonnet", item.ModelName)
 		require.Equal(t, "anthropic", item.ProviderName)
 		require.Equal(t, "anthropic", item.ProviderType)
+		require.Equal(t, "claude-sonnet-4-20250514", item.UpstreamModel)
 		require.False(t, item.IsVirtual)
 		require.False(t, item.IsWildcard)
 		require.True(t, item.HasPricing)
@@ -105,7 +114,7 @@ func TestBuildModelList(t *testing.T) {
 		models := []config.ModelMapping{
 			{ModelName: "unknown-model", Provider: "anthropic", UpstreamModel: "unknown-4-x"},
 		}
-		items := buildModelList(models, providers, emptyCalc)
+		items := buildModelList(models, providerMap, emptyCalc)
 		require.Len(t, items, 1)
 		require.False(t, items[0].HasPricing)
 		require.Nil(t, items[0].Pricing)
@@ -115,20 +124,21 @@ func TestBuildModelList(t *testing.T) {
 		models := []config.ModelMapping{
 			{ModelName: "fast", Fallbacks: []string{"claude-haiku", "claude-sonnet"}},
 		}
-		items := buildModelList(models, providers, calc)
+		items := buildModelList(models, providerMap, calc)
 		require.Len(t, items, 1)
 		item := items[0]
 		require.True(t, item.IsVirtual)
 		require.False(t, item.HasPricing)
 		require.Equal(t, []string{"claude-haiku", "claude-sonnet"}, item.Fallbacks)
 		require.Empty(t, item.ProviderName)
+		require.Empty(t, item.UpstreamModel)
 	})
 
 	t.Run("wildcard entry", func(t *testing.T) {
 		models := []config.ModelMapping{
 			{ModelName: "gc/*", Provider: "copilot"},
 		}
-		items := buildModelList(models, providers, emptyCalc)
+		items := buildModelList(models, providerMap, emptyCalc)
 		require.Len(t, items, 1)
 		require.True(t, items[0].IsWildcard)
 		require.Equal(t, "gc%2F%2A", items[0].EncodedName)
@@ -138,7 +148,7 @@ func TestBuildModelList(t *testing.T) {
 		models := []config.ModelMapping{
 			{ModelName: "gc/claude-sonnet", Provider: "copilot", UpstreamModel: "claude-sonnet-4-20250514"},
 		}
-		items := buildModelList(models, providers, emptyCalc)
+		items := buildModelList(models, providerMap, emptyCalc)
 		require.Len(t, items, 1)
 		require.Equal(t, "gc%2Fclaude-sonnet", items[0].EncodedName)
 	})
@@ -157,7 +167,7 @@ func TestBuildModelList(t *testing.T) {
 				Metadata:      &config.ModelMetadata{InputTokenCost: 1.00, OutputTokenCost: 5.00},
 			},
 		}
-		items := buildModelList(models, providers, overrideCalc)
+		items := buildModelList(models, providerMap, overrideCalc)
 		require.Len(t, items, 1)
 		require.True(t, items[0].HasPricing)
 		require.InDelta(t, 1.00, items[0].Pricing.InputPerMillion, 0.001)
@@ -173,7 +183,7 @@ func TestModelsPage(t *testing.T) {
 	providerName := "anthropic"
 	knownEntry := pricing.Entry{InputPerMillion: 3.00, OutputPerMillion: 15.00}
 	calc := makeTestCalc(providerName, "claude-sonnet-4-20250514", knownEntry)
-	providers := testProviders()
+	providerMap := testProviderMap()
 	templates := ParseTemplates(time.UTC)
 	stub := &stubModelStore{summary: &store.ModelUsageSummary{}}
 
@@ -182,11 +192,11 @@ func TestModelsPage(t *testing.T) {
 			{ModelName: "claude-sonnet", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		}
 		h := &Handlers{
-			store:     stub,
-			calc:      calc,
-			providers: providers,
-			modelList: models,
-			templates: templates,
+			store:       stub,
+			calc:        calc,
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
 		}
 		req := httptest.NewRequest(http.MethodGet, "/ui/models", nil)
 		rec := httptest.NewRecorder()
@@ -200,11 +210,11 @@ func TestModelsPage(t *testing.T) {
 			{ModelName: "claude-haiku", Provider: "anthropic", UpstreamModel: "claude-haiku-4-5-20251001"},
 		}
 		h := &Handlers{
-			store:     stub,
-			calc:      calc,
-			providers: providers,
-			modelList: models,
-			templates: templates,
+			store:       stub,
+			calc:        calc,
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
 		}
 		req := httptest.NewRequest(http.MethodGet, "/ui/models", nil)
 		rec := httptest.NewRecorder()
@@ -212,6 +222,8 @@ func TestModelsPage(t *testing.T) {
 		body := rec.Body.String()
 		require.Contains(t, body, "claude-sonnet")
 		require.Contains(t, body, "claude-haiku")
+		require.Contains(t, body, "claude-sonnet-4-20250514")
+		require.Contains(t, body, ">Copy</button>")
 	})
 
 	t.Run("Virtual label for fallback model", func(t *testing.T) {
@@ -219,11 +231,11 @@ func TestModelsPage(t *testing.T) {
 			{ModelName: "fast", Fallbacks: []string{"claude-haiku", "claude-sonnet"}},
 		}
 		h := &Handlers{
-			store:     stub,
-			calc:      calc,
-			providers: providers,
-			modelList: models,
-			templates: templates,
+			store:       stub,
+			calc:        calc,
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
 		}
 		req := httptest.NewRequest(http.MethodGet, "/ui/models", nil)
 		rec := httptest.NewRecorder()
@@ -237,17 +249,17 @@ func TestModelsPage(t *testing.T) {
 			{ModelName: "unknown-model", Provider: "anthropic", UpstreamModel: "no-such-model"},
 		}
 		h := &Handlers{
-			store:     stub,
-			calc:      pricing.NewCalculator(map[string]pricing.Entry{}),
-			providers: providers,
-			modelList: models,
-			templates: templates,
+			store:       stub,
+			calc:        pricing.NewCalculator(map[string]pricing.Entry{}),
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
 		}
 		req := httptest.NewRequest(http.MethodGet, "/ui/models", nil)
 		rec := httptest.NewRecorder()
 		h.ModelsPage(rec, req)
 		body := rec.Body.String()
-		require.Contains(t, body, "—")
+		require.Contains(t, body, "&mdash;") // em dash for unknown pricing
 	})
 }
 
@@ -259,7 +271,7 @@ func TestModelDetailPage(t *testing.T) {
 	providerName := "anthropic"
 	knownEntry := pricing.Entry{InputPerMillion: 3.00, OutputPerMillion: 15.00}
 	calc := makeTestCalc(providerName, "claude-sonnet-4-20250514", knownEntry)
-	providers := testProviders()
+	providerMap := testProviderMap()
 	templates := ParseTemplates(time.UTC)
 	zeroUsage := &store.ModelUsageSummary{}
 
@@ -277,16 +289,19 @@ func TestModelDetailPage(t *testing.T) {
 			{ModelName: "claude-sonnet", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		}
 		h := &Handlers{
-			calc:      calc,
-			providers: providers,
-			modelList: models,
-			templates: templates,
-			store:     &stubModelStore{summary: zeroUsage},
+			calc:        calc,
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
+			store:       &stubModelStore{summary: zeroUsage},
 		}
 		rec := httptest.NewRecorder()
 		h.ModelDetailPage(rec, makeRequest("/ui/models/claude-sonnet"))
 		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, rec.Body.String(), "claude-sonnet")
+		body := rec.Body.String()
+		require.Contains(t, body, "claude-sonnet")
+		require.Contains(t, body, ">Copy</button>")
+		require.Contains(t, body, "/v1/responses")
 	})
 
 	t.Run("200 for virtual model with fallbacks rendered", func(t *testing.T) {
@@ -294,11 +309,11 @@ func TestModelDetailPage(t *testing.T) {
 			{ModelName: "fast", Fallbacks: []string{"claude-haiku", "claude-sonnet"}},
 		}
 		h := &Handlers{
-			calc:      calc,
-			providers: providers,
-			modelList: models,
-			templates: templates,
-			store:     &stubModelStore{summary: zeroUsage},
+			calc:        calc,
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
+			store:       &stubModelStore{summary: zeroUsage},
 		}
 		rec := httptest.NewRecorder()
 		h.ModelDetailPage(rec, makeRequest("/ui/models/fast"))
@@ -313,11 +328,11 @@ func TestModelDetailPage(t *testing.T) {
 			{ModelName: "claude-sonnet", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		}
 		h := &Handlers{
-			calc:      calc,
-			providers: providers,
-			modelList: models,
-			templates: templates,
-			store:     &stubModelStore{summary: zeroUsage},
+			calc:        calc,
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
+			store:       &stubModelStore{summary: zeroUsage},
 		}
 		rec := httptest.NewRecorder()
 		h.ModelDetailPage(rec, makeRequest("/ui/models/does-not-exist"))
@@ -329,11 +344,11 @@ func TestModelDetailPage(t *testing.T) {
 			{ModelName: "claude-sonnet", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		}
 		h := &Handlers{
-			calc:      calc,
-			providers: providers,
-			modelList: models,
-			templates: templates,
-			store:     &stubModelStore{summary: zeroUsage},
+			calc:        calc,
+			providerMap: providerMap,
+			modelList:   models,
+			templates:   templates,
+			store:       &stubModelStore{summary: zeroUsage},
 		}
 		rec := httptest.NewRecorder()
 		h.ModelDetailPage(rec, makeRequest("/ui/models/claude-sonnet"))

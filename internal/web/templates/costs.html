@@ -4,6 +4,66 @@
 
 {{define "head"}}
 <style>
+    .cost-hero {
+        display: flex;
+        align-items: center;
+        gap: 2rem;
+        margin-bottom: 1.5rem;
+        padding: 1rem 1.5rem;
+        border: 1px solid var(--pico-muted-border-color);
+        border-radius: var(--pico-border-radius);
+    }
+    .cost-hero-main {
+        flex-shrink: 0;
+    }
+    .cost-hero-label {
+        font-size: 0.8rem;
+        color: var(--pico-muted-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .cost-hero-value {
+        font-size: 2.25rem;
+        font-weight: 700;
+        color: var(--pico-primary);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.1;
+    }
+    .cost-hero-stats {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        border-left: 1px solid var(--pico-muted-border-color);
+        padding-left: 2rem;
+    }
+    .cost-hero-stat {
+        display: flex;
+        flex-direction: column;
+    }
+    .cost-hero-stat-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+    .cost-hero-stat-label {
+        font-size: 0.75rem;
+        color: var(--pico-muted-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    @media (max-width: 600px) {
+        .cost-hero {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        .cost-hero-stats {
+            border-left: none;
+            padding-left: 0;
+            border-top: 1px solid var(--pico-muted-border-color);
+            padding-top: 1rem;
+        }
+    }
     .summary-cards {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -87,6 +147,59 @@
         border-radius: 4px;
         display: inline-block;
     }
+    th.sortable {
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+    th.sortable:hover {
+        color: var(--pico-primary);
+    }
+    .sort-indicator {
+        display: inline-block;
+        margin-left: 0.25em;
+        font-size: 0.75em;
+        opacity: 0.35;
+    }
+    th.sort-asc .sort-indicator::after { content: "↑"; opacity: 1; }
+    th.sort-desc .sort-indicator::after { content: "↓"; opacity: 1; }
+    .subsidy-analysis {
+        margin-bottom: 1rem;
+        padding: 1rem 0 0;
+    }
+    .subsidy-hero {
+        text-align: center;
+        padding: 1.5rem 1rem;
+        margin-bottom: 1.5rem;
+        border: 2px solid var(--pico-del-color);
+        border-radius: var(--pico-border-radius);
+        background: color-mix(in srgb, var(--pico-del-color) 5%, transparent);
+    }
+    .subsidy-hero-label {
+        font-size: 0.85rem;
+        color: var(--pico-muted-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.25rem;
+    }
+    .subsidy-hero-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--pico-del-color);
+        font-variant-numeric: tabular-nums;
+    }
+    .subsidy-hero-sub {
+        font-size: 0.9rem;
+        color: var(--pico-muted-color);
+        margin-top: 0.25rem;
+    }
+    .subsidy-chart .subsidy-bar {
+        background: var(--pico-del-color);
+    }
+    .subsidy-savings {
+        color: var(--pico-ins-color);
+        font-weight: 600;
+    }
 </style>
 {{end}}
 
@@ -144,4 +257,70 @@ document.addEventListener('DOMContentLoaded', function() {
 <div id="cost-content">
 {{template "cost_summary" .}}
 </div>
+<script>
+function initBreakdownSort() {
+    var table = document.querySelector('table.breakdown-table');
+    if (!table) return;
+
+    var sortCol = 'requests';
+    var sortDir = 'desc';
+
+    function getVal(row, col) {
+        var cell = row.querySelector('td[data-col="' + col + '"]');
+        return cell ? parseFloat(cell.getAttribute('data-value') || '0') : 0;
+    }
+
+    function updateBars(col) {
+        var rows = Array.from(table.querySelectorAll('tbody tr'));
+        var max = 0;
+        rows.forEach(function(row) {
+            var v = getVal(row, col);
+            if (v > max) max = v;
+        });
+        rows.forEach(function(row) {
+            var bar = row.querySelector('.breakdown-bar');
+            if (!bar) return;
+            var v = getVal(row, col);
+            var w = max > 0 ? Math.max(2, (v / max) * 100) : 2;
+            bar.style.width = w + 'px';
+        });
+    }
+
+    function sortBy(col, dir) {
+        sortCol = col;
+        sortDir = dir;
+
+        table.querySelectorAll('th.sortable').forEach(function(th) {
+            th.classList.remove('sort-asc', 'sort-desc');
+            if (th.getAttribute('data-col') === col) {
+                th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+            }
+        });
+
+        var tbody = table.querySelector('tbody');
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort(function(a, b) {
+            var av = getVal(a, col);
+            var bv = getVal(b, col);
+            return dir === 'asc' ? av - bv : bv - av;
+        });
+        rows.forEach(function(row) { tbody.appendChild(row); });
+
+        updateBars(col);
+    }
+
+    table.querySelectorAll('th.sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = th.getAttribute('data-col');
+            var newDir = (sortCol === col && sortDir === 'desc') ? 'asc' : 'desc';
+            sortBy(col, newDir);
+        });
+    });
+
+    sortBy('requests', 'desc');
+}
+
+document.addEventListener('DOMContentLoaded', initBreakdownSort);
+document.addEventListener('htmx:afterSettle', initBreakdownSort);
+</script>
 {{end}}

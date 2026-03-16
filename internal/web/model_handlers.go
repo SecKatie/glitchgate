@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/errgroup"
 
 	"codeberg.org/kglitchy/glitchgate/internal/config"
 	"codeberg.org/kglitchy/glitchgate/internal/pricing"
@@ -22,6 +24,7 @@ type ModelListItem struct {
 	ModelName      string
 	ProviderName   string
 	ProviderType   string
+	UpstreamModel  string
 	IsVirtual      bool
 	IsWildcard     bool
 	IsUnconfigured bool // seen in logs but not in model_list config
@@ -30,6 +33,17 @@ type ModelListItem struct {
 	HasPricing     bool
 	EncodedName    string // url.PathEscape(ModelName)
 	TotalSpendUSD  float64
+}
+
+// FallbackDetail holds resolved information about a single fallback in a virtual model's chain.
+type FallbackDetail struct {
+	ModelName     string
+	ProviderName  string
+	ProviderType  string
+	UpstreamModel string
+	Pricing       *pricing.Entry
+	HasPricing    bool
+	EncodedName   string
 }
 
 // ModelDetailView is the data passed to the model detail page template.
@@ -44,6 +58,7 @@ type ModelDetailView struct {
 	IsWildcard        bool
 	IsUnconfigured    bool
 	Fallbacks         []string
+	FallbackDetails   []FallbackDetail
 	Pricing           *pricing.Entry
 	HasPricing        bool
 	HasCostData       bool // true when TotalCostUSD is computed (including virtual models)
@@ -66,26 +81,24 @@ type ChartLabel struct {
 
 // resolveModelPricing looks up the provider config for providerName and returns the
 // provider name, type, and pricing entry for the given upstream model.
-func resolveModelPricing(providers []config.ProviderConfig, calc *pricing.Calculator, providerName, upstreamModel string) (name, provType string, entry *pricing.Entry, hasPricing bool) {
-	for _, pc := range providers {
-		if pc.Name != providerName {
-			continue
-		}
-		name = pc.Name
-		provType = pc.Type
-
-		if e, ok := calc.Lookup(pc.Name, upstreamModel); ok {
-			entry = &e
-			hasPricing = true
-		}
+func resolveModelPricing(providerMap map[string]config.ProviderConfig, calc *pricing.Calculator, providerName, upstreamModel string) (name, provType string, entry *pricing.Entry, hasPricing bool) {
+	pc, ok := providerMap[providerName]
+	if !ok {
 		return
+	}
+	name = pc.Name
+	provType = pc.Type
+
+	if e, found := calc.Lookup(pc.Name, upstreamModel); found {
+		entry = &e
+		hasPricing = true
 	}
 	return
 }
 
 // buildModelList constructs a ModelListItem slice from the model_list config.
 // Pure function — no HTTP or template dependencies.
-func buildModelList(modelList []config.ModelMapping, providers []config.ProviderConfig, calc *pricing.Calculator) []ModelListItem {
+func buildModelList(modelList []config.ModelMapping, providerMap map[string]config.ProviderConfig, calc *pricing.Calculator) []ModelListItem {
 	items := make([]ModelListItem, 0, len(modelList))
 
 	for _, m := range modelList {
@@ -98,7 +111,8 @@ func buildModelList(modelList []config.ModelMapping, providers []config.Provider
 		}
 
 		if !item.IsVirtual && m.Provider != "" {
-			item.ProviderName, item.ProviderType, item.Pricing, item.HasPricing = resolveModelPricing(providers, calc, m.Provider, m.UpstreamModel)
+			item.UpstreamModel = m.UpstreamModel
+			item.ProviderName, item.ProviderType, item.Pricing, item.HasPricing = resolveModelPricing(providerMap, calc, m.Provider, m.UpstreamModel)
 		}
 
 		items = append(items, item)
@@ -107,16 +121,40 @@ func buildModelList(modelList []config.ModelMapping, providers []config.Provider
 	return items
 }
 
-// ModelsPage renders the model list page.
-func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
-	items := buildModelList(h.modelList, h.providers, h.calc)
+const modelUsageCacheTTL = 30 * time.Second
 
-	// Fetch all model usage in a single query.
+// cachedModelUsageSummaries returns the all-model usage map, serving from an
+// in-memory TTL cache when possible to avoid redundant full-table aggregations.
+func (h *Handlers) cachedModelUsageSummaries(r *http.Request) map[string]*store.ModelUsageSummary {
+	h.modelUsageMu.RLock()
+	if h.modelUsageCache != nil && time.Since(h.modelUsageCacheTime) < modelUsageCacheTTL {
+		cached := h.modelUsageCache
+		h.modelUsageMu.RUnlock()
+		return cached
+	}
+	h.modelUsageMu.RUnlock()
+
 	usageMap, err := h.store.GetAllModelUsageSummaries(r.Context())
 	if err != nil {
 		slog.Error("get all model usage summaries", "error", err)
-		usageMap = map[string]*store.ModelUsageSummary{}
+		return map[string]*store.ModelUsageSummary{}
 	}
+
+	h.modelUsageMu.Lock()
+	h.modelUsageCache = usageMap
+	h.modelUsageCacheTime = time.Now()
+	h.modelUsageMu.Unlock()
+
+	return usageMap
+}
+
+// ModelsPage renders the model list page.
+func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
+	items := buildModelList(h.modelList, h.providerMap, h.calc)
+
+	// Fetch all model usage, using a TTL cache to avoid re-running
+	// the aggregation on rapid/concurrent page loads.
+	usageMap := h.cachedModelUsageSummaries(r)
 
 	// Track configured model names so we can identify log-only models.
 	configured := make(map[string]struct{}, len(items))
@@ -133,7 +171,8 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 				EncodedName:    url.PathEscape(name),
 			}
 			if u.ProviderName != "" {
-				item.ProviderName, item.ProviderType, item.Pricing, item.HasPricing = resolveModelPricing(h.providers, h.calc, u.ProviderName, u.UpstreamModel)
+				item.UpstreamModel = u.UpstreamModel
+				item.ProviderName, item.ProviderType, item.Pricing, item.HasPricing = resolveModelPricing(h.providerMap, h.calc, u.ProviderName, u.UpstreamModel)
 			}
 			items = append(items, item)
 		}
@@ -183,10 +222,38 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch usage stats — needed both for configured and log-only models.
-	usage, err := h.store.GetModelUsageSummary(r.Context(), modelName)
-	if err != nil {
-		slog.Error("get model usage summary", "model", modelName, "error", err) // #nosec G706 -- slog key-value pairs are structured and safely escaped; no log injection vector
+	// Run independent DB queries concurrently.
+	var (
+		usage   *store.ModelUsageSummary
+		groups  []store.CostPricingGroup
+		latency []store.ModelLatencyTimeseriesEntry
+	)
+
+	needGroups := found != nil && len(found.Fallbacks) > 0 // virtual models need pricing groups
+	g, ctx := errgroup.WithContext(r.Context())
+
+	g.Go(func() error {
+		var err error
+		usage, err = h.store.GetModelUsageSummary(ctx, modelName)
+		return err
+	})
+
+	if needGroups {
+		g.Go(func() error {
+			var err error
+			groups, err = h.store.GetModelCostPricingGroups(ctx, modelName)
+			return err
+		})
+	}
+
+	g.Go(func() error {
+		var err error
+		latency, err = h.store.GetModelLatencyTimeseries(ctx, modelName)
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
+		slog.Error("model detail queries", "model", modelName, "error", err) // #nosec G706 -- slog key-value pairs are structured and safely escaped; no log injection vector
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -210,12 +277,46 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 		view.IsVirtual = len(found.Fallbacks) > 0
 		view.IsWildcard = strings.HasSuffix(found.ModelName, "/*")
 		view.Fallbacks = found.Fallbacks
+
+		// Resolve fallback details for virtual models.
+		if view.IsVirtual {
+			view.FallbackDetails = make([]FallbackDetail, len(found.Fallbacks))
+			for i, fb := range found.Fallbacks {
+				detail := FallbackDetail{
+					ModelName:   fb,
+					EncodedName: url.PathEscape(fb),
+				}
+				// Look up the fallback in the model list to get provider/upstream/pricing.
+				for j := range h.modelList {
+					if h.modelList[j].ModelName == fb {
+						m := h.modelList[j]
+						if m.Provider != "" {
+							detail.UpstreamModel = m.UpstreamModel
+							detail.ProviderName, detail.ProviderType, detail.Pricing, detail.HasPricing = resolveModelPricing(h.providerMap, h.calc, m.Provider, m.UpstreamModel)
+						}
+						break
+					}
+					// Check wildcard prefix match (e.g. fallback "cm/claude-sonnet-4-6" matches "cm/*").
+					if prefix, ok := strings.CutSuffix(h.modelList[j].ModelName, "/*"); ok {
+						if strings.HasPrefix(fb, prefix+"/") {
+							m := h.modelList[j]
+							if m.Provider != "" {
+								detail.UpstreamModel = strings.TrimPrefix(fb, prefix+"/")
+								detail.ProviderName, detail.ProviderType, detail.Pricing, detail.HasPricing = resolveModelPricing(h.providerMap, h.calc, m.Provider, detail.UpstreamModel)
+							}
+							break
+						}
+					}
+				}
+				view.FallbackDetails[i] = detail
+			}
+		}
 	}
 
 	if found != nil && !view.IsVirtual && found.Provider != "" {
-		view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providers, h.calc, found.Provider, found.UpstreamModel)
+		view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providerMap, h.calc, found.Provider, found.UpstreamModel)
 	} else if found == nil && usage.ProviderName != "" {
-		view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providers, h.calc, usage.ProviderName, usage.UpstreamModel)
+		view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providerMap, h.calc, usage.ProviderName, usage.UpstreamModel)
 		view.UpstreamModel = usage.UpstreamModel
 	}
 
@@ -227,25 +328,17 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:     usage.OutputTokens,
 		}).TotalCostUSD
 		view.HasCostData = true
-	} else if view.IsVirtual {
+	} else if view.IsVirtual && len(groups) > 0 {
 		// Virtual models route across multiple upstream models — compute cost per pricing group.
-		groups, err := h.store.GetModelCostPricingGroups(r.Context(), modelName)
-		if err != nil {
-			slog.Error("get model cost pricing groups", "model", modelName, "error", err) // #nosec G706 -- slog key-value pairs are structured and safely escaped; no log injection vector
-		} else {
-			agg := computeAggregateCostBreakdownWithAliases(groups, h.calc, h.providerNames)
-			if agg.HasAnyPricing {
-				usage.TotalCostUSD = agg.TotalCostUSD
-				view.HasCostData = true
-			}
+		agg := computeAggregateCostBreakdownWithAliases(groups, h.calc, h.providerNames)
+		if agg.HasAnyPricing {
+			usage.TotalCostUSD = agg.TotalCostUSD
+			view.HasCostData = true
 		}
 	}
 
-	// Fetch latency timeseries for the performance chart.
-	latency, err := h.store.GetModelLatencyTimeseries(r.Context(), modelName)
-	if err != nil {
-		slog.Error("get model latency timeseries", "model", modelName, "error", err) // #nosec G706 -- slog key-value pairs are structured and safely escaped; no log injection vector
-	} else {
+	// Build the performance chart from latency data.
+	if len(latency) > 0 {
 		view.LatencyTimeseries = latency
 
 		// Compute per-bucket TPS and track min/max for the chart Y-axis.
