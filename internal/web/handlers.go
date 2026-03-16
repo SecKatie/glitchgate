@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -70,7 +71,13 @@ type Handlers struct {
 	oidc          OIDCProvider // nil when OIDC not configured
 	modelList     []config.ModelMapping
 	providers     []config.ProviderConfig
+	providerMap   map[string]config.ProviderConfig // name → config for O(1) lookup
 	providerNames map[string]string
+
+	// TTL cache for GetAllModelUsageSummaries (models list page).
+	modelUsageMu        sync.RWMutex
+	modelUsageCache     map[string]*store.ModelUsageSummary
+	modelUsageCacheTime time.Time
 }
 
 // OIDCProvider is the minimal interface Handlers needs from the OIDC package.
@@ -81,6 +88,10 @@ type OIDCProvider interface {
 
 // NewHandlers creates web UI handlers.
 func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, modelList []config.ModelMapping, providers []config.ProviderConfig, providerNames map[string]string) *Handlers {
+	pm := make(map[string]config.ProviderConfig, len(providers))
+	for _, pc := range providers {
+		pm[pc.Name] = pc
+	}
 	return &Handlers{
 		store:         s,
 		sessions:      sessions,
@@ -90,6 +101,7 @@ func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey strin
 		oidc:          oidcProvider,
 		modelList:     modelList,
 		providers:     providers,
+		providerMap:   pm,
 		providerNames: providerNames,
 	}
 }
@@ -120,8 +132,6 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 				return p
 			}
 		},
-		"minus":    func(a, b int) int { return a - b },
-		"plus":     func(a, b int) int { return a + b },
 		"subtract": func(a, b int) int { return a - b },
 		"add":      func(a, b int) int { return a + b },
 		"addInt64": func(a, b int64) int64 { return a + b },
@@ -498,28 +508,9 @@ func (h *Handlers) LogDetailPage(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	// Enforce scope for non-GA sessions.
-	sc := auth.SessionFromContext(r.Context())
-	if sc != nil && !sc.IsMasterKey && sc.Role != "global_admin" {
-		scopeType, _, _ := buildScopeParams(sc)
-		if scopeType != "all" {
-			visibleKeys, kerr := h.listKeysForSession(r)
-			if kerr != nil {
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-			allowed := false
-			for _, k := range visibleKeys {
-				if k.KeyPrefix == logEntry.ProxyKeyPrefix {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				http.Error(w, "Forbidden", http.StatusForbidden)
-				return
-			}
-		}
+	if !h.canAccessLogEntry(r, logEntry) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
 	}
 
 	conv := parseConversation(logEntry.RequestBody, logEntry.ResponseBody, logEntry.SourceFormat)
@@ -550,37 +541,39 @@ func (h *Handlers) LogDetailAPIHandler(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
-	// Enforce scope: non-GA sessions can only view logs for keys they own.
-	sc := auth.SessionFromContext(r.Context())
-	if sc != nil && !sc.IsMasterKey && sc.Role != "global_admin" {
-		scopeType, scopeUserID, scopeTeamID := buildScopeParams(sc)
-		if scopeType != "all" {
-			// Verify the log's key is within the session's scope.
-			visibleKeys, kerr := h.listKeysForSession(r)
-			if kerr != nil {
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-			_ = scopeUserID
-			_ = scopeTeamID
-			allowed := false
-			for _, k := range visibleKeys {
-				if k.KeyPrefix == logEntry.ProxyKeyPrefix {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				http.Error(w, "Forbidden", http.StatusForbidden)
-				return
-			}
-		}
+	if !h.canAccessLogEntry(r, logEntry) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(logEntry); err != nil {
 		slog.Error("write log detail response", "error", err)
 	}
+}
+
+// canAccessLogEntry checks whether the current session is allowed to view a
+// log entry. Returns true for GA/master-key sessions or when the log's key
+// prefix appears in the session's visible key set.
+func (h *Handlers) canAccessLogEntry(r *http.Request, logEntry *store.RequestLogDetail) bool {
+	sc := auth.SessionFromContext(r.Context())
+	if sc == nil || sc.IsMasterKey || sc.Role == "global_admin" {
+		return true
+	}
+	scopeType, _, _ := buildScopeParams(sc)
+	if scopeType == "all" {
+		return true
+	}
+	visibleKeys, err := h.listKeysForSession(r)
+	if err != nil {
+		return false
+	}
+	for _, k := range visibleKeys {
+		if k.KeyPrefix == logEntry.ProxyKeyPrefix {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -655,8 +648,28 @@ func (h *Handlers) listKeysForSession(r *http.Request) ([]store.ProxyKeySummary,
 	case "user":
 		return h.store.ListProxyKeysByOwner(r.Context(), scope.scopeUserID)
 	default:
-		return h.store.ListActiveProxyKeys(r.Context())
+		return []store.ProxyKeySummary{}, nil
 	}
+}
+
+// canMutateKey returns true if the session is allowed to modify the key with the given prefix.
+// Global admins and master-key sessions can modify any key.
+// Other users can only modify keys returned by listKeysForSession.
+func (h *Handlers) canMutateKey(r *http.Request, prefix string) (bool, error) {
+	sc := auth.SessionFromContext(r.Context())
+	if sc == nil || sc.IsMasterKey || sc.Role == "global_admin" {
+		return true, nil
+	}
+	visible, err := h.listKeysForSession(r)
+	if err != nil {
+		return false, err
+	}
+	for _, k := range visible {
+		if k.KeyPrefix == prefix {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // CreateKeyHandler creates a new proxy key.
@@ -664,7 +677,7 @@ func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	label := r.FormValue("label")
 	if err := validateLabel(label); err != nil {
-		keys, _ := h.store.ListActiveProxyKeys(r.Context())
+		keys, _ := h.listKeysForSession(r)
 		data := map[string]any{
 			"ActiveTab":  "keys",
 			"Keys":       keys,
@@ -737,6 +750,16 @@ func (h *Handlers) UpdateKeyLabelHandler(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	allowed, err := h.canMutateKey(r, prefix)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
 	if err := h.store.UpdateKeyLabel(r.Context(), prefix, label); err != nil {
 		http.Error(w, "Key not found", http.StatusNotFound)
 		return
@@ -765,25 +788,14 @@ func (h *Handlers) UpdateKeyLabelHandler(w http.ResponseWriter, r *http.Request,
 
 // RevokeKeyHandler revokes a proxy key.
 func (h *Handlers) RevokeKeyHandler(w http.ResponseWriter, r *http.Request, prefix string) {
-	// Scope enforcement: non-GA sessions can only revoke keys they can see.
-	sc := auth.SessionFromContext(r.Context())
-	if sc != nil && !sc.IsMasterKey && sc.Role != "global_admin" {
-		visible, err := h.listKeysForSession(r)
-		if err != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-		allowed := false
-		for _, k := range visible {
-			if k.KeyPrefix == prefix {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
+	allowed, err := h.canMutateKey(r, prefix)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
 	}
 
 	if err := h.store.RevokeProxyKey(r.Context(), prefix); err != nil {

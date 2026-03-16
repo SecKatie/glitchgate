@@ -44,12 +44,12 @@ func buildScopeParams(sc *auth.UISessionContext) (scopeType, scopeUserID, scopeT
 		if sc.User != nil {
 			return "user", sc.User.ID, ""
 		}
-		return "all", "", ""
+		return "none", "", ""
 	default: // member
 		if sc.User != nil {
 			return "user", sc.User.ID, ""
 		}
-		return "all", "", ""
+		return "none", "", ""
 	}
 }
 
