@@ -32,6 +32,64 @@
     color: var(--pico-muted-color);
   }
   #model-search { min-width: 16rem; }
+  /* Group header rows */
+  tr.group-header {
+    cursor: pointer;
+  }
+  tr.group-header:hover {
+    background: var(--pico-card-sectioning-background-color);
+  }
+  tr.group-header td:first-child {
+    font-weight: 600;
+  }
+  .expand-icon {
+    display: inline-block;
+    width: 1.2em;
+    text-align: center;
+    font-size: 0.8em;
+    color: var(--pico-muted-color);
+    transition: transform 0.15s;
+    margin-right: 0.25em;
+  }
+  tr.group-header.expanded .expand-icon {
+    transform: rotate(90deg);
+  }
+  /* Child rows */
+  tr.child-row {
+    display: none;
+  }
+  tr.child-row.visible {
+    display: table-row;
+  }
+  tr.child-row td:first-child {
+    padding-left: 2rem;
+  }
+  tr.child-row td {
+    background: color-mix(in srgb, var(--pico-card-sectioning-background-color) 50%, transparent);
+    font-size: 0.92em;
+  }
+  /* Child count badge */
+  .child-count {
+    display: inline-block;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    font-size: 0.72em;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--pico-muted-color) 10%, transparent);
+    color: var(--pico-muted-color);
+    vertical-align: middle;
+    margin-left: 0.35em;
+  }
+  /* Pricing column */
+  .pricing-cell {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.9em;
+  }
+  .pricing-sep {
+    color: var(--pico-muted-color);
+    margin: 0 0.15em;
+  }
 </style>
 {{end}}
 
@@ -63,37 +121,81 @@
       <th data-col="name"     data-type="str" >Model Name</th>
       <th data-col="prov"     data-type="str" >Provider</th>
       <th data-col="upstream" data-type="str" >Upstream Model</th>
-      <th data-col="input"    data-type="num" >Input $/MTok</th>
-      <th data-col="output"   data-type="num" >Output $/MTok</th>
+      <th data-col="pricing"  data-type="num" >Pricing $/MTok</th>
       <th data-col="spend"    data-type="num"  class="cost">Total Spend</th>
     </tr>
   </thead>
   <tbody>
     {{range .Models}}
+    {{if or .IsWildcard .IsVirtual}}
+    {{/* ── Group header row ────────────────────────────────────── */}}
+    {{$parent := .}}
+    <tr class="group-header"
+      data-group="{{.EncodedName}}"
+      data-name="{{.ModelName}}"
+      data-kind="{{if .IsVirtual}}virtual{{else}}wildcard{{end}}"
+      data-prov="{{if .IsVirtual}}virtual{{else}}{{.ProviderName}} {{.ProviderType}}{{end}}"
+      data-upstream=""
+      data-pricing="-1"
+      data-spend="{{if gt .TotalSpendUSD 0.0}}{{.TotalSpendUSD}}{{else}}-1{{end}}"
+    >
+      <td>
+        <span class="expand-icon">&#9654;</span>
+        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>
+        {{if .IsVirtual}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-primary) 15%,transparent);color:var(--pico-primary)">Virtual</span>{{end}}
+        {{if .IsWildcard}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-color) 12%,transparent);color:var(--pico-muted-color)">Wildcard</span>{{end}}
+        {{if gt .ChildCount 0}}<span class="child-count">{{.ChildCount}} {{if .IsVirtual}}fallback{{if gt .ChildCount 1}}s{{end}}{{else}}model{{if gt .ChildCount 1}}s{{end}}{{end}}</span>{{end}}
+      </td>
+      <td>{{if .IsVirtual}}&mdash;{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
+      <td class="upstream-cell">&mdash;</td>
+      <td class="pricing-cell">&mdash;</td>
+      <td class="cost">{{if gt .TotalSpendUSD 0.0}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+    </tr>
+    {{/* ── Child rows ──────────────────────────────────────────── */}}
+    {{range .Children}}
+    <tr class="child-row"
+      data-parent="{{$parent.EncodedName}}"
+      data-href="/ui/models/{{.EncodedName}}"
+      data-name="{{.ModelName}}"
+      data-kind="child"
+      data-prov="{{.ProviderName}} {{.ProviderType}}"
+      data-upstream="{{.UpstreamModel}}"
+      data-pricing="{{if .HasPricing}}{{.Pricing.InputPerMillion}}{{else}}-1{{end}}"
+      data-spend="{{if .HasPricing}}{{.TotalSpendUSD}}{{else}}-1{{end}}"
+    >
+      <td>
+        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>
+        {{if not (eq .ModelName "")}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+      </td>
+      <td>{{if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
+      <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
+      <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
+      <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+    </tr>
+    {{end}}
+    {{else}}
+    {{/* ── Regular (concrete / unconfigured) row ───────────────── */}}
     <tr
       data-href="/ui/models/{{.EncodedName}}"
       data-name="{{.ModelName}}"
-      data-kind="{{if .IsUnconfigured}}unconfigured{{else if .IsVirtual}}virtual{{else if .IsWildcard}}wildcard{{else}}configured{{end}}"
-      data-prov="{{if .IsVirtual}}virtual{{else}}{{.ProviderName}} {{.ProviderType}}{{end}}"
+      data-kind="{{if .IsUnconfigured}}unconfigured{{else}}configured{{end}}"
+      data-prov="{{.ProviderName}} {{.ProviderType}}"
       data-upstream="{{.UpstreamModel}}"
-      data-input="{{if .HasPricing}}{{.Pricing.InputPerMillion}}{{else}}-1{{end}}"
-      data-output="{{if .HasPricing}}{{.Pricing.OutputPerMillion}}{{else}}-1{{end}}"
+      data-pricing="{{if .HasPricing}}{{.Pricing.InputPerMillion}}{{else}}-1{{end}}"
       data-spend="{{if .HasPricing}}{{.TotalSpendUSD}}{{else}}-1{{end}}"
       {{if .IsUnconfigured}}style="color:var(--pico-muted-color)"{{end}}
     >
       <td>
         <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{if .ModelName}}{{.ModelName}}{{else}}<em style="color:var(--pico-muted-color)">(empty)</em>{{end}}</a>
         {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span>{{end}}
-        {{if .IsVirtual}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-primary) 15%,transparent);color:var(--pico-primary)">Virtual</span>{{end}}
-        {{if .IsWildcard}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-color) 12%,transparent);color:var(--pico-muted-color)">Wildcard</span>{{end}}
-        {{if and (not .IsWildcard) .ModelName}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+        {{if .ModelName}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
       </td>
-      <td>{{if .IsVirtual}}Virtual{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
+      <td>{{if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
       <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
-      <td>{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}}{{else}}&mdash;{{end}}</td>
-      <td>{{if .HasPricing}}${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
+      <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
       <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
     </tr>
+    {{end}}
     {{end}}
   </tbody>
 </table>
@@ -118,6 +220,24 @@
     return a.toLowerCase().localeCompare(b.toLowerCase());
   }
 
+  // Get all top-level rows (group headers + non-child rows) with their children.
+  function getGroups() {
+    var tbody = document.querySelector('#models-table tbody');
+    var rows = Array.from(tbody.children);
+    var groups = [];
+    var current = null;
+
+    rows.forEach(function(r) {
+      if (r.classList.contains('child-row')) {
+        if (current) current.children.push(r);
+      } else {
+        current = { header: r, children: [] };
+        groups.push(current);
+      }
+    });
+    return groups;
+  }
+
   function sortTable(col, type) {
     var ths = document.querySelectorAll('#models-table th[data-col]');
     ths.forEach(function(th) {
@@ -134,34 +254,90 @@
       }
     });
 
-    var tbody = document.querySelector('#models-table tbody');
-    var rows = Array.from(tbody.querySelectorAll('tr'));
-    rows.sort(function(a, b) {
-      return cmp(val(a, col), val(b, col), type) * sortDir;
+    var groups = getGroups();
+    groups.sort(function(a, b) {
+      return cmp(val(a.header, col), val(b.header, col), type) * sortDir;
     });
-    rows.forEach(function(r) { tbody.appendChild(r); });
+
+    var tbody = document.querySelector('#models-table tbody');
+    groups.forEach(function(g) {
+      tbody.appendChild(g.header);
+      g.children.forEach(function(c) { tbody.appendChild(c); });
+    });
     updateCount();
   }
 
   function filterModels() {
     var search = document.getElementById('model-search').value.toLowerCase();
     var kind   = document.getElementById('model-kind').value;
-    var rows   = document.querySelectorAll('#models-table tbody tr');
-    rows.forEach(function(row) {
-      var nameMatch = !search || row.dataset.name.toLowerCase().includes(search);
-      var kindMatch = !kind   || row.dataset.kind === kind;
-      row.style.display = (nameMatch && kindMatch) ? '' : 'none';
+    var groups = getGroups();
+
+    groups.forEach(function(g) {
+      var header = g.header;
+      var isGroup = header.classList.contains('group-header');
+      var headerKind = header.dataset.kind;
+
+      if (isGroup) {
+        // For group headers, check if any child matches or the group name matches.
+        var headerNameMatch = !search || header.dataset.name.toLowerCase().includes(search);
+        var headerKindMatch = !kind || headerKind === kind;
+
+        var anyChildMatch = false;
+        g.children.forEach(function(c) {
+          var childNameMatch = !search || c.dataset.name.toLowerCase().includes(search);
+          if (childNameMatch) anyChildMatch = true;
+          // When filtering by search, only show matching children.
+          if (search && header.classList.contains('expanded')) {
+            c.classList.toggle('visible', childNameMatch);
+          }
+        });
+
+        var show = headerKindMatch && (headerNameMatch || anyChildMatch);
+        header.style.display = show ? '' : 'none';
+        if (!show) {
+          g.children.forEach(function(c) { c.classList.remove('visible'); });
+        }
+      } else {
+        // Regular row.
+        var nameMatch = !search || header.dataset.name.toLowerCase().includes(search);
+        var kindMatch = !kind || headerKind === kind;
+        header.style.display = (nameMatch && kindMatch) ? '' : 'none';
+      }
     });
     updateCount();
   }
 
   function updateCount() {
-    var rows    = document.querySelectorAll('#models-table tbody tr');
-    var visible = Array.from(rows).filter(function(r) { return r.style.display !== 'none'; }).length;
+    var groups = getGroups();
+    var total = groups.length;
+    var visible = groups.filter(function(g) { return g.header.style.display !== 'none'; }).length;
     document.getElementById('model-count').textContent =
-      visible === rows.length ? rows.length + ' models' : visible + ' of ' + rows.length + ' models';
+      visible === total ? total + ' models' : visible + ' of ' + total + ' models';
     document.getElementById('no-results').style.display = visible === 0 ? '' : 'none';
   }
+
+  // Expand/collapse group children.
+  function toggleGroup(header) {
+    var groupId = header.dataset.group;
+    var isExpanded = header.classList.contains('expanded');
+    var children = document.querySelectorAll('tr.child-row[data-parent="' + groupId + '"]');
+
+    if (isExpanded) {
+      header.classList.remove('expanded');
+      children.forEach(function(c) { c.classList.remove('visible'); });
+    } else {
+      header.classList.add('expanded');
+      children.forEach(function(c) { c.classList.add('visible'); });
+    }
+  }
+
+  // Attach click handlers for group headers.
+  document.querySelectorAll('tr.group-header').forEach(function(tr) {
+    tr.addEventListener('click', function(e) {
+      if (e.target.closest('a') || e.target.closest('button')) return;
+      toggleGroup(tr);
+    });
+  });
 
   document.querySelectorAll('#models-table th[data-col]').forEach(function(th) {
     th.addEventListener('click', function() { sortTable(th.dataset.col, th.dataset.type || 'str'); });

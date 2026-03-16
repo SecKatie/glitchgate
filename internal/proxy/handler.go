@@ -233,7 +233,7 @@ func (h *Handler) buildOpenAIProviderRoute(w http.ResponseWriter, r *http.Reques
 	body []byte, reqBody *struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
-	}, mapping *config.ModelMapping,
+	}, mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	// Parse the full Anthropic request for translation.
 	var anthReq anthropic.MessagesRequest
@@ -423,7 +423,7 @@ func (h *Handler) buildResponsesProviderRoute(w http.ResponseWriter, r *http.Req
 	body []byte, reqBody *struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
-	}, mapping *config.ModelMapping,
+	}, mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	// Parse the full Anthropic request for translation.
 	var anthReq anthropic.MessagesRequest

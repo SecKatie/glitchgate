@@ -103,11 +103,13 @@ func (s *SQLiteStore) GetBudgetsForScope(ctx context.Context, scopeType, userID,
 
 	switch scopeType {
 	case "all":
-		// Admin sees all user and team budgets.
+		// Admin sees all user, team, and key budgets.
 		parts = append(parts, `SELECT 'user', user_id, limit_usd, period
 			FROM user_budgets WHERE limit_usd IS NOT NULL`)
 		parts = append(parts, `SELECT 'team', team_id, limit_usd, period
 			FROM team_budgets WHERE limit_usd IS NOT NULL`)
+		parts = append(parts, `SELECT 'key', proxy_key_id, limit_usd, period
+			FROM proxy_key_budgets WHERE limit_usd IS NOT NULL`)
 	case "team":
 		if teamID != "" {
 			parts = append(parts, `SELECT 'team', team_id, limit_usd, period
@@ -119,10 +121,25 @@ func (s *SQLiteStore) GetBudgetsForScope(ctx context.Context, scopeType, userID,
 				FROM user_budgets WHERE user_id = ? AND limit_usd IS NOT NULL`)
 			args = append(args, userID)
 		}
+		// Team admins see key budgets for keys owned by their team members.
+		if teamID != "" {
+			parts = append(parts, `SELECT 'key', pkb.proxy_key_id, pkb.limit_usd, pkb.period
+				FROM proxy_key_budgets pkb
+				JOIN proxy_key_owners pko ON pko.proxy_key_id = pkb.proxy_key_id
+				JOIN team_memberships tm ON tm.user_id = pko.owner_user_id
+				WHERE tm.team_id = ? AND pkb.limit_usd IS NOT NULL`)
+			args = append(args, teamID)
+		}
 	case "user":
 		if userID != "" {
 			parts = append(parts, `SELECT 'user', user_id, limit_usd, period
 				FROM user_budgets WHERE user_id = ? AND limit_usd IS NOT NULL`)
+			args = append(args, userID)
+			// Members see key budgets for their own keys.
+			parts = append(parts, `SELECT 'key', pkb.proxy_key_id, pkb.limit_usd, pkb.period
+				FROM proxy_key_budgets pkb
+				JOIN proxy_key_owners pko ON pko.proxy_key_id = pkb.proxy_key_id
+				WHERE pko.owner_user_id = ? AND pkb.limit_usd IS NOT NULL`)
 			args = append(args, userID)
 		}
 	}

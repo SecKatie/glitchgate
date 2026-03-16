@@ -64,7 +64,7 @@ type pipelineSpec struct {
 }
 
 type chainAttempt struct {
-	Mapping          config.ModelMapping
+	Mapping          config.DispatchTarget
 	Provider         provider.Provider
 	AttemptCount     int64
 	HasMoreFallbacks bool
@@ -83,7 +83,7 @@ type providerAttempt struct {
 }
 
 func executeFallbackChain(
-	chain []config.ModelMapping,
+	chain []config.DispatchTarget,
 	providers map[string]provider.Provider,
 	onMissingProvider func(string),
 	handleAttempt func(chainAttempt) bool,
@@ -161,7 +161,7 @@ func executeProxyPipeline(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *AsyncLogger,
-	chain []config.ModelMapping,
+	chain []config.DispatchTarget,
 	providers map[string]provider.Provider,
 	spec pipelineSpec,
 	routes map[string]routeBuilder,

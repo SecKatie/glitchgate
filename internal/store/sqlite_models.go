@@ -18,6 +18,7 @@ func (s *SQLiteStore) GetModelUsageSummary(ctx context.Context, modelName string
 		COALESCE(SUM(cache_creation_input_tokens), 0),
 		COALESCE(SUM(cache_read_input_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(cost_usd), 0),
 		COALESCE(MAX(provider_name), ''),
 		COALESCE(MAX(model_upstream), '')
 	FROM request_logs
@@ -30,10 +31,44 @@ func (s *SQLiteStore) GetModelUsageSummary(ctx context.Context, modelName string
 		&summary.CacheCreationInputTokens,
 		&summary.CacheReadInputTokens,
 		&summary.OutputTokens,
+		&summary.LogCostUSD,
 		&summary.ProviderName,
 		&summary.UpstreamModel,
 	); err != nil {
 		return nil, fmt.Errorf("get model usage summary: %w", err)
+	}
+
+	return &summary, nil
+}
+
+// GetModelUsageSummaryByUpstream returns aggregated usage for a specific
+// provider + upstream model combination. Used for wildcard-resolved models
+// where the client-facing name differs from what's in model_requested.
+func (s *SQLiteStore) GetModelUsageSummaryByUpstream(ctx context.Context, providerName, upstreamModel string) (*ModelUsageSummary, error) {
+	const query = `SELECT
+		COUNT(*),
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(cache_creation_input_tokens), 0),
+		COALESCE(SUM(cache_read_input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(cost_usd), 0),
+		COALESCE(MAX(provider_name), ''),
+		COALESCE(MAX(model_upstream), '')
+	FROM request_logs
+	WHERE provider_name = ? AND model_upstream = ?`
+
+	var summary ModelUsageSummary
+	if err := s.db.QueryRowContext(ctx, query, providerName, upstreamModel).Scan(
+		&summary.RequestCount,
+		&summary.InputTokens,
+		&summary.CacheCreationInputTokens,
+		&summary.CacheReadInputTokens,
+		&summary.OutputTokens,
+		&summary.LogCostUSD,
+		&summary.ProviderName,
+		&summary.UpstreamModel,
+	); err != nil {
+		return nil, fmt.Errorf("get model usage summary by upstream: %w", err)
 	}
 
 	return &summary, nil
@@ -49,6 +84,7 @@ func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string
 		COALESCE(SUM(cache_creation_input_tokens), 0),
 		COALESCE(SUM(cache_read_input_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(cost_usd), 0),
 		COALESCE(MAX(provider_name), ''),
 		COALESCE(MAX(model_upstream), '')
 	FROM request_logs
@@ -64,7 +100,7 @@ func (s *SQLiteStore) GetAllModelUsageSummaries(ctx context.Context) (map[string
 	for rows.Next() {
 		var modelName string
 		var summary ModelUsageSummary
-		if err := rows.Scan(&modelName, &summary.RequestCount, &summary.InputTokens, &summary.CacheCreationInputTokens, &summary.CacheReadInputTokens, &summary.OutputTokens, &summary.ProviderName, &summary.UpstreamModel); err != nil {
+		if err := rows.Scan(&modelName, &summary.RequestCount, &summary.InputTokens, &summary.CacheCreationInputTokens, &summary.CacheReadInputTokens, &summary.OutputTokens, &summary.LogCostUSD, &summary.ProviderName, &summary.UpstreamModel); err != nil {
 			return nil, fmt.Errorf("scan model usage summary: %w", err)
 		}
 		result[modelName] = &summary

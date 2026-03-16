@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
@@ -21,18 +22,23 @@ import (
 
 // ModelListItem is a row on the Models list page.
 type ModelListItem struct {
-	ModelName      string
-	ProviderName   string
-	ProviderType   string
-	UpstreamModel  string
-	IsVirtual      bool
-	IsWildcard     bool
-	IsUnconfigured bool // seen in logs but not in model_list config
-	Fallbacks      []string
-	Pricing        *pricing.Entry
-	HasPricing     bool
-	EncodedName    string // url.PathEscape(ModelName)
-	TotalSpendUSD  float64
+	ModelName       string
+	ProviderName    string
+	ProviderType    string
+	ProviderKey     string // raw config provider key (e.g. "anthropic"), used for pricing lookups
+	UpstreamModel   string
+	IsVirtual       bool
+	IsWildcard      bool
+	IsUnconfigured  bool // seen in logs but not in model_list config
+	Fallbacks       []string
+	Pricing         *pricing.Entry
+	HasPricing      bool
+	EncodedName     string // url.PathEscape(ModelName)
+	TotalSpendUSD   float64
+	Children        []ModelListItem  // wildcard: matched models from logs; virtual: fallback targets
+	ChildCount      int              // number of children (for display)
+	RequestCount    int64            // aggregate request count (for wildcards/virtual)
+	FallbackDetails []FallbackDetail // resolved fallback chain (virtual models only)
 }
 
 // FallbackDetail holds resolved information about a single fallback in a virtual model's chain.
@@ -64,6 +70,7 @@ type ModelDetailView struct {
 	HasCostData       bool // true when TotalCostUSD is computed (including virtual models)
 	Usage             *store.ModelUsageSummary
 	CurlExample       string
+	MatchedModels     []ModelListItem // wildcard: concrete models seen in logs matching this prefix
 	LatencyTimeseries []store.ModelLatencyTimeseriesEntry
 	OverallTPS        float64 // overall tokens per second across all data
 	MaxTPS            float64 // chart Y-axis ceiling
@@ -96,6 +103,24 @@ func resolveModelPricing(providerMap map[string]config.ProviderConfig, calc *pri
 	return
 }
 
+// resolveFallbackDetails resolves provider/upstream/pricing for each fallback in a virtual model's chain.
+func resolveFallbackDetails(cfg *config.Config, fallbacks []string, providerMap map[string]config.ProviderConfig, calc *pricing.Calculator) []FallbackDetail {
+	details := make([]FallbackDetail, len(fallbacks))
+	for i, fb := range fallbacks {
+		detail := FallbackDetail{
+			ModelName:   fb,
+			EncodedName: url.PathEscape(fb),
+		}
+		entry, upstreamModel, ok := cfg.ResolveModel(fb)
+		if ok && entry.Provider != "" {
+			detail.UpstreamModel = upstreamModel
+			detail.ProviderName, detail.ProviderType, detail.Pricing, detail.HasPricing = resolveModelPricing(providerMap, calc, entry.Provider, upstreamModel)
+		}
+		details[i] = detail
+	}
+	return details
+}
+
 // buildModelList constructs a ModelListItem slice from the model_list config.
 // Pure function — no HTTP or template dependencies.
 func buildModelList(modelList []config.ModelMapping, providerMap map[string]config.ProviderConfig, calc *pricing.Calculator) []ModelListItem {
@@ -104,13 +129,14 @@ func buildModelList(modelList []config.ModelMapping, providerMap map[string]conf
 	for _, m := range modelList {
 		item := ModelListItem{
 			ModelName:   m.ModelName,
-			IsVirtual:   len(m.Fallbacks) > 0,
-			IsWildcard:  strings.HasSuffix(m.ModelName, "/*"),
+			IsVirtual:   m.IsVirtual(),
+			IsWildcard:  m.IsWildcard(),
 			Fallbacks:   m.Fallbacks,
 			EncodedName: url.PathEscape(m.ModelName),
 		}
 
 		if !item.IsVirtual && m.Provider != "" {
+			item.ProviderKey = m.Provider
 			item.UpstreamModel = m.UpstreamModel
 			item.ProviderName, item.ProviderType, item.Pricing, item.HasPricing = resolveModelPricing(providerMap, calc, m.Provider, m.UpstreamModel)
 		}
@@ -150,55 +176,223 @@ func (h *Handlers) cachedModelUsageSummaries(r *http.Request) map[string]*store.
 
 // ModelsPage renders the model list page.
 func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
-	items := buildModelList(h.modelList, h.providerMap, h.calc)
+	items := buildModelList(h.cfg.ModelList, h.providerMap, h.calc)
 
 	// Fetch all model usage, using a TTL cache to avoid re-running
 	// the aggregation on rapid/concurrent page loads.
 	usageMap := h.cachedModelUsageSummaries(r)
 
+	// Build a map of wildcard prefixes → index in items for grouping.
+	wildcardIdx := make(map[string]int) // prefix (without "/*") → items index
+	for i, it := range items {
+		if it.IsWildcard {
+			prefix, _ := strings.CutSuffix(it.ModelName, "/*")
+			wildcardIdx[prefix] = i
+		}
+	}
+
+	// Nest explicitly configured models that match a wildcard under the wildcard group.
+	// Track which items to remove from top level.
+	nestedAsChild := make(map[int]bool)
+	for i, it := range items {
+		if it.IsWildcard || it.IsVirtual {
+			continue
+		}
+		for prefix, wcIdx := range wildcardIdx {
+			if _, ok := config.MatchesWildcard(prefix, it.ModelName); ok {
+				items[wcIdx].Children = append(items[wcIdx].Children, it)
+				nestedAsChild[i] = true
+				break
+			}
+		}
+	}
+
+	// Remove nested items from top level (iterate backwards to preserve indices).
+	if len(nestedAsChild) > 0 {
+		filtered := make([]ModelListItem, 0, len(items)-len(nestedAsChild))
+		for i, it := range items {
+			if !nestedAsChild[i] {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
+		// Rebuild wildcard index since positions changed.
+		wildcardIdx = make(map[string]int, len(wildcardIdx))
+		for i, it := range items {
+			if it.IsWildcard {
+				prefix, _ := strings.CutSuffix(it.ModelName, "/*")
+				wildcardIdx[prefix] = i
+			}
+		}
+	}
+
 	// Track configured model names so we can identify log-only models.
 	configured := make(map[string]struct{}, len(items))
 	for _, it := range items {
 		configured[it.ModelName] = struct{}{}
-	}
-
-	// Append models seen in logs that are not in the config.
-	for name, u := range usageMap {
-		if _, ok := configured[name]; !ok {
-			item := ModelListItem{
-				ModelName:      name,
-				IsUnconfigured: true,
-				EncodedName:    url.PathEscape(name),
-			}
-			if u.ProviderName != "" {
-				item.UpstreamModel = u.UpstreamModel
-				item.ProviderName, item.ProviderType, item.Pricing, item.HasPricing = resolveModelPricing(h.providerMap, h.calc, u.ProviderName, u.UpstreamModel)
-			}
-			items = append(items, item)
+		for _, ch := range it.Children {
+			configured[ch.ModelName] = struct{}{}
 		}
 	}
 
-	// Populate spend from the usage map, computing cost from pricing when available.
-	for i := range items {
-		u, ok := usageMap[items[i].ModelName]
-		if !ok {
+	// Classify models seen in logs: nest under wildcard or add as top-level unconfigured.
+	for name, u := range usageMap {
+		if _, ok := configured[name]; ok {
 			continue
 		}
-		if items[i].HasPricing && items[i].Pricing != nil {
-			items[i].TotalSpendUSD = priceUsage(*items[i].Pricing, tokenUsage{
+		child := ModelListItem{
+			ModelName:   name,
+			EncodedName: url.PathEscape(name),
+		}
+		if u.ProviderName != "" {
+			child.UpstreamModel = u.UpstreamModel
+			child.ProviderName, child.ProviderType, child.Pricing, child.HasPricing = resolveModelPricing(h.providerMap, h.calc, u.ProviderName, u.UpstreamModel)
+		}
+		child.RequestCount = u.RequestCount
+
+		// Check if this model matches a wildcard prefix.
+		matched := false
+		for prefix, idx := range wildcardIdx {
+			if after, ok := config.MatchesWildcard(prefix, name); ok {
+				// Resolve pricing from the wildcard's provider.
+				if items[idx].ProviderKey != "" {
+					child.UpstreamModel = after
+					child.ProviderName, child.ProviderType, child.Pricing, child.HasPricing = resolveModelPricing(h.providerMap, h.calc, items[idx].ProviderKey, after)
+				}
+				items[idx].Children = append(items[idx].Children, child)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			child.IsUnconfigured = true
+			items = append(items, child)
+		}
+	}
+
+	// Build a reverse index for O(1) lookup by provider+upstream model.
+	usageByUpstream := make(map[string]*store.ModelUsageSummary, len(usageMap))
+	for _, u := range usageMap {
+		if u.ProviderName != "" && u.UpstreamModel != "" {
+			usageByUpstream[u.ProviderName+"/"+u.UpstreamModel] = u
+		}
+	}
+
+	// Populate spend from usage map for all items (top-level and children).
+	// lookupUsage finds usage data for a model by name first, then by
+	// provider+upstream match (for wildcard-resolved models whose name
+	// doesn't appear directly in the usage map).
+	lookupUsage := func(item *ModelListItem) *store.ModelUsageSummary {
+		if u, ok := usageMap[item.ModelName]; ok {
+			return u
+		}
+		if item.ProviderName != "" && item.UpstreamModel != "" {
+			if u, ok := usageByUpstream[item.ProviderName+"/"+item.UpstreamModel]; ok {
+				return u
+			}
+		}
+		return nil
+	}
+
+	computeSpend := func(item *ModelListItem) {
+		u := lookupUsage(item)
+		if u == nil {
+			return
+		}
+		item.RequestCount = u.RequestCount
+		if item.HasPricing && item.Pricing != nil {
+			item.TotalSpendUSD = priceUsage(*item.Pricing, tokenUsage{
 				InputTokens:      u.InputTokens,
 				CacheWriteTokens: u.CacheCreationInputTokens,
 				CacheReadTokens:  u.CacheReadInputTokens,
 				OutputTokens:     u.OutputTokens,
 			}).TotalCostUSD
+		} else if u.LogCostUSD > 0 {
+			// Fall back to pre-computed cost from request logs when pricing
+			// config is unavailable (e.g. unconfigured models).
+			item.TotalSpendUSD = u.LogCostUSD
 		}
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.templates.ExecuteTemplate(w, "models.html", map[string]any{
+	for i := range items {
+		computeSpend(&items[i])
+		for j := range items[i].Children {
+			computeSpend(&items[i].Children[j])
+		}
+	}
+
+	// Resolve virtual model fallback details and create children from them.
+	// Also nest fallback targets under matching wildcards so they appear in both places.
+	wildcardChildren := make(map[string]map[string]bool) // prefix → set of child names already present
+	for prefix, idx := range wildcardIdx {
+		m := make(map[string]bool, len(items[idx].Children))
+		for _, ch := range items[idx].Children {
+			m[ch.ModelName] = true
+		}
+		wildcardChildren[prefix] = m
+		_ = idx // used via wildcardChildren
+	}
+
+	for i := range items {
+		if !items[i].IsVirtual || len(items[i].Fallbacks) == 0 {
+			continue
+		}
+		items[i].FallbackDetails = resolveFallbackDetails(h.cfg, items[i].Fallbacks, h.providerMap, h.calc)
+		items[i].ChildCount = len(items[i].FallbackDetails)
+		// Build children from fallback details for uniform template rendering.
+		for _, fb := range items[i].FallbackDetails {
+			child := ModelListItem{
+				ModelName:     fb.ModelName,
+				ProviderName:  fb.ProviderName,
+				ProviderType:  fb.ProviderType,
+				UpstreamModel: fb.UpstreamModel,
+				Pricing:       fb.Pricing,
+				HasPricing:    fb.HasPricing,
+				EncodedName:   fb.EncodedName,
+			}
+			computeSpend(&child)
+			items[i].Children = append(items[i].Children, child)
+
+			// If this fallback target matches a wildcard, ensure it also
+			// appears under that wildcard group (models resolved through
+			// wildcards at request time may not have their own usage entry).
+			for prefix, idx := range wildcardIdx {
+				if _, ok := config.MatchesWildcard(prefix, fb.ModelName); ok {
+					if !wildcardChildren[prefix][fb.ModelName] {
+						wcChild := child // copy
+						items[idx].Children = append(items[idx].Children, wcChild)
+						wildcardChildren[prefix][fb.ModelName] = true
+					}
+					break
+				}
+			}
+		}
+
+		// Compute virtual model aggregate spend from pricing groups.
+		if u, ok := usageMap[items[i].ModelName]; ok {
+			items[i].RequestCount = u.RequestCount
+		}
+	}
+
+	// Recompute wildcard child counts and aggregate spend after all children are resolved.
+	for _, idx := range wildcardIdx {
+		items[idx].ChildCount = len(items[idx].Children)
+		items[idx].TotalSpendUSD = 0
+		items[idx].RequestCount = 0
+		for _, ch := range items[idx].Children {
+			items[idx].TotalSpendUSD += ch.TotalSpendUSD
+			items[idx].RequestCount += ch.RequestCount
+		}
+	}
+
+	data := map[string]any{
 		"ActiveTab": "models",
 		"Models":    items,
-	}); err != nil {
+	}
+	setNavData(data, auth.SessionFromContext(r.Context()))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.templates.ExecuteTemplate(w, "models.html", data); err != nil {
 		slog.Error("render models page", "error", err)
 		http.Error(w, "Template error", http.StatusInternalServerError)
 	}
@@ -213,13 +407,11 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find the model in the config list.
-	var found *config.ModelMapping
-	for i := range h.modelList {
-		if h.modelList[i].ModelName == modelName {
-			found = &h.modelList[i]
-			break
-		}
+	// Find the model in the config (exact match or wildcard resolution).
+	found, resolvedUpstream, foundOK := h.cfg.ResolveModel(modelName)
+	resolvedViaWildcard := foundOK && found.IsWildcard()
+	if !foundOK {
+		found = nil
 	}
 
 	// Run independent DB queries concurrently.
@@ -234,7 +426,13 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 
 	g.Go(func() error {
 		var err error
-		usage, err = h.store.GetModelUsageSummary(ctx, modelName)
+		if resolvedViaWildcard && found != nil {
+			// Wildcard-resolved models: query by provider + upstream since
+			// model_requested in logs is the virtual/client-facing name.
+			usage, err = h.store.GetModelUsageSummaryByUpstream(ctx, found.Provider, resolvedUpstream)
+		} else {
+			usage, err = h.store.GetModelUsageSummary(ctx, modelName)
+		}
 		return err
 	})
 
@@ -272,48 +470,53 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 		CurlExample:    buildCurlExample(modelName),
 	}
 
-	if found != nil {
+	if found != nil && resolvedViaWildcard {
+		// Concrete model resolved through a wildcard — treat as a simple concrete model.
+		view.UpstreamModel = resolvedUpstream
+		if found.Provider != "" {
+			view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providerMap, h.calc, found.Provider, resolvedUpstream)
+		}
+	} else if found != nil {
 		view.UpstreamModel = found.UpstreamModel
-		view.IsVirtual = len(found.Fallbacks) > 0
-		view.IsWildcard = strings.HasSuffix(found.ModelName, "/*")
+		view.IsVirtual = found.IsVirtual()
+		view.IsWildcard = found.IsWildcard()
 		view.Fallbacks = found.Fallbacks
 
 		// Resolve fallback details for virtual models.
 		if view.IsVirtual {
-			view.FallbackDetails = make([]FallbackDetail, len(found.Fallbacks))
-			for i, fb := range found.Fallbacks {
-				detail := FallbackDetail{
-					ModelName:   fb,
-					EncodedName: url.PathEscape(fb),
-				}
-				// Look up the fallback in the model list to get provider/upstream/pricing.
-				for j := range h.modelList {
-					if h.modelList[j].ModelName == fb {
-						m := h.modelList[j]
-						if m.Provider != "" {
-							detail.UpstreamModel = m.UpstreamModel
-							detail.ProviderName, detail.ProviderType, detail.Pricing, detail.HasPricing = resolveModelPricing(h.providerMap, h.calc, m.Provider, m.UpstreamModel)
-						}
-						break
+			view.FallbackDetails = resolveFallbackDetails(h.cfg, found.Fallbacks, h.providerMap, h.calc)
+		}
+
+		// For wildcard models, find concrete models seen in logs that match the prefix.
+		if view.IsWildcard {
+			prefix := found.WildcardPrefix()
+			allUsage := h.cachedModelUsageSummaries(r)
+			for name, u := range allUsage {
+				if after, ok := config.MatchesWildcard(prefix, name); ok {
+					child := ModelListItem{
+						ModelName:    name,
+						EncodedName:  url.PathEscape(name),
+						RequestCount: u.RequestCount,
 					}
-					// Check wildcard prefix match (e.g. fallback "cm/claude-sonnet-4-6" matches "cm/*").
-					if prefix, ok := strings.CutSuffix(h.modelList[j].ModelName, "/*"); ok {
-						if strings.HasPrefix(fb, prefix+"/") {
-							m := h.modelList[j]
-							if m.Provider != "" {
-								detail.UpstreamModel = strings.TrimPrefix(fb, prefix+"/")
-								detail.ProviderName, detail.ProviderType, detail.Pricing, detail.HasPricing = resolveModelPricing(h.providerMap, h.calc, m.Provider, detail.UpstreamModel)
-							}
-							break
-						}
+					if found.Provider != "" {
+						child.UpstreamModel = after
+						child.ProviderName, child.ProviderType, child.Pricing, child.HasPricing = resolveModelPricing(h.providerMap, h.calc, found.Provider, after)
 					}
+					if child.HasPricing && child.Pricing != nil {
+						child.TotalSpendUSD = priceUsage(*child.Pricing, tokenUsage{
+							InputTokens:      u.InputTokens,
+							CacheWriteTokens: u.CacheCreationInputTokens,
+							CacheReadTokens:  u.CacheReadInputTokens,
+							OutputTokens:     u.OutputTokens,
+						}).TotalCostUSD
+					}
+					view.MatchedModels = append(view.MatchedModels, child)
 				}
-				view.FallbackDetails[i] = detail
 			}
 		}
 	}
 
-	if found != nil && !view.IsVirtual && found.Provider != "" {
+	if found != nil && !resolvedViaWildcard && !view.IsVirtual && found.Provider != "" {
 		view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providerMap, h.calc, found.Provider, found.UpstreamModel)
 	} else if found == nil && usage.ProviderName != "" {
 		view.ProviderName, view.ProviderType, view.Pricing, view.HasPricing = resolveModelPricing(h.providerMap, h.calc, usage.ProviderName, usage.UpstreamModel)
@@ -335,6 +538,12 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 			usage.TotalCostUSD = agg.TotalCostUSD
 			view.HasCostData = true
 		}
+	}
+
+	// Fall back to pre-computed cost from request logs when pricing config is unavailable.
+	if !view.HasCostData && usage.LogCostUSD > 0 {
+		usage.TotalCostUSD = usage.LogCostUSD
+		view.HasCostData = true
 	}
 
 	// Build the performance chart from latency data.
@@ -366,6 +575,14 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 			view.MinTPS = 0
 		}
 		view.ChartPoints, view.ChartFill, view.ChartLabels = buildTPSChartSVG(latency, tpsValues, view.MinTPS, view.MaxTPS)
+	}
+
+	if sc := auth.SessionFromContext(r.Context()); sc != nil {
+		if sc.IsMasterKey {
+			view.CurrentUser = "admin"
+		} else if sc.User != nil {
+			view.CurrentUser = sc.User.DisplayName
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

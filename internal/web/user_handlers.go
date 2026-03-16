@@ -49,6 +49,7 @@ func (h *UserHandlers) UsersPage(w http.ResponseWriter, r *http.Request) {
 		"ActiveTab": "users",
 		"Users":     users,
 	}
+	setNavData(data, auth.SessionFromContext(r.Context()))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "users.html", data); err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)

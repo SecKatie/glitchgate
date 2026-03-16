@@ -62,3 +62,16 @@ func applyScopeToParams(sc *auth.UISessionContext, params *store.ListLogsParams)
 func applyScopeToCostParams(sc *auth.UISessionContext, params *store.CostParams) {
 	params.ScopeType, params.ScopeUserID, params.ScopeTeamID = buildScopeParams(sc)
 }
+
+// setNavData injects common nav fields (CurrentUser) into a template data map
+// from the session context. Call this in every page handler before rendering.
+func setNavData(data map[string]any, sc *auth.UISessionContext) {
+	if sc == nil {
+		return
+	}
+	if sc.IsMasterKey {
+		data["CurrentUser"] = "admin"
+	} else if sc.User != nil {
+		data["CurrentUser"] = sc.User.DisplayName
+	}
+}

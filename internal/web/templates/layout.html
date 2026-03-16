@@ -295,6 +295,44 @@
         .result-expand-link:hover {
             text-decoration: underline;
         }
+        .budget-form {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        .budget-form label {
+            margin-bottom: 0;
+            flex: 1 1 12rem;
+            min-width: 10rem;
+        }
+        .budget-form label small {
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+        .budget-form input,
+        .budget-form select {
+            width: 100%;
+            min-width: 0;
+            margin-bottom: 0;
+            padding: 0.25rem 0.5rem;
+        }
+        .budget-form .budget-form-field--compact {
+            flex-basis: 9rem;
+            min-width: 8rem;
+        }
+        .budget-form .budget-form-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-end;
+            flex: 0 0 auto;
+        }
+        .budget-form .budget-form-actions button,
+        .budget-form > button {
+            margin-bottom: 0;
+            padding: 0.25rem 0.75rem;
+            white-space: nowrap;
+        }
     </style>
     {{block "head" .}}{{end}}
 </head>
@@ -305,10 +343,14 @@
                 <li><strong>glitchgate</strong></li>
             </ul>
             <ul>
+                <li><a href="/ui/dashboard"{{if eq .ActiveTab "dashboard"}} aria-current="page" class="nav-active"{{end}}>Dashboard</a></li>
                 <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page" class="nav-active"{{end}}>Logs</a></li>
                 <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page" class="nav-active"{{end}}>Costs</a></li>
+                <li><a href="/ui/budgets"{{if eq .ActiveTab "budgets"}} aria-current="page" class="nav-active"{{end}}>Budgets</a></li>
+                <li><a href="/ui/providers"{{if eq .ActiveTab "providers"}} aria-current="page" class="nav-active"{{end}}>Providers</a></li>
                 <li><a href="/ui/models"{{if eq .ActiveTab "models"}} aria-current="page" class="nav-active"{{end}}>Models</a></li>
                 <li><a href="/ui/keys"{{if eq .ActiveTab "keys"}} aria-current="page" class="nav-active"{{end}}>Keys</a></li>
+                <li><a href="/ui/audit"{{if eq .ActiveTab "audit"}} aria-current="page" class="nav-active"{{end}}>Audit</a></li>
                 <li><a href="/ui/users"{{if eq .ActiveTab "users"}} aria-current="page" class="nav-active"{{end}}>Users</a></li>
                 <li><a href="/ui/teams"{{if eq .ActiveTab "teams"}} aria-current="page" class="nav-active"{{end}}>Teams</a></li>
                 {{if .CurrentUser}}

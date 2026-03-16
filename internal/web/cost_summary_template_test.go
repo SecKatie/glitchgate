@@ -13,10 +13,6 @@ import (
 	"github.com/seckatie/glitchgate/internal/store"
 )
 
-func float64Ptr(v float64) *float64 {
-	return &v
-}
-
 func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 	templates := ParseTemplates(time.UTC)
 	rec := httptest.NewRecorder()
@@ -54,7 +50,7 @@ func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 	require.False(t, strings.Contains(body, "(partial)</span>"))
 }
 
-func TestCostSummaryTemplateShowsProviderSubscriptionComparisons(t *testing.T) {
+func TestCostSummaryTemplateShowsProviderLinkInsteadOfSubscriptionColumns(t *testing.T) {
 	templates := ParseTemplates(time.UTC)
 	rec := httptest.NewRecorder()
 
@@ -78,25 +74,12 @@ func TestCostSummaryTemplateShowsProviderSubscriptionComparisons(t *testing.T) {
 		},
 		"ProviderComparisons": map[string]*ProviderSpendComparison{
 			"chatgpt-pro": {
-				MonthlySubscriptionCost:       20.0,
-				TokenMinusSubscriptionUSD:     -1.5,
-				TokenVsSubscriptionPct:        float64Ptr(-7.5),
-				TotalTokens:                   120,
-				EffectiveTokenCostPerMTok:     float64Ptr(166666.6666666667),
-				AverageRealTokenCostPerMTok:   float64Ptr(154166.6666666667),
-				EffectiveMinusRealCostPerMTok: float64Ptr(12500.0),
-				EffectiveVsRealPct:            float64Ptr(8.108108108108109),
+				MonthlySubscriptionCost: 20.0,
 			},
 		},
 		"ProviderComparisonSummary": ProviderSpendComparisonSummary{
-			HasAnySubscription:            true,
-			TotalSubscriptionCost:         20.0,
-			TokenMinusSubscription:        -1.5,
-			TokenVsSubscriptionPct:        float64Ptr(-7.5),
-			EffectiveTokenCostPerMTok:     float64Ptr(166666.6666666667),
-			AverageRealTokenCostPerMTok:   float64Ptr(154166.6666666667),
-			EffectiveMinusRealCostPerMTok: float64Ptr(12500.0),
-			EffectiveVsRealPct:            float64Ptr(8.108108108108109),
+			HasAnySubscription:    true,
+			TotalSubscriptionCost: 20.0,
 		},
 		"MaxBreakdownRequests": float64(2),
 	})
@@ -104,17 +87,14 @@ func TestCostSummaryTemplateShowsProviderSubscriptionComparisons(t *testing.T) {
 	require.NoError(t, err)
 	body := rec.Body.String()
 
-	require.Contains(t, body, "Monthly Subscription")
-	require.Contains(t, body, "Token vs Subscription")
-	require.Contains(t, body, "Effective Subscription $/MTok")
-	require.Contains(t, body, "Avg Real Token $/MTok")
-	require.Contains(t, body, "Effective vs Real $/MTok")
-	require.Contains(t, body, "Monthly subscription cost is compared against token spend and average real token pricing for the selected date range.")
-	require.Contains(t, body, "$20.00")
-	require.Contains(t, body, "-7.5%")
-	require.Contains(t, body, "$166666.67")
-	require.Contains(t, body, "$154166.67")
-	require.Contains(t, body, "&#43;8.1%")
+	// Subscription columns should NOT be in the breakdown table.
+	require.NotContains(t, body, "Monthly Subscription")
+	require.NotContains(t, body, "Token vs Subscription")
+	require.NotContains(t, body, "Effective Subscription $/MTok")
+
+	// Instead, a link to the Providers page should be shown.
+	require.Contains(t, body, "/ui/providers")
+	require.Contains(t, body, "Provider subscription analysis has moved")
 }
 
 func TestCostsPageTemplatePushesFilterStateIntoURL(t *testing.T) {

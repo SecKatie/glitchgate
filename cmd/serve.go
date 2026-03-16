@@ -103,9 +103,12 @@ func runServe(_ *cobra.Command, _ []string) error {
 	sessions := auth.NewUISessionStore(runtime.Store)
 	tmpl := web.ParseTemplates(runtime.Timezone)
 
-	webHandlers := web.NewHandlers(runtime.Store, sessions, cfg.MasterKey, runtime.Calculator, tmpl, runtime.OIDCProvider, cfg.ModelList, cfg.Providers, runtime.ProviderNames)
+	webHandlers := web.NewHandlers(runtime.Store, sessions, cfg.MasterKey, runtime.Calculator, tmpl, runtime.OIDCProvider, cfg, runtime.ProviderNames)
 	authHandlers := web.NewAuthHandlers(runtime.Store, sessions, runtime.OIDCProvider)
-	costHandlers := web.NewCostHandlers(runtime.Store, runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
+	costHandlers := web.NewCostHandlers(runtime.Store, runtime.Store, runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
+	dashboardHandlers := web.NewDashboardHandlers(runtime.Store, runtime.Store, runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
+	providerHandlers := web.NewProviderHandlers(runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions, cfg)
+	auditHandlers := web.NewAuditHandlers(runtime.Store, tmpl, runtime.Timezone)
 	userHandlers := web.NewUserHandlers(runtime.Store, sessions, tmpl)
 	teamHandlers := web.NewTeamHandlers(runtime.Store, sessions, tmpl)
 
@@ -127,8 +130,11 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Post("/api/logout", webHandlers.LogoutHandler)
 
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/ui/logs", http.StatusSeeOther)
+			http.Redirect(w, r, "/ui/dashboard", http.StatusSeeOther)
 		})
+
+		// Dashboard.
+		r.Get("/dashboard", dashboardHandlers.DashboardPageHandler)
 
 		// Logs.
 		r.Get("/logs", webHandlers.LogsPage)
@@ -146,17 +152,29 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Get("/api/costs/timeseries", costHandlers.CostTimeseriesHandler)
 		r.Get("/api/costs/fragment", costHandlers.CostSummaryFragmentHandler)
 
-		// Budget management (GA-only for global/user, GA/TA for team).
+		// Budgets.
+		r.Get("/budgets", costHandlers.BudgetsPageHandler)
+
+		// Budget management (GA-only for global/user, GA/TA for team/key).
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/global", costHandlers.SetGlobalBudgetHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/global/clear", costHandlers.ClearGlobalBudgetHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/user/{id}", costHandlers.SetUserBudgetHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/user/{id}/clear", costHandlers.ClearUserBudgetHandler)
 		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/team/{id}", costHandlers.SetTeamBudgetHandler)
 		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/team/{id}/clear", costHandlers.ClearTeamBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/key/{id}", costHandlers.SetKeyBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/key/{id}/clear", costHandlers.ClearKeyBudgetHandler)
 
 		// Models.
 		r.Get("/models", webHandlers.ModelsPage)
 		r.Get("/models/*", webHandlers.ModelDetailPage)
+
+		// Providers.
+		r.Get("/providers", providerHandlers.ProvidersPageHandler)
+		r.Get("/providers/{name}", providerHandlers.ProviderDetailPageHandler)
+
+		// Audit log (GA-only).
+		r.With(web.RequireGlobalAdmin).Get("/audit", auditHandlers.AuditPageHandler)
 
 		// Keys.
 		r.Get("/keys", webHandlers.KeysPage)
@@ -190,7 +208,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	// Root redirect to UI.
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/ui/logs", http.StatusSeeOther)
+		http.Redirect(w, r, "/ui/dashboard", http.StatusSeeOther)
 	})
 
 	// Health check.
