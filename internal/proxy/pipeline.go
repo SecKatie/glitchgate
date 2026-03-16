@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"codeberg.org/kglitchy/glitchgate/internal/config"
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/provider"
 )
 
@@ -59,6 +60,7 @@ type pipelineSpec struct {
 	ModelRequest string
 	IsStreaming  bool
 	Start        time.Time
+	Calculator   *pricing.Calculator
 }
 
 type chainAttempt struct {
@@ -109,6 +111,7 @@ func executeProviderAttempt(
 	prov provider.Provider,
 	provReq *provider.Request,
 	attempt providerAttempt,
+	calc *pricing.Calculator,
 	writeNetworkError func(),
 	writeExhaustedError func(),
 	handleResponse func(*provider.Response) handlerResult,
@@ -124,7 +127,7 @@ func executeProviderAttempt(
 			latency, attempt.RequestBody, attempt.AttemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: attempt.IsStreaming,
-			})
+			}, calc)
 		writeNetworkError()
 		return true
 	}
@@ -142,7 +145,7 @@ func executeProviderAttempt(
 			latency, attempt.RequestBody, attempt.AttemptCount, handlerResult{
 				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: attempt.IsStreaming,
-			})
+			}, calc)
 		writeExhaustedError()
 		return true
 	}
@@ -150,7 +153,7 @@ func executeProviderAttempt(
 	result := handleResponse(provResp)
 	latency := time.Since(attempt.Start).Milliseconds()
 	logger.logEntry(attempt.ProxyKeyID, attempt.SourceFormat, providerNameFor(prov), attempt.ModelRequested, attempt.ModelUpstream, "",
-		latency, attempt.RequestBody, attempt.AttemptCount, result)
+		latency, attempt.RequestBody, attempt.AttemptCount, result, calc)
 	return true
 }
 
@@ -185,7 +188,7 @@ func executeProxyPipeline(
 			AttemptCount:     attempt.AttemptCount,
 			HasMoreFallbacks: attempt.HasMoreFallbacks,
 			Start:            spec.Start,
-		}, cbs.onNetworkError, cbs.onExhaustedError, func(provResp *provider.Response) handlerResult {
+		}, spec.Calculator, cbs.onNetworkError, cbs.onExhaustedError, func(provResp *provider.Response) handlerResult {
 			return plan.HandleResponse(w, provResp)
 		})
 	})

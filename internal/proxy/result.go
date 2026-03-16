@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"codeberg.org/kglitchy/glitchgate/internal/pricing"
 	"codeberg.org/kglitchy/glitchgate/internal/store"
 )
 
@@ -30,6 +31,7 @@ type handlerResult struct {
 func (l *AsyncLogger) logEntry(
 	proxyKeyID, sourceFormat, providerName, modelRequested, modelUpstream, resolvedModelName string,
 	latencyMs int64, requestBody []byte, attemptCount int64, r handlerResult,
+	calc *pricing.Calculator,
 ) {
 	// If resolvedModelName not provided, default to modelUpstream if fallback happened, else modelRequested
 	if resolvedModelName == "" {
@@ -38,6 +40,14 @@ func (l *AsyncLogger) logEntry(
 		} else {
 			resolvedModelName = modelRequested
 		}
+	}
+
+	var costUSD *float64
+	if calc != nil {
+		costUSD = calc.Calculate(providerName, modelUpstream,
+			r.InputTokens, r.OutputTokens,
+			r.CacheCreationInputTokens, r.CacheReadInputTokens,
+			r.ReasoningTokens)
 	}
 
 	l.Log(&store.RequestLogEntry{
@@ -61,6 +71,7 @@ func (l *AsyncLogger) logEntry(
 		ErrorDetails:             r.ErrDetails,
 		IsStreaming:              r.IsStreaming,
 		FallbackAttempts:         attemptCount,
+		CostUSD:                  costUSD,
 	})
 }
 

@@ -106,6 +106,7 @@ func TestAsyncLoggerTruncatesBodiesBeforePersisting(t *testing.T) {
 			Status: 200,
 			Body:   []byte(strings.Repeat("y", 64)),
 		},
+		nil,
 	)
 	logger.Close()
 

@@ -62,9 +62,9 @@ func runServe(_ *cobra.Command, _ []string) error {
 	runtime.StartMaintenance(maintenanceCtx, cfg)
 
 	// Build the proxy handlers.
-	proxyHandler := proxy.NewHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger)
-	openaiHandler := proxy.NewOpenAIHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger)
-	responsesHandler := proxy.NewResponsesHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger)
+	proxyHandler := proxy.NewHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
+	openaiHandler := proxy.NewOpenAIHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
+	responsesHandler := proxy.NewResponsesHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
 
 	// Build chi router.
 	r := chi.NewRouter()

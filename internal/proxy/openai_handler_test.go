@@ -97,7 +97,7 @@ func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 
-	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
 
 	h := &openAITestHarness{
 		store:     st,
@@ -414,7 +414,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
 	return handler, st, logger
 }
 
@@ -600,7 +600,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
 	return handler, st, logger
 }
 

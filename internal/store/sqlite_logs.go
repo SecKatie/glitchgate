@@ -18,8 +18,9 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		model_requested, model_upstream, input_tokens, output_tokens,
 		cache_creation_input_tokens, cache_read_input_tokens,
 		reasoning_tokens, latency_ms, status, request_body, response_body,
-		error_details, is_streaming, fallback_attempts, resolved_model_name
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		error_details, is_streaming, fallback_attempts, resolved_model_name,
+		cost_usd
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	isStreaming := 0
 	if entry.IsStreaming {
@@ -58,6 +59,7 @@ func (s *SQLiteStore) InsertRequestLog(ctx context.Context, entry *RequestLogEnt
 		isStreaming,
 		fallbackAttempts,
 		resolvedModelName,
+		entry.CostUSD,
 	)
 	if err != nil {
 		return fmt.Errorf("insert request log: %w", err)

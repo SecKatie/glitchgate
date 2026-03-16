@@ -20,19 +20,21 @@ import (
 // dispatches them via the configured provider, and translates responses
 // back to OpenAI format.
 type OpenAIHandler struct {
-	cfg        *config.Config
-	providers  map[string]provider.Provider
-	calculator *pricing.Calculator
-	logger     *AsyncLogger
+	cfg           *config.Config
+	providers     map[string]provider.Provider
+	calculator    *pricing.Calculator
+	logger        *AsyncLogger
+	budgetChecker *BudgetChecker
 }
 
 // NewOpenAIHandler creates a new OpenAI-compatible proxy handler.
-func NewOpenAIHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger) *OpenAIHandler {
+func NewOpenAIHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker) *OpenAIHandler {
 	return &OpenAIHandler{
-		cfg:        cfg,
-		providers:  providers,
-		calculator: calc,
-		logger:     logger,
+		cfg:           cfg,
+		providers:     providers,
+		calculator:    calc,
+		logger:        logger,
+		budgetChecker: bc,
 	}
 }
 
@@ -76,12 +78,25 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxyKeyID = pk.ID
 	}
 
+	if h.budgetChecker != nil && proxyKeyID != "" {
+		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
+			slog.Warn("budget check error", "error", err)
+		} else if violation != nil {
+			writeOpenAIError(w, http.StatusTooManyRequests, "budget_exceeded",
+				fmt.Sprintf("Budget exceeded: %s %s limit $%.2f, spent $%.2f, resets %s",
+					violation.Scope, violation.Period, violation.LimitUSD, violation.SpendUSD,
+					violation.ResetAt.In(h.budgetChecker.tz).Format(time.RFC3339)))
+			return
+		}
+	}
+
 	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
 		SourceFormat: "openai",
 		ProxyKeyID:   proxyKeyID,
 		ModelRequest: oaiReq.Model,
 		IsStreaming:  oaiReq.Stream,
 		Start:        start,
+		Calculator:   h.calculator,
 	}, h.routeBuilders(w, r, &oaiReq, body),
 		newPipelineCallbacks(w, writeOpenAIError, "api_error"))
 }

@@ -99,7 +99,7 @@ func newTestHarness(t *testing.T, upstreamURL string) *testHarness {
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 
-	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
 
 	h := &testHarness{
 		store:     st,
@@ -471,7 +471,7 @@ model_list:
 		"secondary": anthropic.NewClient("secondary", secondary.URL, "proxy_key", "key2", "2023-06-01"),
 	}
 
-	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
 	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -708,7 +708,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
 	return handler, st, logger
 }
 
@@ -810,7 +810,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
 	return handler, st, logger
 }
 
@@ -979,7 +979,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
 	return handler, st, logger
 }
 
@@ -1307,7 +1307,7 @@ model_list:
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 	defer logger.Close()
-	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
 
 	reqBody := `{"model":"chatgpt-model","messages":[{"role":"user","content":"hi"}],"max_tokens":10,"stream":true}`
 	req := buildFallbackRequest(t, st, "", reqBody)
@@ -1377,7 +1377,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger)
+	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
 
 	reqBody := `{"model":"chatgpt-model","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`
 	req := buildFallbackRequest(t, st, "", reqBody)

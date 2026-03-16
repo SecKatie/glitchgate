@@ -88,8 +88,8 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 	logger := proxy.NewAsyncLogger(st, 100)
 	t.Cleanup(func() { logger.Close() })
 
-	proxyHandler := proxy.NewHandler(cfg, providers, calc, logger)
-	openaiHandler := proxy.NewOpenAIHandler(cfg, providers, calc, logger)
+	proxyHandler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	openaiHandler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
 
 	// --- chi router (identical to serve.go) ---
 	r := chi.NewRouter()
