@@ -29,8 +29,12 @@ type Client struct {
 	requestTimeout time.Duration
 }
 
-// NewClient creates an OpenAI provider client.
-func NewClient(name, baseURL, authMode, apiKey, apiType string) *Client {
+// NewClient creates an OpenAI provider client. Returns an error if
+// baseURL is not a valid HTTP(S) URL.
+func NewClient(name, baseURL, authMode, apiKey, apiType string) (*Client, error) {
+	if err := provider.ValidateBaseURL(baseURL); err != nil {
+		return nil, fmt.Errorf("openai provider %q: %w", name, err)
+	}
 	if apiType == "" {
 		apiType = APITypeChatCompletions
 	}
@@ -42,7 +46,7 @@ func NewClient(name, baseURL, authMode, apiKey, apiType string) *Client {
 		apiType:        apiType,
 		httpClient:     provider.BuildHTTPClient(),
 		requestTimeout: config.DefaultUpstreamRequestTimeout,
-	}
+	}, nil
 }
 
 // SetTimeouts overrides the default upstream request deadline.

@@ -247,6 +247,15 @@
         }
         tr[data-href]:hover {
             background: var(--pico-card-sectioning-background-color);
+            box-shadow: inset 3px 0 0 var(--pico-primary);
+        }
+        /* Link inside clickable rows — always shown as primary color so rows are obviously clickable */
+        .row-link {
+            color: var(--pico-primary);
+            text-decoration: none;
+        }
+        tr[data-href]:hover .row-link {
+            text-decoration: underline;
         }
         /* Token details summary */
         .token-details-summary {

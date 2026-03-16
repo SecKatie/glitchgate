@@ -40,7 +40,7 @@
     <tbody>
         {{range .Models}}
         <tr data-href="/ui/models/{{.EncodedName}}">
-            <td class="mono"><a href="/ui/models/{{.EncodedName}}">{{.ModelName}}</a></td>
+            <td class="mono"><a href="/ui/models/{{.EncodedName}}" class="row-link">{{.ModelName}}</a></td>
             <td class="mono">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
             <td class="cost">{{if .InputPerMTok}}${{printf "%.2f" (deref .InputPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
             <td class="cost">{{if .OutputPerMTok}}${{printf "%.2f" (deref .OutputPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>

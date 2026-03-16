@@ -300,7 +300,7 @@
   <tbody>
     {{range .MatchedModels}}
     <tr data-href="/ui/models/{{.EncodedName}}">
-      <td><a href="/ui/models/{{.EncodedName}}">{{.ModelName}}</a></td>
+      <td><a href="/ui/models/{{.EncodedName}}" class="row-link">{{.ModelName}}</a></td>
       <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
       <td>{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} / ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
       <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>

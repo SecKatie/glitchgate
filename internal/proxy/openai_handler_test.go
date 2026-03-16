@@ -90,8 +90,11 @@ func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 		},
 	}
 
+	anthropicClient, err := anthropic.NewClient("anthropic", upstreamURL, "proxy_key", "test-upstream-key", "2023-06-01")
+	require.NoError(t, err)
+
 	providers := map[string]provider.Provider{
-		"anthropic": anthropic.NewClient("anthropic", upstreamURL, "proxy_key", "test-upstream-key", "2023-06-01"),
+		"anthropic": anthropicClient,
 	}
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
@@ -407,9 +410,14 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
+	primaryClient, err := anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01")
+	require.NoError(t, err)
+	secondaryClient, err := anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01")
+	require.NoError(t, err)
+
 	providers := map[string]provider.Provider{
-		"primary":   anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01"),
-		"secondary": anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01"),
+		"primary":   primaryClient,
+		"secondary": secondaryClient,
 	}
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
@@ -593,10 +601,15 @@ model_list:
 		apiType = openaiprov.APITypeChatCompletions
 	}
 
-	providers := map[string]provider.Provider{
-		"primary":   openaiprov.NewClient("primary", primaryURL, "proxy_key", "key1", apiType),
-		"secondary": anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01"),
-	}
+	providers := map[string]provider.Provider{}
+
+	primaryClient, err2 := openaiprov.NewClient("primary", primaryURL, "proxy_key", "key1", apiType)
+	require.NoError(t, err2)
+	providers["primary"] = primaryClient
+
+	secondaryClient, err2 := anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01")
+	require.NoError(t, err2)
+	providers["secondary"] = secondaryClient
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)

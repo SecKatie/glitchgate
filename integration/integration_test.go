@@ -80,8 +80,10 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 			{ModelName: "gpt-4", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		},
 	}
+	anthropicClient, err := llmanthropic.NewClient("anthropic", upstream.URL, "proxy_key", "fake-upstream-key", "2023-06-01")
+	require.NoError(t, err)
 	providers := map[string]provider.Provider{
-		"anthropic": llmanthropic.NewClient("anthropic", upstream.URL, "proxy_key", "fake-upstream-key", "2023-06-01"),
+		"anthropic": anthropicClient,
 	}
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})

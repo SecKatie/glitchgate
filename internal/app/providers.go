@@ -118,7 +118,10 @@ func (r *ProviderRegistry) ProviderMonthlySubscriptions() map[string]float64 {
 func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (provider.Provider, error) {
 	switch pc.Type {
 	case "anthropic":
-		client := anthropic.NewClient(pc.Name, pc.BaseURL, pc.AuthMode, pc.APIKey, pc.DefaultVersion)
+		client, err := anthropic.NewClient(pc.Name, pc.BaseURL, pc.AuthMode, pc.APIKey, pc.DefaultVersion)
+		if err != nil {
+			return nil, fmt.Errorf("anthropic provider %q: %w", pc.Name, err)
+		}
 		client.SetTimeouts(requestTimeout)
 		return client, nil
 	case "github_copilot":
@@ -130,11 +133,17 @@ func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (prov
 		client.SetTimeouts(requestTimeout)
 		return client, nil
 	case "openai":
-		client := openaiprov.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
+		client, err := openaiprov.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
+		if err != nil {
+			return nil, fmt.Errorf("openai provider %q: %w", pc.Name, err)
+		}
 		client.SetTimeouts(requestTimeout)
 		return client, nil
 	case "openai_responses":
-		client := openaiprov.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
+		client, err := openaiprov.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
+		if err != nil {
+			return nil, fmt.Errorf("openai_responses provider %q: %w", pc.Name, err)
+		}
 		client.SetTimeouts(requestTimeout)
 		return client, nil
 	default:

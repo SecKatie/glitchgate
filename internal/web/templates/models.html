@@ -164,7 +164,7 @@
       data-spend="{{if .HasPricing}}{{.TotalSpendUSD}}{{else}}-1{{end}}"
     >
       <td>
-        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>
+        <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{.ModelName}}</a>
         {{if not (eq .ModelName "")}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
       </td>
       <td>{{if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
@@ -186,7 +186,7 @@
       {{if .IsUnconfigured}}style="color:var(--pico-muted-color)"{{end}}
     >
       <td>
-        <a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{if .ModelName}}{{.ModelName}}{{else}}<em style="color:var(--pico-muted-color)">(empty)</em>{{end}}</a>
+        <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{if .ModelName}}{{.ModelName}}{{else}}<em style="color:var(--pico-muted-color)">(empty)</em>{{end}}</a>
         {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span>{{end}}
         {{if .ModelName}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
       </td>

@@ -22,7 +22,8 @@ func TestSendRequest_ForwardsAnthropicAllowlistHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewClient("claude-max", srv.URL, "forward", "", "2023-06-01")
+	client, err := NewClient("claude-max", srv.URL, "forward", "", "2023-06-01")
+	require.NoError(t, err)
 	req := &provider.Request{
 		Body:  []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`),
 		Model: "claude-sonnet-4-6",
