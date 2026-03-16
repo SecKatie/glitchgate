@@ -1,9 +1,16 @@
 .PHONY: build test lint audit clean generate image image-push image-push-version
 
-BINARY := glitchgate
+BINARY  := glitchgate
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -s -w \
+           -X github.com/seckatie/glitchgate/cmd.version=$(VERSION) \
+           -X github.com/seckatie/glitchgate/cmd.commit=$(COMMIT) \
+           -X github.com/seckatie/glitchgate/cmd.date=$(DATE)
 
 build:
-	CGO_ENABLED=0 go build -o $(BINARY) .
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 test:
 	go test -race ./...

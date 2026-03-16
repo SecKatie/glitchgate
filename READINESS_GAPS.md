@@ -13,7 +13,7 @@ Release-blocking gaps:
 1. ~~A web UI authorization flaw allows scoped users to discover and modify keys they should not control.~~ **FIXED** (2026-03-15).
 2. ~~Budget enforcement is described as a shipped feature, but is not enforced on the proxy request path.~~ **FIXED** (2026-03-15). P1 (enforcement), P2 (dashboard display), and P3 (management UI) complete.
 3. ~~No CI pipeline exists -- lint, test, and security scanning are not automated.~~ **FIXED** (2026-03-15).
-4. No version embedding -- deployed builds cannot be identified.
+4. ~~No version embedding -- deployed builds cannot be identified.~~ **FIXED** (2026-03-15).
 5. Security-critical packages have zero test coverage.
 
 ## What Was Verified
@@ -69,27 +69,17 @@ Resolved 2026-03-15. Changes:
 - All jobs trigger on push and pull_request to any branch.
 - Go version auto-tracked from `go.mod` via `go-version-file`.
 
-### 4. No version embedding
+### ~~4. No version embedding~~ FIXED
 
-Severity: High
+Resolved 2026-03-15. Changes:
 
-Why this blocks deployment:
-
-- `.goreleaser.yaml` only sets `ldflags: [-s -w]` with no version injection.
-- No `var version` exists anywhere in the codebase.
-- No `version` subcommand in cobra.
-- The Containerfile does not inject version labels.
-
-Impact:
-
-- Deployed binaries and containers cannot be identified by version.
-- Incident response and rollback decisions lack basic build provenance.
-
-Required fix before release:
-
-- Add `-X main.version={{.Version}}` (and commit/date) to goreleaser ldflags.
-- Add a `version` cobra subcommand.
-- Inject version into OCI labels in the Containerfile.
+- Added `cmd/version.go` with `version`, `commit`, `date` vars injected via ldflags.
+- `version` subcommand prints `glitchgate <version> (commit: <sha>, built: <date>)`.
+- `rootCmd.Version` set so `--version` flag works automatically.
+- `.goreleaser.yaml` ldflags inject `{{.Version}}`, `{{.Commit}}`, `{{.Date}}`.
+- `Makefile` build target injects version from `git describe`, commit, and date.
+- `Containerfile` accepts `VERSION` ARG and injects via ldflags + OCI label.
+- Also fixes gap #13: `GOARCH` now uses `TARGETARCH` ARG for multi-arch builds.
 
 ### 5. Zero test coverage for security-critical packages
 
@@ -254,22 +244,9 @@ Recommended fix:
 - Add a `/metrics` endpoint with request counters, latency histograms, and token usage.
 - Make health check verify DB connectivity.
 
-### 13. Containerfile hardcodes GOARCH=amd64
+### ~~13. Containerfile hardcodes GOARCH=amd64~~ FIXED
 
-Severity: Medium
-
-Evidence:
-
-- `Containerfile` line 16 hardcodes `GOARCH=amd64`.
-- The Makefile builds multi-arch via podman manifests (`linux/amd64,linux/arm64`), but the Containerfile itself always produces an amd64 binary.
-
-Impact:
-
-- arm64 container builds silently produce wrong-architecture binaries.
-
-Recommended fix:
-
-- Use `ARG TARGETARCH` and `GOARCH=${TARGETARCH}`.
+Resolved 2026-03-15 as part of gap #4 (version embedding). The Containerfile now uses `ARG TARGETARCH` with `GOARCH=${TARGETARCH:-amd64}`.
 
 ### 14. SQLite PRAGMAs not applied per-connection
 
@@ -366,10 +343,10 @@ The app should not be called deployment-ready until all items below are complete
 - [x] Fix scoped key authorization for list, update, and all related UI paths.
 - [x] Implement real budget enforcement on the proxy path, or remove claims from README.
 - [x] Add a CI pipeline running lint, test, and security audit on every push.
-- [ ] Embed version information in binaries and container images.
+- [x] Embed version information in binaries and container images.
 - [ ] Add tests for `internal/auth`, `internal/oidc`, and `internal/ratelimit`.
 - [ ] Fix constant-time master key comparison.
-- [ ] Fix Containerfile `GOARCH` for multi-arch builds.
+- [x] Fix Containerfile `GOARCH` for multi-arch builds.
 - [ ] Decide and document the supported deployment model.
 - [ ] Decide and document production logging posture for prompts, responses, and session data.
 
@@ -377,8 +354,8 @@ The app should not be called deployment-ready until all items below are complete
 
 1. ~~Fix key-scope authorization bugs and add regression tests.~~ **Done.**
 2. ~~Add CI pipeline (`make lint test audit`).~~ **Done.**
-3. Embed version information (goreleaser ldflags + cobra subcommand).
-4. Fix Containerfile `GOARCH` hardcoding.
+3. ~~Embed version information (goreleaser ldflags + cobra subcommand).~~ **Done.**
+4. ~~Fix Containerfile `GOARCH` hardcoding.~~ **Done (with #3).**
 5. Fix constant-time master key comparison.
 6. Add tests for auth, oidc, and ratelimit packages.
 7. ~~Implement budget enforcement or remove claims from README.~~ **Done (P1/P2/P3).**

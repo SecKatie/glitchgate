@@ -1,0 +1,56 @@
+{{template "layout.html" .}}
+
+{{define "title"}}{{.ProviderName}} — glitchgate{{end}}
+
+{{define "content"}}
+<p><a href="/ui/providers">&larr; Back to Providers</a></p>
+
+<h2>{{.ProviderName}}</h2>
+
+<div class="cost-headline">
+    <div class="cost-headline-item">
+        <div class="cost-headline-value">{{.ProviderType}}</div>
+        <div class="cost-headline-label">Type</div>
+    </div>
+    {{if .HasSubscription}}
+    <div class="cost-headline-item">
+        <div class="cost-headline-value">${{printf "%.2f" .SubscriptionCost}}</div>
+        <div class="cost-headline-label">Monthly Subscription</div>
+    </div>
+    {{end}}
+    <div class="cost-headline-item">
+        <div class="cost-headline-value">${{printf "%.4f" .TotalSpend}}</div>
+        <div class="cost-headline-label">Total Token Spend</div>
+    </div>
+</div>
+
+{{if .Models}}
+<h3>Models</h3>
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Model</th>
+            <th>Upstream Model</th>
+            <th class="cost">Input $/MTok</th>
+            <th class="cost">Output $/MTok</th>
+            <th class="cost">Total Spend</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Models}}
+        <tr data-href="/ui/models/{{.EncodedName}}">
+            <td class="mono"><a href="/ui/models/{{.EncodedName}}">{{.ModelName}}</a></td>
+            <td class="mono">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .InputPerMTok}}${{printf "%.2f" (deref .InputPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .OutputPerMTok}}${{printf "%.2f" (deref .OutputPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .TotalSpendUSD}}${{printf "%.4f" .TotalSpendUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+</figure>
+{{else}}
+<p>No models configured for this provider.</p>
+{{end}}
+{{end}}

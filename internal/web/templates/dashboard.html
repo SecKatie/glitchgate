@@ -1,0 +1,253 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Dashboard - glitchgate{{end}}
+
+{{define "head"}}
+<style>
+    .dash-hero {
+        display: flex;
+        align-items: center;
+        gap: 2rem;
+        margin-bottom: 1.5rem;
+        padding: 1rem 1.5rem;
+        border: 1px solid var(--pico-muted-border-color);
+        border-radius: var(--pico-border-radius);
+    }
+    .dash-hero-main {
+        flex-shrink: 0;
+    }
+    .dash-hero-label {
+        font-size: 0.8rem;
+        color: var(--pico-muted-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .dash-hero-value {
+        font-size: 2.25rem;
+        font-weight: 700;
+        color: var(--pico-primary);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.1;
+    }
+    .dash-hero-stats {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        border-left: 1px solid var(--pico-muted-border-color);
+        padding-left: 2rem;
+    }
+    .dash-hero-stat {
+        display: flex;
+        flex-direction: column;
+    }
+    .dash-hero-stat-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+    .dash-hero-stat-label {
+        font-size: 0.75rem;
+        color: var(--pico-muted-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .dash-subsidy {
+        flex-shrink: 0;
+        border-left: 1px solid var(--pico-muted-border-color);
+        padding-left: 2rem;
+    }
+    .dash-subsidy-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--pico-del-color);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.1;
+    }
+    .dash-subsidy-sub {
+        font-size: 0.75rem;
+        color: var(--pico-muted-color);
+    }
+    .dash-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .dash-card {
+        padding: 1rem;
+    }
+    .dash-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 100px;
+        padding: 0 0 0.25rem 0;
+        border-bottom: 1px solid var(--pico-muted-border-color);
+        margin-bottom: 0.25rem;
+    }
+    .dash-chart .bar-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        height: 100%;
+        justify-content: flex-end;
+        min-width: 0;
+    }
+    .dash-chart .bar {
+        width: 80%;
+        max-width: 24px;
+        background: var(--pico-primary);
+        border-radius: 2px 2px 0 0;
+        min-height: 2px;
+    }
+    .dash-chart .bar-val {
+        font-size: 0.55rem;
+        color: var(--pico-muted-color);
+        margin-bottom: 2px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+    .dash-chart-labels {
+        display: flex;
+        gap: 2px;
+    }
+    .dash-chart-labels .bar-date {
+        flex: 1;
+        text-align: center;
+        font-size: 0.55rem;
+        color: var(--pico-muted-color);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+    }
+    @media (max-width: 768px) {
+        .dash-hero {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        .dash-hero-stats, .dash-subsidy {
+            border-left: none;
+            padding-left: 0;
+            border-top: 1px solid var(--pico-muted-border-color);
+            padding-top: 1rem;
+        }
+        .dash-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<h2>Dashboard</h2>
+
+<!-- Hero metrics -->
+<div class="dash-hero">
+    <div class="dash-hero-main">
+        <div class="dash-hero-label">Total Cost (30d)</div>
+        <div class="dash-hero-value">${{printf "%.2f" .TokenCosts.TotalCostUSD}}</div>
+    </div>
+    {{if .SubsidyAnalysis}}
+    <div class="dash-subsidy">
+        <div class="dash-hero-label">Provider Subsidy</div>
+        <div class="dash-subsidy-value">${{printf "%.2f" .SubsidyAnalysis.ProviderSubsidyUSD}}</div>
+        <div class="dash-subsidy-sub">You paid ${{printf "%.2f" .SubsidyAnalysis.SubscriptionCostUSD}}/mo{{if .SubsidyAnalysis.SubsidyPct}} &middot; {{printf "%.0f" (deref .SubsidyAnalysis.SubsidyPct)}}% subsidized{{end}}</div>
+    </div>
+    {{end}}
+    <div class="dash-hero-stats">
+        <div class="dash-hero-stat">
+            <span class="dash-hero-stat-value">{{.Summary.TotalRequests}}</span>
+            <span class="dash-hero-stat-label">Requests</span>
+        </div>
+        <div class="dash-hero-stat">
+            <span class="dash-hero-stat-value">{{fmtTokens .TotalTokens}}</span>
+            <span class="dash-hero-stat-label">Total Tokens</span>
+        </div>
+    </div>
+</div>
+
+<!-- Budget status -->
+{{template "budget_status" .}}
+
+<!-- Daily spend trend -->
+{{if and .Timeseries (gt (len .Timeseries) 1)}}
+<div style="margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem;">
+        <h4 style="margin-bottom: 0;">Daily Spend (30d)</h4>
+        <a href="/ui/costs" style="font-size: 0.85em;">View full cost analysis &rarr;</a>
+    </div>
+    <figure style="margin-bottom: 0;">
+        <div class="dash-chart">
+            {{range .Timeseries}}
+            <div class="bar-col" title="{{.Date}}: ${{printf "%.2f" .CostUSD}}">
+                <div class="bar-val">${{printf "%.2f" .CostUSD}}</div>
+                <div class="bar" style="height: {{if gt $.MaxCost 0.0}}{{barPct .CostUSD $.MaxCost}}%{{else}}2px{{end}};"></div>
+            </div>
+            {{end}}
+        </div>
+        <div class="dash-chart-labels">
+            {{range .Timeseries}}
+            <div class="bar-date">{{shortDate .Date}}</div>
+            {{end}}
+        </div>
+    </figure>
+</div>
+{{end}}
+
+<!-- Bottom grid: Top Models + Recent Activity -->
+<div class="dash-grid">
+    <div class="card dash-card">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem;">
+            <h4 style="margin-bottom: 0;">Top Models</h4>
+            <a href="/ui/models" style="font-size: 0.85em;">View all &rarr;</a>
+        </div>
+        {{if .TopModels}}
+        <table style="margin-bottom: 0;">
+            <tbody>
+                {{range .TopModels}}
+                <tr>
+                    <td class="mono" style="font-size: 0.9em;">{{.Name}}</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums;">{{if .CostUSD}}${{printf "%.2f" .CostUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+        {{else}}
+        <p style="color: var(--pico-muted-color); margin-bottom: 0;">No cost data yet.</p>
+        {{end}}
+    </div>
+
+    <div class="card dash-card">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem;">
+            <h4 style="margin-bottom: 0;">Today's Activity</h4>
+            <a href="/ui/logs" style="font-size: 0.85em;">View logs &rarr;</a>
+        </div>
+        <table style="margin-bottom: 0;">
+            <tbody>
+                <tr>
+                    <td>Requests</td>
+                    <td style="text-align: right; font-weight: 600; font-variant-numeric: tabular-nums;">{{.ActivityStats.TotalRequests}}</td>
+                </tr>
+                <tr>
+                    <td>Errors</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums;">
+                        {{.ActivityStats.ErrorCount}}
+                        {{if gt .ActivityStats.ErrorCount 0}}
+                        <span style="color: var(--pico-del-color); font-size: 0.85em;">({{printf "%.1f" .ErrorPct}}%)</span>
+                        {{end}}
+                    </td>
+                </tr>
+                <tr>
+                    <td>Avg Latency</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums;">
+                        {{if gt .ActivityStats.TotalRequests 0}}{{printf "%.1f" .AvgLatencySec}}s{{else}}&mdash;{{end}}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{{end}}

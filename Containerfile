@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1
 
+ARG VERSION=dev
+
 # Build stage
 FROM golang:1.26-alpine AS builder
+ARG TARGETARCH
+ARG VERSION
 WORKDIR /src
 
 # Install build dependencies (git for private modules if needed)
@@ -13,20 +17,22 @@ RUN go mod download && go mod verify
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -trimpath \
-    -ldflags="-s -w -extldflags '-static'" \
+    -ldflags="-s -w -extldflags '-static' -X github.com/seckatie/glitchgate/cmd.version=${VERSION}" \
     -a -installsuffix cgo \
     -o /glitchgate .
 
 # Final stage - minimal alpine image
 FROM alpine:3.21
+ARG VERSION
 
 # OCI labels
 LABEL org.opencontainers.image.title="glitchgate"
 LABEL org.opencontainers.image.description="LLM API reverse proxy with format translation"
 LABEL org.opencontainers.image.source="https://github.com/seckatie/glitchgate"
 LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL org.opencontainers.image.version="${VERSION}"
 
 # Install ca-certificates for HTTPS requests to upstream providers
 RUN apk add --no-cache ca-certificates && \

@@ -69,8 +69,7 @@ type Handlers struct {
 	templates     *TemplateSet
 	calc          *pricing.Calculator
 	oidc          OIDCProvider // nil when OIDC not configured
-	modelList     []config.ModelMapping
-	providers     []config.ProviderConfig
+	cfg           *config.Config
 	providerMap   map[string]config.ProviderConfig // name → config for O(1) lookup
 	providerNames map[string]string
 
@@ -87,9 +86,9 @@ type OIDCProvider interface {
 }
 
 // NewHandlers creates web UI handlers.
-func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, modelList []config.ModelMapping, providers []config.ProviderConfig, providerNames map[string]string) *Handlers {
-	pm := make(map[string]config.ProviderConfig, len(providers))
-	for _, pc := range providers {
+func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey string, calc *pricing.Calculator, tmpl *TemplateSet, oidcProvider OIDCProvider, cfg *config.Config, providerNames map[string]string) *Handlers {
+	pm := make(map[string]config.ProviderConfig, len(cfg.Providers))
+	for _, pc := range cfg.Providers {
 		pm[pc.Name] = pc
 	}
 	return &Handlers{
@@ -99,8 +98,7 @@ func NewHandlers(s HandlersStore, sessions *auth.UISessionStore, masterKey strin
 		templates:     tmpl,
 		calc:          calc,
 		oidc:          oidcProvider,
-		modelList:     modelList,
-		providers:     providers,
+		cfg:           cfg,
 		providerMap:   pm,
 		providerNames: providerNames,
 	}
@@ -424,6 +422,7 @@ func (h *Handlers) LogsPage(w http.ResponseWriter, r *http.Request) {
 		"To":           params.To,
 	}
 
+	setNavData(data, auth.SessionFromContext(r.Context()))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := h.templates.ExecuteTemplate(w, "logs.html", data); err != nil {
@@ -522,6 +521,13 @@ func (h *Handlers) LogDetailPage(w http.ResponseWriter, r *http.Request, id stri
 		Conversation: conv,
 		Cost:         costBreakdown,
 	}
+	if sc := auth.SessionFromContext(r.Context()); sc != nil {
+		if sc.IsMasterKey {
+			data.CurrentUser = "admin"
+		} else if sc.User != nil {
+			data.CurrentUser = sc.User.DisplayName
+		}
+	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "log_detail.html", data); err != nil {
@@ -607,6 +613,7 @@ func (h *Handlers) KeysPage(w http.ResponseWriter, r *http.Request) {
 		"ActiveTab": "keys",
 		"Keys":      keys,
 	}
+	setNavData(data, auth.SessionFromContext(r.Context()))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "keys.html", data); err != nil {
@@ -684,6 +691,7 @@ func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 			"LabelError": err.Error(),
 			"LabelValue": label,
 		}
+		setNavData(data, auth.SessionFromContext(r.Context()))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		if err := h.templates.ExecuteTemplate(w, "keys.html", data); err != nil {
@@ -734,6 +742,7 @@ func (h *Handlers) CreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 		"CreatedPrefix": prefix,
 		"CreatedLabel":  label,
 	}
+	setNavData(data, auth.SessionFromContext(r.Context()))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "keys.html", data); err != nil {

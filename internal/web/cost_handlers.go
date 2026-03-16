@@ -27,6 +27,7 @@ type CostHandlers struct {
 	store                        store.CostQueryStore
 	budgetStore                  store.BudgetCheckStore
 	budgetAdminStore             store.BudgetAdminStore
+	keyStore                     store.ProxyKeyStore
 	templates                    *TemplateSet
 	tz                           *time.Location
 	calc                         *pricing.Calculator
@@ -37,7 +38,7 @@ type CostHandlers struct {
 // NewCostHandlers creates a new CostHandlers with the given store, template set,
 // display timezone (pass nil or time.UTC for UTC), and provider name map
 // (provider name or legacy raw key → display name). Pass nil if no providers are configured.
-func NewCostHandlers(s store.CostQueryStore, bs store.BudgetCheckStore, bas store.BudgetAdminStore, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string, providerMonthlySubscriptions map[string]float64) *CostHandlers {
+func NewCostHandlers(s store.CostQueryStore, bs store.BudgetCheckStore, bas store.BudgetAdminStore, ks store.ProxyKeyStore, tmpl *TemplateSet, tz *time.Location, calc *pricing.Calculator, providerNames map[string]string, providerMonthlySubscriptions map[string]float64) *CostHandlers {
 	if tz == nil {
 		tz = time.UTC
 	}
@@ -45,6 +46,7 @@ func NewCostHandlers(s store.CostQueryStore, bs store.BudgetCheckStore, bas stor
 		store:                        s,
 		budgetStore:                  bs,
 		budgetAdminStore:             bas,
+		keyStore:                     ks,
 		templates:                    tmpl,
 		tz:                           tz,
 		calc:                         calc,
@@ -177,6 +179,22 @@ func (h *CostHandlers) parseCostParams(r *http.Request) store.CostParams {
 func startOfDay(t time.Time, tz *time.Location) time.Time {
 	local := t.In(tz)
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, tz)
+}
+
+// costParamsLast30Days builds a CostParams for the last 30 local days with
+// the given groupBy dimension. Used by dashboard and providers pages.
+func costParamsLast30Days(tz *time.Location, groupBy string) store.CostParams {
+	now := time.Now().In(tz)
+	fromLocal := startOfDay(now.AddDate(0, 0, -30), tz)
+	toLocalEnd := startOfDay(now, tz).AddDate(0, 0, 1).Add(-time.Second)
+	_, offsetSecs := fromLocal.Zone()
+	return store.CostParams{
+		From:            fromLocal.UTC().Format("2006-01-02 15:04:05"),
+		To:              toLocalEnd.UTC().Format("2006-01-02 15:04:05"),
+		GroupBy:         groupBy,
+		TzOffsetSeconds: offsetSecs,
+		TzLocation:      tz,
+	}
 }
 
 // daysInRange returns the number of days between two date strings (inclusive).
@@ -460,10 +478,6 @@ type costDashboardData struct {
 	MaxBreakdownRequests      int64
 	HasIncompleteData         bool
 	GroupBy                   string
-	SubsidyAnalysis           *SubsidyAnalysis
-	BudgetEntries             []BudgetStatusEntry
-	IsGA                      bool // current session is global admin
-	IsAdmin                   bool // current session is global admin or team admin
 	FromDate                  string
 	ToDate                    string
 }
@@ -534,27 +548,6 @@ func (h *CostHandlers) buildCostDashboardData(r *http.Request) (*costDashboardDa
 
 	fromDate, toDate := h.defaultDateRange(r)
 
-	subsidyAnalysis := buildSubsidyAnalysis(
-		pricingGroups, timeseriesPricingGroups,
-		h.calc, h.providerNames, h.providerMonthlySubscriptions,
-		daysInRange(fromDate, toDate),
-	)
-
-	// Fetch budget status for the current session scope.
-	var budgetEntries []BudgetStatusEntry
-	sc := auth.SessionFromContext(r.Context())
-	isGA := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin")
-	isAdmin := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin" || sc.Role == "team_admin")
-	if h.budgetStore != nil {
-		scopeType, scopeUserID, scopeTeamID := buildScopeParams(sc)
-		budgets, err := h.budgetStore.GetBudgetsForScope(r.Context(), scopeType, scopeUserID, scopeTeamID)
-		if err != nil {
-			slog.Warn("budget status fetch failed", "error", err)
-		} else {
-			budgetEntries = h.buildBudgetStatusEntries(r.Context(), budgets)
-		}
-	}
-
 	return &costDashboardData{
 		Summary:                   summary,
 		TokenCosts:                tokenCosts,
@@ -567,10 +560,6 @@ func (h *CostHandlers) buildCostDashboardData(r *http.Request) (*costDashboardDa
 		MaxBreakdownRequests:      maxBreakdownRequests,
 		HasIncompleteData:         hasIncompleteData,
 		GroupBy:                   groupBy,
-		SubsidyAnalysis:           subsidyAnalysis,
-		BudgetEntries:             budgetEntries,
-		IsGA:                      isGA,
-		IsAdmin:                   isAdmin,
 		FromDate:                  fromDate,
 		ToDate:                    toDate,
 	}, nil
@@ -591,10 +580,6 @@ func (d *costDashboardData) toTemplateData() map[string]any {
 		"HasIncompleteData":         d.HasIncompleteData,
 		"GroupBy":                   d.GroupBy,
 		"TotalAllInputTokens":       d.Summary.TotalInputTokens + d.Summary.TotalCacheCreationTokens + d.Summary.TotalCacheReadTokens,
-		"SubsidyAnalysis":           d.SubsidyAnalysis,
-		"BudgetEntries":             d.BudgetEntries,
-		"IsGA":                      d.IsGA,
-		"IsAdmin":                   d.IsAdmin,
 	}
 }
 
@@ -623,6 +608,7 @@ func (h *CostHandlers) CostsPageHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	data["GroupFilter"] = groupFilter
 
+	setNavData(data, auth.SessionFromContext(r.Context()))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "costs.html", data); err != nil {
 		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
@@ -651,14 +637,42 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 	}
 }
 
-// buildBudgetStatusEntries computes budget utilization for each configured budget.
+// buildBudgetStatusEntries delegates to the package-level BuildBudgetStatusEntries.
 func (h *CostHandlers) buildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBudget) []BudgetStatusEntry {
+	return BuildBudgetStatusEntries(ctx, budgets, h.budgetStore, h.keyStore, h.tz)
+}
+
+// BuildBudgetStatusEntries computes budget utilization for each configured budget.
+func BuildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBudget, budgetStore store.BudgetCheckStore, keyStore store.ProxyKeyStore, tz *time.Location) []BudgetStatusEntry {
+	// Pre-fetch key summaries for key-scoped budget labels.
+	keyLabels := make(map[string]string)
+	if keyStore != nil {
+		for _, b := range budgets {
+			if b.Scope == "key" {
+				keyLabels[b.ScopeID] = "" // mark for lookup
+			}
+		}
+		if len(keyLabels) > 0 {
+			if keys, err := keyStore.ListActiveProxyKeys(ctx); err == nil {
+				for _, k := range keys {
+					if _, needed := keyLabels[k.ID]; needed {
+						lbl := "Key: " + k.KeyPrefix + "..."
+						if k.Label != "" {
+							lbl += " (" + k.Label + ")"
+						}
+						keyLabels[k.ID] = lbl
+					}
+				}
+			}
+		}
+	}
+
 	now := time.Now()
 	var entries []BudgetStatusEntry
 
 	for _, b := range budgets {
-		start := proxy.PeriodStart(b.Period, now, h.tz)
-		spend, err := h.budgetStore.GetSpendSince(ctx, b.Scope, b.ScopeID, start)
+		start := proxy.PeriodStart(b.Period, now, tz)
+		spend, err := budgetStore.GetSpendSince(ctx, b.Scope, b.ScopeID, start)
 		if err != nil {
 			slog.Warn("budget status: failed to get spend", "scope", b.Scope, "error", err)
 			continue
@@ -680,10 +694,16 @@ func (h *CostHandlers) buildBudgetStatusEntries(ctx context.Context, budgets []s
 			status = "warning"
 		}
 
-		resetAt := proxy.PeriodResetAt(b.Period, now, h.tz)
+		resetAt := proxy.PeriodResetAt(b.Period, now, tz)
 
 		label := strings.ToUpper(b.Scope[:1]) + b.Scope[1:]
-		if b.ScopeID != "" {
+		if b.Scope == "key" && b.ScopeID != "" {
+			if kl, ok := keyLabels[b.ScopeID]; ok && kl != "" {
+				label = kl
+			} else {
+				label = "Key: " + b.ScopeID[:min(8, len(b.ScopeID))] + "..."
+			}
+		} else if b.ScopeID != "" {
 			label += ": " + b.ScopeID
 		}
 
@@ -696,7 +716,7 @@ func (h *CostHandlers) buildBudgetStatusEntries(ctx context.Context, budgets []s
 			SpendUSD:       spend,
 			RemainingUSD:   remaining,
 			UtilizationPct: pct,
-			ResetAtFmt:     resetAt.In(h.tz).Format("Jan 2 3:04 PM"),
+			ResetAtFmt:     resetAt.In(tz).Format("Jan 2 3:04 PM"),
 			Status:         status,
 		})
 	}
@@ -882,4 +902,98 @@ func (h *CostHandlers) ClearTeamBudgetHandler(w http.ResponseWriter, r *http.Req
 		"", fmt.Sprintf("team=%s", teamID))
 
 	h.renderBudgetFragment(w, r)
+}
+
+// SetKeyBudgetHandler handles POST /ui/api/budgets/key/{id}.
+func (h *CostHandlers) SetKeyBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	keyID := chi.URLParam(r, "id")
+	if keyID == "" {
+		http.Error(w, "key ID required", http.StatusBadRequest)
+		return
+	}
+
+	limit, period, err := parseBudgetForm(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.budgetAdminStore.SetKeyBudget(r.Context(), keyID, limit, period); err != nil {
+		http.Error(w, "Failed to set key budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.key.set",
+		"", fmt.Sprintf("key=%s limit=$%.2f period=%s", keyID, limit, period))
+
+	h.renderBudgetFragment(w, r)
+}
+
+// ClearKeyBudgetHandler handles POST /ui/api/budgets/key/{id}/clear.
+func (h *CostHandlers) ClearKeyBudgetHandler(w http.ResponseWriter, r *http.Request) {
+	keyID := chi.URLParam(r, "id")
+	if keyID == "" {
+		http.Error(w, "key ID required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.budgetAdminStore.ClearKeyBudget(r.Context(), keyID); err != nil {
+		http.Error(w, "Failed to clear key budget", http.StatusInternalServerError)
+		return
+	}
+
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.key.clear",
+		"", fmt.Sprintf("key=%s", keyID))
+
+	h.renderBudgetFragment(w, r)
+}
+
+// --------------------------------------------------------------------------
+// Budgets page
+// --------------------------------------------------------------------------
+
+// BudgetsPageHandler renders the dedicated budget management page.
+func (h *CostHandlers) BudgetsPageHandler(w http.ResponseWriter, r *http.Request) {
+	sc := auth.SessionFromContext(r.Context())
+	scopeType, scopeUserID, scopeTeamID := buildScopeParams(sc)
+
+	budgets, err := h.budgetStore.GetBudgetsForScope(r.Context(), scopeType, scopeUserID, scopeTeamID)
+	if err != nil {
+		slog.Error("budgets page: fetch budgets", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	entries := h.buildBudgetStatusEntries(r.Context(), budgets)
+	isGA := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin")
+	isAdmin := sc != nil && (sc.IsMasterKey || sc.Role == "global_admin" || sc.Role == "team_admin")
+
+	// Fetch active keys for the key-budget selector dropdown.
+	var keys []store.ProxyKeySummary
+	if isAdmin && h.keyStore != nil {
+		switch scopeType {
+		case "all":
+			keys, _ = h.keyStore.ListActiveProxyKeys(r.Context())
+		case "team":
+			if scopeTeamID != "" {
+				keys, _ = h.keyStore.ListProxyKeysByTeam(r.Context(), scopeTeamID)
+			}
+		}
+	}
+
+	data := map[string]any{
+		"ActiveTab":     "budgets",
+		"Title":         "Budgets",
+		"BudgetEntries": entries,
+		"IsGA":          isGA,
+		"IsAdmin":       isAdmin,
+		"Keys":          keys,
+	}
+
+	setNavData(data, sc)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.templates.ExecuteTemplate(w, "budgets.html", data); err != nil {
+		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
+	}
 }

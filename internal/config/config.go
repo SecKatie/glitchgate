@@ -43,7 +43,7 @@ type Config struct {
 	// name to its ordered dispatch slice (one entry for direct models, multiple
 	// entries for virtual/fallback models). Wildcard entries are NOT stored here;
 	// FindModel falls through to the wildcard scan for those.
-	resolvedChains map[string][]ModelMapping
+	resolvedChains map[string][]DispatchTarget
 }
 
 // Default operational limits and retention settings used when config values
@@ -111,6 +111,44 @@ type ModelMapping struct {
 	UpstreamModel string         `mapstructure:"upstream_model" yaml:"upstream_model"`
 	Fallbacks     []string       `mapstructure:"fallbacks"      yaml:"fallbacks"`
 	Metadata      *ModelMetadata `mapstructure:"metadata"       yaml:"metadata"`
+}
+
+// IsWildcard returns true for wildcard prefix entries (e.g. "chatgpt/*").
+func (m ModelMapping) IsWildcard() bool { return strings.HasSuffix(m.ModelName, "/*") }
+
+// IsDirect returns true for concrete model entries with a provider and upstream model.
+func (m ModelMapping) IsDirect() bool { return m.Provider != "" && len(m.Fallbacks) == 0 }
+
+// IsVirtual returns true for entries that route through a fallback chain.
+func (m ModelMapping) IsVirtual() bool { return len(m.Fallbacks) > 0 }
+
+// WildcardPrefix returns the prefix portion of a wildcard entry (e.g. "chatgpt"
+// for "chatgpt/*"), or "" if the entry is not a wildcard.
+func (m ModelMapping) WildcardPrefix() string {
+	if prefix, ok := strings.CutSuffix(m.ModelName, "/*"); ok {
+		return prefix
+	}
+	return ""
+}
+
+// DispatchTarget is a single concrete upstream destination for a proxy request.
+// FindModel returns a slice of these — one for direct models, multiple for
+// virtual/fallback models. The proxy pipeline only needs Provider + UpstreamModel;
+// Metadata is carried through for pricing overrides.
+type DispatchTarget struct {
+	Provider      string
+	UpstreamModel string
+	Metadata      *ModelMetadata
+}
+
+// MatchesWildcard checks if modelName matches a wildcard prefix (e.g. "chatgpt"
+// matches "chatgpt/gpt-5.4") and returns the suffix ("gpt-5.4").
+func MatchesWildcard(prefix, modelName string) (suffix string, ok bool) {
+	after, found := strings.CutPrefix(modelName, prefix+"/")
+	if found && after != "" {
+		return after, true
+	}
+	return "", false
 }
 
 // Load reads the configuration from file, environment, and defaults.
@@ -217,8 +255,7 @@ func (c *Config) buildResolvedChains() error {
 	// Build a name → index map for O(1) lookup.
 	byName := make(map[string]int, len(c.ModelList))
 	for i, m := range c.ModelList {
-		// Skip wildcard entries — they are not stored in the map.
-		if strings.HasSuffix(m.ModelName, "/*") {
+		if m.IsWildcard() {
 			continue
 		}
 		byName[m.ModelName] = i
@@ -228,16 +265,11 @@ func (c *Config) buildResolvedChains() error {
 	// entry (e.g. "gc/claude-sonnet-4-6" matching "gc/*"), otherwise nil.
 	resolveWildcard := func(name string) *ModelMapping {
 		for i := range c.ModelList {
-			pattern := c.ModelList[i].ModelName
-			if !strings.HasSuffix(pattern, "/*") {
+			prefix := c.ModelList[i].WildcardPrefix()
+			if prefix == "" {
 				continue
 			}
-			prefix := pattern[:len(pattern)-2] // strip "/*"
-			if strings.HasPrefix(name, prefix+"/") {
-				suffix := name[len(prefix)+1:]
-				if suffix == "" {
-					return nil
-				}
+			if suffix, ok := MatchesWildcard(prefix, name); ok {
 				m := ModelMapping{
 					ModelName:     name,
 					Provider:      c.ModelList[i].Provider,
@@ -251,8 +283,8 @@ func (c *Config) buildResolvedChains() error {
 
 	// Pass 1: validate mutual exclusivity for each non-wildcard entry.
 	for _, m := range c.ModelList {
-		if strings.HasSuffix(m.ModelName, "/*") {
-			continue // wildcards are always direct; no fallbacks allowed
+		if m.IsWildcard() {
+			continue
 		}
 		isDirect := m.Provider != "" || m.UpstreamModel != ""
 		isVirtual := len(m.Fallbacks) > 0
@@ -317,7 +349,7 @@ func (c *Config) buildResolvedChains() error {
 	}
 
 	for _, m := range c.ModelList {
-		if strings.HasSuffix(m.ModelName, "/*") {
+		if m.IsWildcard() {
 			continue
 		}
 		if err := detectCycle(m.ModelName, nil); err != nil {
@@ -326,17 +358,21 @@ func (c *Config) buildResolvedChains() error {
 	}
 
 	// Pass 4: flatten all non-wildcard entries into resolvedChains.
-	chains := make(map[string][]ModelMapping, len(c.ModelList))
+	chains := make(map[string][]DispatchTarget, len(c.ModelList))
 
-	var flatten func(name string) ([]ModelMapping, error)
-	flatten = func(name string) ([]ModelMapping, error) {
+	var flatten func(name string) ([]DispatchTarget, error)
+	flatten = func(name string) ([]DispatchTarget, error) {
 		if chain, ok := chains[name]; ok {
 			return chain, nil // already computed
 		}
 		idx, ok := byName[name]
 		if !ok {
 			if wm := resolveWildcard(name); wm != nil {
-				chain := []ModelMapping{*wm}
+				chain := []DispatchTarget{{
+					Provider:      wm.Provider,
+					UpstreamModel: wm.UpstreamModel,
+					Metadata:      wm.Metadata,
+				}}
 				chains[name] = chain
 				return chain, nil
 			}
@@ -345,12 +381,16 @@ func (c *Config) buildResolvedChains() error {
 		m := c.ModelList[idx]
 		if len(m.Fallbacks) == 0 {
 			// Direct entry: chain of one.
-			chain := []ModelMapping{m}
+			chain := []DispatchTarget{{
+				Provider:      m.Provider,
+				UpstreamModel: m.UpstreamModel,
+				Metadata:      m.Metadata,
+			}}
 			chains[name] = chain
 			return chain, nil
 		}
 		// Virtual entry: expand each fallback recursively.
-		var chain []ModelMapping
+		var chain []DispatchTarget
 		for _, ref := range m.Fallbacks {
 			sub, err := flatten(ref)
 			if err != nil {
@@ -363,7 +403,7 @@ func (c *Config) buildResolvedChains() error {
 	}
 
 	for _, m := range c.ModelList {
-		if strings.HasSuffix(m.ModelName, "/*") {
+		if m.IsWildcard() {
 			continue
 		}
 		if _, err := flatten(m.ModelName); err != nil {
@@ -462,7 +502,7 @@ func (c *Config) FindProvider(name string) (*ProviderConfig, error) {
 //  3. Exact scan of ModelList (fallback for Config values constructed directly
 //     in tests without calling Load, which skips resolvedChains population).
 //  4. No match — return error.
-func (c *Config) FindModel(modelName string) ([]ModelMapping, error) {
+func (c *Config) FindModel(modelName string) ([]DispatchTarget, error) {
 	// Pass 1: pre-computed chains (populated by Load).
 	if c.resolvedChains != nil {
 		if chain, ok := c.resolvedChains[modelName]; ok {
@@ -474,30 +514,66 @@ func (c *Config) FindModel(modelName string) ([]ModelMapping, error) {
 		// Do a linear exact scan so existing unit tests continue to work.
 		for i := range c.ModelList {
 			if c.ModelList[i].ModelName == modelName {
-				return []ModelMapping{c.ModelList[i]}, nil
+				m := c.ModelList[i]
+				return []DispatchTarget{{
+					Provider:      m.Provider,
+					UpstreamModel: m.UpstreamModel,
+					Metadata:      m.Metadata,
+				}}, nil
 			}
 		}
 	}
 
 	// Pass 2: wildcard scan (entries ending in "/*").
 	for i := range c.ModelList {
-		pattern := c.ModelList[i].ModelName
-		if !strings.HasSuffix(pattern, "/*") {
+		prefix := c.ModelList[i].WildcardPrefix()
+		if prefix == "" {
 			continue
 		}
-		prefix := pattern[:len(pattern)-2] // strip "/*"
-		if strings.HasPrefix(modelName, prefix+"/") {
-			suffix := modelName[len(prefix)+1:]
-			if suffix == "" {
-				return nil, fmt.Errorf("invalid model name: %s (empty model after prefix)", modelName)
-			}
-			return []ModelMapping{{
-				ModelName:     modelName,
+		if suffix, ok := MatchesWildcard(prefix, modelName); ok {
+			return []DispatchTarget{{
 				Provider:      c.ModelList[i].Provider,
 				UpstreamModel: suffix,
+				Metadata:      c.ModelList[i].Metadata,
 			}}, nil
 		}
 	}
 
 	return nil, fmt.Errorf("model not found: %s", modelName)
+}
+
+// ResolveModel finds the config entry for a model name. For wildcard-resolved
+// models (e.g. "chatgpt/gpt-5.4" matching "chatgpt/*"), it returns the
+// wildcard entry as the config entry and the computed upstream model name.
+// Returns ok=false if the name doesn't match any config entry.
+func (c *Config) ResolveModel(name string) (entry *ModelMapping, upstreamModel string, ok bool) {
+	// Exact match.
+	for i := range c.ModelList {
+		if c.ModelList[i].ModelName == name {
+			return &c.ModelList[i], c.ModelList[i].UpstreamModel, true
+		}
+	}
+	// Wildcard match.
+	for i := range c.ModelList {
+		prefix := c.ModelList[i].WildcardPrefix()
+		if prefix == "" {
+			continue
+		}
+		if suffix, matched := MatchesWildcard(prefix, name); matched {
+			return &c.ModelList[i], suffix, true
+		}
+	}
+	return nil, "", false
+}
+
+// WildcardPrefixes returns a map of wildcard prefix → ModelList index for all
+// wildcard entries. Used by the web layer for grouping models under wildcards.
+func (c *Config) WildcardPrefixes() map[string]int {
+	m := make(map[string]int)
+	for i := range c.ModelList {
+		if prefix := c.ModelList[i].WildcardPrefix(); prefix != "" {
+			m[prefix] = i
+		}
+	}
+	return m
 }

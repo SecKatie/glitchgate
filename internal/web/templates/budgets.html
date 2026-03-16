@@ -1,0 +1,178 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Budgets - glitchgate{{end}}
+
+{{define "head"}}
+<style>
+    .budget-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .budget-card {
+        padding: 1rem;
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<h2>Budget Management</h2>
+
+<div id="budget-status-section">
+    {{if .BudgetEntries}}
+    <h4 style="margin-bottom: 0.75rem;">Active Budgets</h4>
+    <div class="budget-cards">
+        {{range .BudgetEntries}}
+        <div class="card budget-card">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.25rem;">
+                <strong>{{.ScopeLabel}}</strong>
+                <small style="color: var(--pico-muted-color);">{{.Period}} &middot; resets {{.ResetAtFmt}}</small>
+            </div>
+            <progress value="{{printf "%.0f" .UtilizationPct}}" max="100"
+                style="margin-bottom: 0.25rem;{{if eq .Status "exceeded"}} --pico-progress-color: var(--pico-del-color);{{else if eq .Status "warning"}} --pico-progress-color: var(--pico-color-orange-500, #f59e0b);{{end}}"></progress>
+            <div style="display: flex; justify-content: space-between; font-size: 0.85em;">
+                <span>${{printf "%.2f" .SpendUSD}} / ${{printf "%.2f" .LimitUSD}}</span>
+                <span{{if eq .Status "exceeded"}} style="color: var(--pico-del-color); font-weight: bold;"{{else if eq .Status "warning"}} style="color: var(--pico-color-orange-500, #f59e0b);"{{end}}>{{printf "%.0f" .UtilizationPct}}% used</span>
+            </div>
+            {{if or (and (eq .Scope "global") $.IsGA) (and (eq .Scope "user") $.IsGA) (and (eq .Scope "team") $.IsAdmin) (and (eq .Scope "key") $.IsAdmin)}}
+            <details style="margin-top: 0.5rem; margin-bottom: 0;">
+                <summary style="font-size: 0.85em; cursor: pointer;">Edit</summary>
+                <form hx-post="/ui/api/budgets/{{.Scope}}{{if .ScopeID}}/{{.ScopeID}}{{end}}"
+                      hx-swap="none" hx-on::after-request="if(event.detail.successful) location.reload()"
+                      class="budget-form"
+                      style="margin-top: 0.5rem;">
+                    <label>
+                        <small>Limit ($)</small>
+                        <input type="number" name="limit" step="0.01" min="0.01" value="{{printf "%.2f" .LimitUSD}}" required>
+                    </label>
+                    <label class="budget-form-field--compact">
+                        <small>Period</small>
+                        <select name="period" required>
+                            <option value="daily"{{if eq .Period "daily"}} selected{{end}}>Daily</option>
+                            <option value="weekly"{{if eq .Period "weekly"}} selected{{end}}>Weekly</option>
+                            <option value="monthly"{{if eq .Period "monthly"}} selected{{end}}>Monthly</option>
+                        </select>
+                    </label>
+                    <div class="budget-form-actions">
+                        <button type="submit">Save</button>
+                        <button type="button"
+                                hx-post="/ui/api/budgets/{{.Scope}}{{if .ScopeID}}/{{.ScopeID}}{{end}}/clear"
+                                hx-swap="none" hx-on::after-request="if(event.detail.successful) location.reload()"
+                                class="secondary">Clear</button>
+                    </div>
+                </form>
+            </details>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+    {{else}}
+    <p style="color: var(--pico-muted-color);">No budgets configured yet.</p>
+    {{end}}
+</div>
+
+{{if $.IsAdmin}}
+<hr>
+<h4>Set New Budget</h4>
+<div style="padding: 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);">
+    <form id="new-budget-form" class="budget-form" style="gap: 0.75rem;">
+        <label>
+            <small>Scope</small>
+            <select id="new-budget-scope" required>
+                {{if $.IsGA}}<option value="global">Global</option>{{end}}
+                {{if $.IsGA}}<option value="user">User</option>{{end}}
+                <option value="team">Team</option>
+                <option value="key">API Key</option>
+            </select>
+        </label>
+        <label id="new-budget-id-label"{{if $.IsGA}} style="display: none;"{{end}}>
+            <small id="new-budget-id-text">ID</small>
+            <input type="text" id="new-budget-id-input" placeholder="user or team ID">
+        </label>
+        {{if .Keys}}
+        <label id="new-budget-key-label" style="display: none;">
+            <small>API Key</small>
+            <select id="new-budget-key-select">
+                <option value="">Select a key...</option>
+                {{range .Keys}}
+                <option value="{{.ID}}">{{.KeyPrefix}}...{{if .Label}} ({{.Label}}){{end}}</option>
+                {{end}}
+            </select>
+        </label>
+        {{end}}
+        <label class="budget-form-field--compact">
+            <small>Limit ($)</small>
+            <input type="number" id="new-budget-limit" name="limit" step="0.01" min="0.01" required>
+        </label>
+        <label class="budget-form-field--compact">
+            <small>Period</small>
+            <select id="new-budget-period" name="period" required>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly" selected>Monthly</option>
+            </select>
+        </label>
+        <button type="button" id="new-budget-submit">Create</button>
+    </form>
+</div>
+<script>
+(function() {
+    var scopeEl = document.getElementById('new-budget-scope');
+    var idLabel = document.getElementById('new-budget-id-label');
+    var idInput = document.getElementById('new-budget-id-input');
+    var idText  = document.getElementById('new-budget-id-text');
+    var keyLabel = document.getElementById('new-budget-key-label');
+    var keySelect = document.getElementById('new-budget-key-select');
+
+    function updateScopeUI() {
+        var v = scopeEl.value;
+        if (v === 'global') {
+            idLabel.style.display = 'none';
+            idInput.required = false;
+            if (keyLabel) keyLabel.style.display = 'none';
+            if (keySelect) keySelect.required = false;
+        } else if (v === 'key' && keySelect) {
+            idLabel.style.display = 'none';
+            idInput.required = false;
+            keyLabel.style.display = '';
+            keySelect.required = true;
+        } else {
+            idLabel.style.display = '';
+            idInput.required = true;
+            idText.textContent = v === 'user' ? 'User ID' : 'Team ID';
+            idInput.placeholder = v === 'user' ? 'user ID' : 'team ID';
+            if (keyLabel) keyLabel.style.display = 'none';
+            if (keySelect) keySelect.required = false;
+        }
+    }
+
+    scopeEl.addEventListener('change', updateScopeUI);
+    updateScopeUI();
+
+    document.getElementById('new-budget-submit').addEventListener('click', function() {
+        var scope = scopeEl.value;
+        var scopeId = '';
+        if (scope === 'key' && keySelect) {
+            scopeId = keySelect.value;
+        } else if (scope !== 'global') {
+            scopeId = idInput.value;
+        }
+        if (scope !== 'global' && !scopeId) {
+            alert('Please select or enter an ID for the budget scope.');
+            return;
+        }
+        var url = '/ui/api/budgets/' + scope;
+        if (scope !== 'global') { url += '/' + encodeURIComponent(scopeId); }
+        htmx.ajax('POST', url, {
+            swap: 'none',
+            values: {
+                limit: document.getElementById('new-budget-limit').value,
+                period: document.getElementById('new-budget-period').value
+            }
+        }).then(function() { location.reload(); });
+    });
+})();
+</script>
+{{end}}
+{{end}}

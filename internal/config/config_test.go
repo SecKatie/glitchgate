@@ -43,52 +43,46 @@ func TestFindModelWildcard(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		model         string
-		wantProvider  string
-		wantUpstream  string
-		wantModelName string
-		wantErr       string
+		name         string
+		model        string
+		wantProvider string
+		wantUpstream string
+		wantErr      string
 	}{
 		{
-			name:          "exact match",
-			model:         "claude-sonnet",
-			wantProvider:  "anthropic",
-			wantUpstream:  "claude-sonnet-4-20250514",
-			wantModelName: "claude-sonnet",
+			name:         "exact match",
+			model:        "claude-sonnet",
+			wantProvider: "anthropic",
+			wantUpstream: "claude-sonnet-4-20250514",
 		},
 		{
-			name:          "wildcard match strips prefix",
-			model:         "claude_max/claude-opus-4-20250514",
-			wantProvider:  "claude-max",
-			wantUpstream:  "claude-opus-4-20250514",
-			wantModelName: "claude_max/claude-opus-4-20250514",
+			name:         "wildcard match strips prefix",
+			model:        "claude_max/claude-opus-4-20250514",
+			wantProvider: "claude-max",
+			wantUpstream: "claude-opus-4-20250514",
 		},
 		{
-			name:          "exact match takes priority over wildcard",
-			model:         "claude_max/claude-sonnet-4-20250514",
-			wantProvider:  "anthropic-override",
-			wantUpstream:  "claude-sonnet-4-20250514",
-			wantModelName: "claude_max/claude-sonnet-4-20250514",
+			name:         "exact match takes priority over wildcard",
+			model:        "claude_max/claude-sonnet-4-20250514",
+			wantProvider: "anthropic-override",
+			wantUpstream: "claude-sonnet-4-20250514",
 		},
 		{
-			name:          "different wildcard prefix",
-			model:         "other/some-model",
-			wantProvider:  "other-provider",
-			wantUpstream:  "some-model",
-			wantModelName: "other/some-model",
+			name:         "different wildcard prefix",
+			model:        "other/some-model",
+			wantProvider: "other-provider",
+			wantUpstream: "some-model",
 		},
 		{
-			name:          "nested slashes preserved in suffix",
-			model:         "claude_max/org/model-name",
-			wantProvider:  "claude-max",
-			wantUpstream:  "org/model-name",
-			wantModelName: "claude_max/org/model-name",
+			name:         "nested slashes preserved in suffix",
+			model:        "claude_max/org/model-name",
+			wantProvider: "claude-max",
+			wantUpstream: "org/model-name",
 		},
 		{
 			name:    "empty suffix returns error",
 			model:   "claude_max/",
-			wantErr: "invalid model name",
+			wantErr: "model not found",
 		},
 		{
 			name:    "no match returns error",
@@ -115,7 +109,6 @@ func TestFindModelWildcard(t *testing.T) {
 			result := chain[0]
 			require.Equal(t, tt.wantProvider, result.Provider)
 			require.Equal(t, tt.wantUpstream, result.UpstreamModel)
-			require.Equal(t, tt.wantModelName, result.ModelName)
 		})
 	}
 }

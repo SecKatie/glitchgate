@@ -1,0 +1,70 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Audit Log — glitchgate{{end}}
+
+{{define "content"}}
+<h2>Audit Log</h2>
+
+<form class="filter-bar" method="get" action="/ui/audit">
+    <div>
+        <label for="action">Action</label>
+        <select name="action" id="action">
+            <option value="">All</option>
+            {{range .Actions}}
+            <option value="{{.}}"{{if eq . $.FilterAction}} selected{{end}}>{{.}}</option>
+            {{end}}
+        </select>
+    </div>
+    <div>
+        <label for="from">From</label>
+        <input type="date" name="from" id="from" value="{{.From}}">
+    </div>
+    <div>
+        <label for="to">To</label>
+        <input type="date" name="to" id="to" value="{{.To}}">
+    </div>
+    <div>
+        <button type="submit" style="height:2.5rem;margin-bottom:0">Filter</button>
+    </div>
+</form>
+
+{{if .Events}}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Action</th>
+            <th>Key Prefix</th>
+            <th>Detail</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Events}}
+        <tr>
+            <td style="white-space:nowrap">{{fmtET .CreatedAt "Jan 2 3:04 PM"}}</td>
+            <td class="mono">{{.Action}}</td>
+            <td class="mono">{{if .KeyPrefix}}{{.KeyPrefix}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td>{{if .Detail}}{{.Detail}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+</figure>
+
+{{if gt .TotalPages 1}}
+<div class="pagination">
+    {{if gt .Page 1}}
+    <a href="/ui/audit?page={{subtract .Page 1}}{{if .FilterAction}}&action={{.FilterAction}}{{end}}{{if .From}}&from={{.From}}{{end}}{{if .To}}&to={{.To}}{{end}}" role="button" class="outline">Previous</a>
+    {{end}}
+    <span>Page {{.Page}} of {{.TotalPages}}</span>
+    {{if lt .Page .TotalPages}}
+    <a href="/ui/audit?page={{add .Page 1}}{{if .FilterAction}}&action={{.FilterAction}}{{end}}{{if .From}}&from={{.From}}{{end}}{{if .To}}&to={{.To}}{{end}}" role="button" class="outline">Next</a>
+    {{end}}
+</div>
+{{end}}
+
+{{else}}
+<p>No audit events found{{if or .FilterAction .From .To}} matching the current filters{{end}}.</p>
+{{end}}
+{{end}}

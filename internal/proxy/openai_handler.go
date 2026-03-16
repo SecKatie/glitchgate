@@ -215,9 +215,9 @@ func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oa
 				RequestBody: rawBody,
 				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
 					if oaiReq.Stream {
-						return h.handleOpenAIStreaming(w, provResp, mapping.ModelName)
+						return h.handleOpenAIStreaming(w, provResp, oaiReq.Model)
 					}
-					return h.handleOpenAINonStreaming(w, provResp, mapping.ModelName)
+					return h.handleOpenAINonStreaming(w, provResp, oaiReq.Model)
 				},
 			}, false
 		},
@@ -234,7 +234,7 @@ func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oa
 // without translating through Anthropic format.
 func (h *OpenAIHandler) buildOpenAINativeRoute(w http.ResponseWriter, r *http.Request,
 	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
-	mapping *config.ModelMapping,
+	mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	// Replace model name in the raw JSON body to preserve all original fields.
 	var bodyMap map[string]any
@@ -333,7 +333,7 @@ func (h *OpenAIHandler) handleOpenAINativeStreaming(ctx context.Context, w http.
 // API upstream. Translates CC→Responses on request and Responses→CC on response.
 func (h *OpenAIHandler) buildResponsesRoute(w http.ResponseWriter, r *http.Request,
 	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
-	mapping *config.ModelMapping,
+	mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	// Translate CC to Responses API format.
 	oaiReqCopy := *oaiReq
@@ -360,9 +360,9 @@ func (h *OpenAIHandler) buildResponsesRoute(w http.ResponseWriter, r *http.Reque
 		RequestBody: rawBody,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
 			if oaiReq.Stream {
-				return h.handleResponsesProviderStreamingToCC(w, provResp, mapping.ModelName)
+				return h.handleResponsesProviderStreamingToCC(w, provResp, oaiReq.Model)
 			}
-			return h.handleResponsesProviderNonStreamingToCC(w, provResp, mapping.ModelName)
+			return h.handleResponsesProviderNonStreamingToCC(w, provResp, oaiReq.Model)
 		},
 	}, false
 }

@@ -36,11 +36,29 @@
         </div>
     </div>
 
-    {{if or $sa.Categories (and $sa.CumulativeData (gt (len $sa.CumulativeData) 1))}}
-    <details style="margin-bottom: 1rem;">
-        <summary>Rate Breakdown &amp; Cumulative Trend</summary>
+    {{if and $sa.CumulativeData (gt (len $sa.CumulativeData) 1)}}
+    <h4>Cumulative Provider Subsidy</h4>
+    <figure>
+        <div class="bar-chart subsidy-chart">
+            {{range $sa.CumulativeData}}
+            <div class="bar-col" title="{{.Date}}: Provider loss ${{printf "%.2f" .CumulativeSubsidy}} (API: ${{printf "%.2f" .CumulativeAPICost}}, Sub: ${{printf "%.2f" .CumulativeSubCost}})">
+                <div class="bar-val">${{printf "%.0f" .CumulativeSubsidy}}</div>
+                <div class="bar subsidy-bar" style="height: {{if gt $sa.MaxCumulativeSubsidy 0.0}}{{barPct .CumulativeSubsidy $sa.MaxCumulativeSubsidy}}%{{else}}2px{{end}};"></div>
+            </div>
+            {{end}}
+        </div>
+        <div class="bar-labels">
+            {{range $sa.CumulativeData}}
+            <div class="bar-date">{{shortDate .Date}}</div>
+            {{end}}
+        </div>
+    </figure>
+    {{end}}
 
-        {{if $sa.Categories}}
+    {{if $sa.Categories}}
+    <details style="margin-bottom: 1rem;">
+        <summary>Rate Breakdown</summary>
+
         <figure style="margin-top: 0.75rem;">
         <table class="token-detail">
             <thead>
@@ -91,26 +109,6 @@
             </tbody>
         </table>
         </figure>
-        {{end}}
-
-        {{if and $sa.CumulativeData (gt (len $sa.CumulativeData) 1)}}
-        <h4 style="margin-top: 1rem;">Cumulative Provider Subsidy</h4>
-        <figure>
-            <div class="bar-chart subsidy-chart">
-                {{range $sa.CumulativeData}}
-                <div class="bar-col" title="{{.Date}}: Provider loss ${{printf "%.2f" .CumulativeSubsidy}} (API: ${{printf "%.2f" .CumulativeAPICost}}, Sub: ${{printf "%.2f" .CumulativeSubCost}})">
-                    <div class="bar-val">${{printf "%.0f" .CumulativeSubsidy}}</div>
-                    <div class="bar subsidy-bar" style="height: {{if gt $sa.MaxCumulativeSubsidy 0.0}}{{barPct .CumulativeSubsidy $sa.MaxCumulativeSubsidy}}%{{else}}2px{{end}};"></div>
-                </div>
-                {{end}}
-            </div>
-            <div class="bar-labels">
-                {{range $sa.CumulativeData}}
-                <div class="bar-date">{{shortDate .Date}}</div>
-                {{end}}
-            </div>
-        </figure>
-        {{end}}
     </details>
     {{end}}
 </section>

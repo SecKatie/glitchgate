@@ -81,6 +81,7 @@ type RequestLogStore interface {
 	ListDistinctModels(ctx context.Context) ([]string, error)
 	ListDistinctStatuses(ctx context.Context) ([]int, error)
 	CountLogsSince(ctx context.Context, sinceID string, params ListLogsParams) (int64, error)
+	GetActivityStats(ctx context.Context, since time.Time) (*ActivityStats, error)
 }
 
 // CostQueryStore contains cost and billing analytics queries.
@@ -95,6 +96,7 @@ type CostQueryStore interface {
 // ModelUsageStore contains per-model usage statistics queries.
 type ModelUsageStore interface {
 	GetModelUsageSummary(ctx context.Context, modelName string) (*ModelUsageSummary, error)
+	GetModelUsageSummaryByUpstream(ctx context.Context, providerName, upstreamModel string) (*ModelUsageSummary, error)
 	GetAllModelUsageSummaries(ctx context.Context) (map[string]*ModelUsageSummary, error)
 	GetModelCostPricingGroups(ctx context.Context, modelName string) ([]CostPricingGroup, error)
 	GetModelLatencyTimeseries(ctx context.Context, modelName string) ([]ModelLatencyTimeseriesEntry, error)
@@ -140,6 +142,22 @@ type BudgetAdminStore interface {
 	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
 }
 
+// AuditStore contains query operations for the audit event log.
+type AuditStore interface {
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	ListAuditEvents(ctx context.Context, params ListAuditParams) ([]AuditEvent, int64, error)
+	ListDistinctAuditActions(ctx context.Context) ([]string, error)
+}
+
+// ListAuditParams controls filtering and pagination for audit event queries.
+type ListAuditParams struct {
+	Action string
+	From   string // UTC datetime
+	To     string // UTC datetime
+	Page   int
+	Limit  int
+}
+
 // Store defines all data-access operations required by the proxy. It composes
 // narrow interfaces so that consumers can depend on the smallest surface they
 // need. Prefer accepting a narrow interface for new code.
@@ -159,6 +177,7 @@ type Store interface {
 	MaintenanceStore
 	BudgetCheckStore
 	BudgetAdminStore
+	AuditStore
 
 	Migrate(ctx context.Context) error
 	Close() error
@@ -172,8 +191,9 @@ type ModelUsageSummary struct {
 	CacheReadInputTokens     int64
 	OutputTokens             int64
 	TotalCostUSD             float64
-	ProviderName             string // most-recently-seen configured provider name from logs (may be empty)
-	UpstreamModel            string // most-recently-seen model_upstream from logs (may be empty)
+	LogCostUSD               float64 // SUM of per-request cost_usd from logs (always available, even without pricing config)
+	ProviderName             string  // most-recently-seen configured provider name from logs (may be empty)
+	UpstreamModel            string  // most-recently-seen model_upstream from logs (may be empty)
 }
 
 // ProxyKey represents a full proxy-key row, including the hash.
@@ -295,6 +315,13 @@ type CostSummary struct {
 	TotalCacheCreationTokens int64
 	TotalCacheReadTokens     int64
 	TotalRequests            int64
+}
+
+// ActivityStats holds aggregate request activity metrics for a time period.
+type ActivityStats struct {
+	TotalRequests int64
+	ErrorCount    int64 // status >= 400
+	AvgLatencyMs  float64
 }
 
 // CostBreakdownEntry holds cost aggregated by a grouping dimension.

@@ -378,3 +378,21 @@ func (s *SQLiteStore) ListDistinctStatuses(ctx context.Context) ([]int, error) {
 
 	return statuses, nil
 }
+
+// GetActivityStats returns aggregate request metrics since the given timestamp.
+func (s *SQLiteStore) GetActivityStats(ctx context.Context, since time.Time) (*ActivityStats, error) {
+	const query = `SELECT
+		COUNT(*),
+		COUNT(CASE WHEN status >= 400 THEN 1 END),
+		COALESCE(AVG(latency_ms), 0)
+		FROM request_logs WHERE timestamp >= ?`
+
+	sinceUTC := since.UTC().Format("2006-01-02 15:04:05")
+	var stats ActivityStats
+	if err := s.db.QueryRowContext(ctx, query, sinceUTC).Scan(
+		&stats.TotalRequests, &stats.ErrorCount, &stats.AvgLatencyMs,
+	); err != nil {
+		return nil, fmt.Errorf("get activity stats: %w", err)
+	}
+	return &stats, nil
+}

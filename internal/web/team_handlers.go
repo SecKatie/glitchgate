@@ -58,6 +58,7 @@ func (h *TeamHandlers) TeamsPage(w http.ResponseWriter, r *http.Request) {
 		"AllUsers":  allUsers,
 		"IsGA":      isGA,
 	}
+	setNavData(data, sc)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "teams.html", data); err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
