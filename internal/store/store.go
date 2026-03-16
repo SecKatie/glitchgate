@@ -120,6 +120,12 @@ type MaintenanceStore interface {
 	PruneRequestLogs(ctx context.Context, before time.Time, limit int) (int64, error)
 }
 
+// BudgetCheckStore contains the operations needed for pre-flight budget enforcement.
+type BudgetCheckStore interface {
+	GetApplicableBudgets(ctx context.Context, proxyKeyID string) ([]ApplicableBudget, error)
+	GetSpendSince(ctx context.Context, scope, scopeID string, since time.Time) (float64, error)
+}
+
 // Store defines all data-access operations required by the proxy. It composes
 // narrow interfaces so that consumers can depend on the smallest surface they
 // need. Prefer accepting a narrow interface for new code.
@@ -137,6 +143,7 @@ type Store interface {
 	OIDCStateStore
 	OIDCUserStore
 	MaintenanceStore
+	BudgetCheckStore
 
 	Migrate(ctx context.Context) error
 	Close() error
@@ -194,6 +201,7 @@ type RequestLogEntry struct {
 	ErrorDetails             *string
 	IsStreaming              bool
 	FallbackAttempts         int64
+	CostUSD                  *float64
 }
 
 // ListLogsParams controls filtering, sorting, and pagination for log listing.
@@ -386,6 +394,24 @@ type TeamWithMemberCount struct {
 type BudgetPolicy struct {
 	LimitUSD *float64
 	Period   *string
+}
+
+// ApplicableBudget represents a single budget that applies to a request.
+type ApplicableBudget struct {
+	Scope    string // "global", "user", "team", "key"
+	ScopeID  string // entity ID ("" for global)
+	LimitUSD float64
+	Period   string // "daily", "weekly", "monthly"
+}
+
+// BudgetViolation holds details about a budget limit that was exceeded.
+type BudgetViolation struct {
+	Scope    string
+	ScopeID  string
+	Period   string
+	LimitUSD float64
+	SpendUSD float64
+	ResetAt  time.Time
 }
 
 // TeamMembership records a user's assignment to a team.

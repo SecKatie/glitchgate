@@ -19,19 +19,21 @@ import (
 
 // ResponsesHandler is the proxy HTTP handler for Responses API requests.
 type ResponsesHandler struct {
-	cfg        *config.Config
-	providers  map[string]provider.Provider
-	calculator *pricing.Calculator
-	logger     *AsyncLogger
+	cfg           *config.Config
+	providers     map[string]provider.Provider
+	calculator    *pricing.Calculator
+	logger        *AsyncLogger
+	budgetChecker *BudgetChecker
 }
 
 // NewResponsesHandler creates a new Responses API proxy handler.
-func NewResponsesHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger) *ResponsesHandler {
+func NewResponsesHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker) *ResponsesHandler {
 	return &ResponsesHandler{
-		cfg:        cfg,
-		providers:  providers,
-		calculator: calc,
-		logger:     logger,
+		cfg:           cfg,
+		providers:     providers,
+		calculator:    calc,
+		logger:        logger,
+		budgetChecker: bc,
 	}
 }
 
@@ -109,12 +111,25 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxyKeyID = pk.ID
 	}
 
+	if h.budgetChecker != nil && proxyKeyID != "" {
+		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
+			slog.Warn("budget check error", "error", err)
+		} else if violation != nil {
+			writeResponsesError(w, http.StatusTooManyRequests, "budget_exceeded",
+				fmt.Sprintf("Budget exceeded: %s %s limit $%.2f, spent $%.2f, resets %s",
+					violation.Scope, violation.Period, violation.LimitUSD, violation.SpendUSD,
+					violation.ResetAt.In(h.budgetChecker.tz).Format(time.RFC3339)))
+			return
+		}
+	}
+
 	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
 		SourceFormat: "responses",
 		ProxyKeyID:   proxyKeyID,
 		ModelRequest: req.Model,
 		IsStreaming:  isStreaming,
 		Start:        start,
+		Calculator:   h.calculator,
 	}, h.routeBuilders(w, r, body, &req, isStreaming),
 		newPipelineCallbacks(w, writeResponsesError, "server_error"))
 }

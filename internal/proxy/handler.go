@@ -25,19 +25,21 @@ func providerNameFor(prov provider.Provider) string {
 
 // Handler is the core proxy HTTP handler for Anthropic-compatible requests.
 type Handler struct {
-	cfg        *config.Config
-	providers  map[string]provider.Provider
-	calculator *pricing.Calculator
-	logger     *AsyncLogger
+	cfg           *config.Config
+	providers     map[string]provider.Provider
+	calculator    *pricing.Calculator
+	logger        *AsyncLogger
+	budgetChecker *BudgetChecker
 }
 
 // NewHandler creates a new proxy handler.
-func NewHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger) *Handler {
+func NewHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker) *Handler {
 	return &Handler{
-		cfg:        cfg,
-		providers:  providers,
-		calculator: calc,
-		logger:     logger,
+		cfg:           cfg,
+		providers:     providers,
+		calculator:    calc,
+		logger:        logger,
+		budgetChecker: bc,
 	}
 }
 
@@ -90,12 +92,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxyKeyID = pk.ID
 	}
 
+	if h.budgetChecker != nil && proxyKeyID != "" {
+		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
+			slog.Warn("budget check error", "error", err)
+		} else if violation != nil {
+			writeAnthropicError(w, http.StatusTooManyRequests, "budget_exceeded",
+				fmt.Sprintf("Budget exceeded: %s %s limit $%.2f, spent $%.2f, resets %s",
+					violation.Scope, violation.Period, violation.LimitUSD, violation.SpendUSD,
+					violation.ResetAt.In(h.budgetChecker.tz).Format(time.RFC3339)))
+			return
+		}
+	}
+
 	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
 		SourceFormat: "anthropic",
 		ProxyKeyID:   proxyKeyID,
 		ModelRequest: reqBody.Model,
 		IsStreaming:  reqBody.Stream,
 		Start:        start,
+		Calculator:   h.calculator,
 	}, h.routeBuilders(w, r, body, &reqBody),
 		newPipelineCallbacks(w, writeAnthropicError, "api_error"))
 }
