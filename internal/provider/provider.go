@@ -36,7 +36,7 @@ type Provider interface {
 	// authenticates with the upstream service.
 	AuthMode() string
 	// APIFormat returns the native API format the provider speaks upstream.
-	// Valid values: "anthropic" (Anthropic Messages API) or "openai" (OpenAI Chat Completions API).
+	// Valid values include "anthropic", "openai", "responses", and "gemini".
 	APIFormat() string
 	// SendRequest forwards a translated request to the upstream provider.
 	SendRequest(ctx context.Context, req *Request) (*Response, error)

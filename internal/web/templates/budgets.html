@@ -76,6 +76,7 @@
 <hr>
 <h4 id="set-budget">Set New Budget</h4>
 <div style="padding: 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);">
+    <div id="budget-error" style="display:none;padding:0.5rem 1rem;border-radius:var(--pico-border-radius);margin-bottom:0.75rem;background:var(--pico-del-color);color:#fff"></div>
     <form id="new-budget-form" class="budget-form" style="gap: 0.75rem;">
         <label>
             <small>Scope</small>
@@ -150,6 +151,13 @@
     scopeEl.addEventListener('change', updateScopeUI);
     updateScopeUI();
 
+    function showBudgetError(msg) {
+        var el = document.getElementById('budget-error');
+        el.textContent = msg;
+        el.style.display = '';
+        setTimeout(function() { el.style.display = 'none'; }, 5000);
+    }
+
     document.getElementById('new-budget-submit').addEventListener('click', function() {
         var scope = scopeEl.value;
         var scopeId = '';
@@ -159,7 +167,7 @@
             scopeId = idInput.value;
         }
         if (scope !== 'global' && !scopeId) {
-            alert('Please select or enter an ID for the budget scope.');
+            showBudgetError('Please select or enter an ID for the budget scope.');
             return;
         }
         var url = '/ui/api/budgets/' + scope;

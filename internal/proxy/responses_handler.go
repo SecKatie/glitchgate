@@ -227,6 +227,9 @@ func (h *ResponsesHandler) routeBuilders(
 				},
 			}, false
 		},
+		"gemini": func(attempt chainAttempt) (*routePlan, bool) {
+			return h.buildGeminiRoute(w, r, req, body, isStreaming, &attempt.Mapping)
+		},
 	}
 }
 
@@ -528,6 +531,161 @@ func (h *ResponsesHandler) handleOpenAICCProviderStreaming(w http.ResponseWriter
 		Body:            result.Body,
 		ErrDetails:      errDetails,
 		IsStreaming:     true,
+	}
+}
+
+// buildGeminiRoute handles Responses API requests that need to be sent to a
+// native Gemini (Vertex AI) provider. Translates Responses→Gemini on request
+// and Gemini→Responses on response.
+func (h *ResponsesHandler) buildGeminiRoute(
+	w http.ResponseWriter, r *http.Request,
+	req *translate.ResponsesRequest, rawBody []byte, isStreaming bool,
+	mapping *config.DispatchTarget,
+) (*routePlan, bool) {
+	gemReq, err := translate.ResponsesToGeminiRequest(req)
+	if err != nil {
+		writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
+		return nil, true
+	}
+
+	gemBody, err := json.Marshal(gemReq)
+	if err != nil {
+		writeResponsesError(w, http.StatusInternalServerError, "server_error", "Internal server error")
+		return nil, true
+	}
+
+	forceNonStream := false
+	if provCfg, cfgErr := h.cfg.FindProvider(mapping.Provider); cfgErr == nil && provCfg.Stream != nil && !*provCfg.Stream {
+		forceNonStream = true
+	}
+
+	return &routePlan{
+		ProviderRequest: &provider.Request{
+			Body:        gemBody,
+			Headers:     r.Header.Clone(),
+			Model:       mapping.UpstreamModel,
+			IsStreaming: isStreaming && !forceNonStream,
+		},
+		RequestBody: rawBody,
+		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			switch {
+			case isStreaming && forceNonStream:
+				return h.handleGeminiForcedStreamToResponses(w, provResp, req.Model)
+			case isStreaming:
+				return h.handleGeminiStreamingToResponses(w, provResp, req.Model)
+			default:
+				return h.handleGeminiNonStreamingToResponses(w, provResp, req.Model)
+			}
+		},
+	}, false
+}
+
+func (h *ResponsesHandler) handleGeminiNonStreamingToResponses(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.StatusCode >= 400 {
+		s := string(resp.Body)
+		writeResponsesError(w, resp.StatusCode, "server_error", s)
+		return handlerResult{
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
+		}
+	}
+
+	respResp := translate.GeminiToResponsesResponse(resp.Body, modelRequested)
+
+	respBody, err := json.Marshal(respResp)
+	if err != nil {
+		writeResponsesError(w, http.StatusInternalServerError, "server_error", "Internal server error")
+		s := "Internal server error"
+		return handlerResult{Status: http.StatusInternalServerError, ErrDetails: &s}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(respBody); err != nil {
+		slog.Warn("write Responses response", "error", err)
+	}
+	return handlerResult{
+		InputTokens:          resp.InputTokens,
+		OutputTokens:         resp.OutputTokens,
+		CacheReadInputTokens: resp.CacheReadInputTokens,
+		ReasoningTokens:      resp.ReasoningTokens,
+		Status:               http.StatusOK,
+		Body:                 respBody,
+	}
+}
+
+func (h *ResponsesHandler) handleGeminiStreamingToResponses(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.Stream == nil {
+		return h.handleGeminiForcedStreamToResponses(w, resp, modelRequested)
+	}
+
+	result, err := translate.GeminiSSEToResponsesSSE(w, resp.Stream, modelRequested)
+
+	var errDetails *string
+	if err != nil {
+		errDetails = streamRelayErrorDetails(err)
+		if errDetails != nil {
+			slog.Warn("gemini stream relay error", "error", err)
+		}
+	}
+
+	status := resp.StatusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return handlerResult{
+		InputTokens:              result.InputTokens,
+		OutputTokens:             result.OutputTokens,
+		CacheCreationInputTokens: result.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.CacheReadInputTokens,
+		ReasoningTokens:          result.ReasoningTokens,
+		Status:                   status,
+		Body:                     result.Body,
+		ErrDetails:               errDetails,
+		IsStreaming:              true,
+	}
+}
+
+func (h *ResponsesHandler) handleGeminiForcedStreamToResponses(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.StatusCode >= 400 {
+		s := string(resp.Body)
+		writeResponsesError(w, resp.StatusCode, "server_error", s)
+		return handlerResult{
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
+			IsStreaming:          true,
+		}
+	}
+
+	respResp := translate.GeminiToResponsesResponse(resp.Body, modelRequested)
+	result, err := SynthesizeResponsesSSE(w, respResp)
+
+	var errDetails *string
+	if err != nil {
+		s := fmt.Sprintf("stream synthesis error: %v", err)
+		errDetails = &s
+		slog.Warn("stream synthesis error", "error", err)
+	}
+
+	return handlerResult{
+		InputTokens:          resp.InputTokens,
+		OutputTokens:         resp.OutputTokens,
+		CacheReadInputTokens: resp.CacheReadInputTokens,
+		ReasoningTokens:      resp.ReasoningTokens,
+		Status:               http.StatusOK,
+		Body:                 result.Body,
+		ErrDetails:           errDetails,
+		IsStreaming:          true,
 	}
 }
 

@@ -30,6 +30,7 @@ type ModelListItem struct {
 	IsVirtual       bool
 	IsWildcard      bool
 	IsUnconfigured  bool // seen in logs but not in model_list config
+	IsLogGroup      bool // synthetic group header for all unconfigured models
 	Fallbacks       []string
 	Pricing         *pricing.Entry
 	HasPricing      bool
@@ -385,6 +386,36 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Group unconfigured (log-only) models into a single collapsible section.
+	var logOnly []ModelListItem
+	filtered := items[:0]
+	for _, it := range items {
+		if it.IsUnconfigured {
+			logOnly = append(logOnly, it)
+		} else {
+			filtered = append(filtered, it)
+		}
+	}
+	if len(logOnly) > 0 {
+		var groupSpend float64
+		var groupReqs int64
+		for _, ch := range logOnly {
+			groupSpend += ch.TotalSpendUSD
+			groupReqs += ch.RequestCount
+		}
+		filtered = append(filtered, ModelListItem{
+			ModelName:     "Seen in logs",
+			IsLogGroup:    true,
+			IsUnconfigured: true,
+			Children:      logOnly,
+			ChildCount:    len(logOnly),
+			TotalSpendUSD: groupSpend,
+			RequestCount:  groupReqs,
+			EncodedName:   "_log_group",
+		})
+		items = filtered
+	}
+
 	data := map[string]any{
 		"ActiveTab": "models",
 		"Models":    items,
@@ -648,10 +679,10 @@ func buildTPSChartSVG(entries []store.ModelLatencyTimeseriesEntry, tpsValues []f
 		}
 		x := (float64(idx) / float64(n-1)) * w
 		bucket := entries[idx].Bucket
-		// Format: "MM-DD HH:00" from "YYYY-MM-DD HH"
+		// Format: "MM-DD HH:00" from "YYYY-MM-DDTHH" or "YYYY-MM-DD HH"
 		lbl := bucket
 		if len(bucket) >= 13 {
-			lbl = bucket[5:13] + ":00"
+			lbl = bucket[5:10] + " " + bucket[11:13] + ":00"
 		}
 		labels = append(labels, ChartLabel{X: x, Label: lbl})
 	}

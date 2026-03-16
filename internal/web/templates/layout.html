@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{block "title" .}}glitchgate{{end}}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/ui/static/pico.min.css">
     <script src="/ui/static/htmx.min.js"></script>
     <style>
         :root {
@@ -78,10 +78,34 @@
             background: var(--pico-primary-background);
             color: var(--pico-primary-inverse);
         }
-        /* Active navigation */
-        .nav-active {
+        /* Responsive nav: hide aside on desktop, hide full links on mobile */
+        .nav-mobile { display: none; }
+        .nav-section-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem 0.25rem;
+            font-size: 0.7em;
             font-weight: 700;
-            text-decoration: underline;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--pico-muted-color);
+            margin-top: 0.25rem;
+        }
+        .nav-section-label::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--pico-muted-border-color);
+        }
+        @media (max-width: 992px) {
+            nav ul.nav-full { display: none; }
+            .nav-mobile { display: block; margin-bottom: 1.5rem; }
+            .nav-mobile > details > summary {
+                font-size: 1.1em;
+                font-weight: 600;
+                padding: 0.6rem 1rem;
+            }
         }
         /* Auto-refresh status indicator */
         .refresh-status {
@@ -270,15 +294,15 @@
             margin-left: 0.25rem;
             vertical-align: middle;
         }
-        /* Details/summary as clearly clickable section headers */
-        details > summary {
+        /* Details/summary as clearly clickable section headers (not in nav) */
+        main details:not(.dropdown) > summary {
             cursor: pointer;
             user-select: none;
             padding: 0.4rem 0.75rem;
             background: color-mix(in srgb, var(--pico-primary) 7%, transparent);
             transition: background 0.12s, color 0.12s;
         }
-        details > summary:hover {
+        main details:not(.dropdown) > summary:hover {
             background: color-mix(in srgb, var(--pico-primary) 16%, transparent);
             color: var(--pico-primary);
         }
@@ -362,41 +386,257 @@
             outline-offset: 2px;
             border-radius: var(--pico-border-radius);
         }
-        /* Nav user display */
-        .nav-user {
-            font-size: 0.8em;
+        /* ── Shared hero metric section ────────────────────────── */
+        .cost-hero {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            margin-bottom: 1.5rem;
+            padding: 1rem 1.5rem;
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+        }
+        .cost-hero-main { flex-shrink: 0; }
+        .cost-hero-label {
+            font-size: 0.8rem;
             color: var(--pico-muted-color);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .cost-hero-value {
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: var(--pico-primary);
+            font-variant-numeric: tabular-nums;
+            line-height: 1.1;
+        }
+        .cost-hero-stats {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            border-left: 1px solid var(--pico-muted-border-color);
+            padding-left: 2rem;
+        }
+        .cost-hero-stat { display: flex; flex-direction: column; }
+        .cost-hero-stat-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+        .cost-hero-stat-label {
+            font-size: 0.75rem;
+            color: var(--pico-muted-color);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        @media (max-width: 600px) {
+            .cost-hero {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+            .cost-hero-stats {
+                border-left: none;
+                padding-left: 0;
+                border-top: 1px solid var(--pico-muted-border-color);
+                padding-top: 1rem;
+            }
+        }
+        /* ── Shared bar chart ──────────────────────────────────── */
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 160px;
+            padding: 0 0 0.25rem 0;
+            border-bottom: 1px solid var(--pico-muted-border-color);
+            margin-bottom: 0.25rem;
+        }
+        .bar-chart .bar-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100%;
+            justify-content: flex-end;
+            min-width: 0;
+        }
+        .bar-chart .bar {
+            width: 80%;
+            max-width: 36px;
+            background: var(--pico-primary);
+            border-radius: 2px 2px 0 0;
+            min-height: 2px;
+            transition: opacity 0.15s;
+        }
+        .bar-chart .bar:hover { opacity: 0.75; }
+        .bar-chart .bar-val {
+            font-size: 0.55rem;
+            color: var(--pico-muted-color);
+            margin-bottom: 2px;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+        .bar-labels {
+            display: flex;
+            gap: 2px;
+        }
+        .bar-labels .bar-date {
+            flex: 1;
+            text-align: center;
+            font-size: 0.55rem;
+            color: var(--pico-muted-color);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+            visibility: hidden;
+        }
+        /* Show every 5th label (1st, 6th, 11th, …) and always the last */
+        .bar-labels .bar-date:first-child,
+        .bar-labels .bar-date:nth-child(5n+1),
+        .bar-labels .bar-date:last-child {
+            visibility: visible;
+        }
+        /* ── Shared subsidy styles ─────────────────────────────── */
+        .subsidy-analysis {
+            margin-bottom: 1rem;
+            padding: 1rem 0 0;
+        }
+        .subsidy-chart .subsidy-bar {
+            background: var(--pico-del-color);
+        }
+        .subsidy-savings {
+            color: var(--pico-ins-color);
+            font-weight: 600;
+        }
+        /* ── Role badges (shared across users + teams) ─────────── */
+        .role-badge {
+            display: inline-block;
+            padding: 0.15em 0.5em;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .role-global_admin { background: var(--pico-del-color); color: #fff; }
+        .role-team_admin { background: var(--pico-ins-color); color: #fff; }
+        .role-member { background: var(--pico-muted-border-color); color: var(--pico-color); }
+        /* ── Breadcrumb navigation ─────────────────────────────── */
+        .breadcrumb {
+            list-style: none;
+            display: flex;
+            gap: 0.4rem;
+            padding: 0;
+            margin: 0 0 1rem;
+            font-size: 0.9em;
+        }
+        .breadcrumb li + li::before {
+            content: "›";
+            margin-right: 0.4rem;
+            color: var(--pico-muted-color);
+        }
+        .breadcrumb li:last-child {
+            color: var(--pico-color);
+            font-weight: 600;
+        }
+        /* ── Utility classes ──────────────────────────────────── */
+        .muted-dash {
+            color: var(--pico-muted-color);
+        }
+        .text-muted {
+            color: var(--pico-muted-color);
+        }
+        .text-sm-muted {
+            color: var(--pico-muted-color);
+            font-size: 0.85em;
+        }
+        .btn-sm {
+            margin: 0;
+            padding: 0.15rem 0.5rem;
+            font-size: 0.8em;
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        .mb-0 { margin-bottom: 0; }
+        .nowrap { white-space: nowrap; }
+        /* ── Empty state container ─────────────────────────────── */
+        .empty-state {
+            text-align: center;
+            padding: 2.5rem 1.5rem;
+            border: 1px dashed var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+            color: var(--pico-muted-color);
+        }
+        .empty-state strong {
+            display: block;
+            margin-bottom: 0.25rem;
+            color: var(--pico-color);
         }
     </style>
     {{block "head" .}}{{end}}
 </head>
 <body>
     <main class="container">
-        <nav class="contrast">
+        <nav>
             <ul>
                 <li><strong>glitchgate</strong></li>
             </ul>
-            <ul>
-                <li><a href="/ui/dashboard"{{if eq .ActiveTab "dashboard"}} aria-current="page" class="nav-active"{{end}}>Dashboard</a></li>
-                <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page" class="nav-active"{{end}}>Logs</a></li>
-                <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page" class="nav-active"{{end}}>Costs</a></li>
-                <li><a href="/ui/budgets"{{if eq .ActiveTab "budgets"}} aria-current="page" class="nav-active"{{end}}>Budgets</a></li>
-                <li><a href="/ui/keys"{{if eq .ActiveTab "keys"}} aria-current="page" class="nav-active"{{end}}>Keys</a></li>
-                <li><a href="/ui/models"{{if eq .ActiveTab "models"}} aria-current="page" class="nav-active"{{end}}>Models</a></li>
-                <li><a href="/ui/providers"{{if eq .ActiveTab "providers"}} aria-current="page" class="nav-active"{{end}}>Providers</a></li>
-                <li><a href="/ui/audit"{{if eq .ActiveTab "audit"}} aria-current="page" class="nav-active"{{end}}>Audit</a></li>
-                <li><a href="/ui/users"{{if eq .ActiveTab "users"}} aria-current="page" class="nav-active"{{end}}>Users</a></li>
-                <li><a href="/ui/teams"{{if eq .ActiveTab "teams"}} aria-current="page" class="nav-active"{{end}}>Teams</a></li>
-                {{if .CurrentUser}}
-                <li><span class="nav-user" title="Logged in as {{.CurrentUser}}">{{.CurrentUser}}</span></li>
-                {{end}}
+            <ul class="nav-full">
+                <li><a href="/ui/dashboard"{{if eq .ActiveTab "dashboard"}} aria-current="page"{{end}}>Dashboard</a></li>
+                <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page"{{end}}>Logs</a></li>
+                <li><a href="/ui/models"{{if eq .ActiveTab "models"}} aria-current="page"{{end}}>Models</a></li>
+                <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page"{{end}}>Costs</a></li>
                 <li>
-                    <form method="post" action="/ui/api/logout" style="margin:0">
-                        <button type="submit" class="outline secondary" style="padding:0.25rem 0.75rem;margin:0">Logout</button>
+                    <details class="dropdown" role="list">
+                        <summary aria-haspopup="listbox">Admin</summary>
+                        <ul role="listbox">
+                            <li><a href="/ui/keys"{{if eq .ActiveTab "keys"}} aria-current="page"{{end}}>Keys</a></li>
+                            <li><a href="/ui/providers"{{if eq .ActiveTab "providers"}} aria-current="page"{{end}}>Providers</a></li>
+                            <li><a href="/ui/budgets"{{if eq .ActiveTab "budgets"}} aria-current="page"{{end}}>Budgets</a></li>
+                            <li><a href="/ui/users"{{if eq .ActiveTab "users"}} aria-current="page"{{end}}>Users</a></li>
+                            <li><a href="/ui/teams"{{if eq .ActiveTab "teams"}} aria-current="page"{{end}}>Teams</a></li>
+                            <li><a href="/ui/audit"{{if eq .ActiveTab "audit"}} aria-current="page"{{end}}>Audit</a></li>
+                        </ul>
+                    </details>
+                </li>
+                <li>
+                    <form method="post" action="/ui/api/logout" class="mb-0">
+                        <button type="submit" class="outline btn-sm">Logout</button>
                     </form>
                 </li>
             </ul>
         </nav>
+
+        <aside class="nav-mobile">
+            <details>
+                <summary>{{if eq .ActiveTab "dashboard"}}Dashboard{{else if eq .ActiveTab "logs"}}Logs{{else if eq .ActiveTab "models"}}Models{{else if eq .ActiveTab "costs"}}Costs{{else if eq .ActiveTab "keys"}}Keys{{else if eq .ActiveTab "providers"}}Providers{{else if eq .ActiveTab "budgets"}}Budgets{{else if eq .ActiveTab "audit"}}Audit{{else if eq .ActiveTab "users"}}Users{{else if eq .ActiveTab "teams"}}Teams{{else}}Menu{{end}}</summary>
+                <nav>
+                    <ul>
+                        <li><a href="/ui/dashboard"{{if eq .ActiveTab "dashboard"}} aria-current="page"{{end}}>Dashboard</a></li>
+                        <li><a href="/ui/logs"{{if eq .ActiveTab "logs"}} aria-current="page"{{end}}>Logs</a></li>
+                        <li><a href="/ui/models"{{if eq .ActiveTab "models"}} aria-current="page"{{end}}>Models</a></li>
+                        <li><a href="/ui/costs"{{if eq .ActiveTab "costs"}} aria-current="page"{{end}}>Costs</a></li>
+                    </ul>
+                    <small class="nav-section-label">Admin</small>
+                    <ul>
+                        <li><a href="/ui/keys"{{if eq .ActiveTab "keys"}} aria-current="page"{{end}}>Keys</a></li>
+                        <li><a href="/ui/providers"{{if eq .ActiveTab "providers"}} aria-current="page"{{end}}>Providers</a></li>
+                        <li><a href="/ui/budgets"{{if eq .ActiveTab "budgets"}} aria-current="page"{{end}}>Budgets</a></li>
+                        <li><a href="/ui/users"{{if eq .ActiveTab "users"}} aria-current="page"{{end}}>Users</a></li>
+                        <li><a href="/ui/teams"{{if eq .ActiveTab "teams"}} aria-current="page"{{end}}>Teams</a></li>
+                        <li><a href="/ui/audit"{{if eq .ActiveTab "audit"}} aria-current="page"{{end}}>Audit</a></li>
+                        <li>
+                            <form method="post" action="/ui/api/logout" class="mb-0">
+                                <button type="submit" class="outline btn-sm">Logout</button>
+                            </form>
+                        </li>
+                    </ul>
+                </nav>
+            </details>
+        </aside>
 
         {{block "content" .}}{{end}}
     </main>
@@ -475,11 +715,13 @@
     // Clipboard copy helper (used by log_detail.html copy buttons)
     // ---------------------------------------------------------------------------
     function copyText(btn, text) {
+        var orig = btn.textContent;
+        function done() {
+            btn.textContent = 'Copied!';
+            setTimeout(function() { btn.textContent = orig; }, 1500);
+        }
         if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(text).then(function() {
-                btn.textContent = '✓';
-                setTimeout(function() { btn.textContent = '⎘'; }, 1500);
-            });
+            navigator.clipboard.writeText(text).then(done);
         } else {
             var el = document.createElement('textarea');
             el.value = text;
@@ -489,10 +731,44 @@
             el.select();
             document.execCommand('copy'); // eslint-disable-line
             document.body.removeChild(el);
-            btn.textContent = '✓';
-            setTimeout(function() { btn.textContent = '⎘'; }, 1500);
+            done();
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // Flash message helper (used by users.html and teams.html)
+    // ---------------------------------------------------------------------------
+    function showFlash(container, msg, isError) {
+        var bg = isError ? 'var(--pico-del-color)' : 'var(--pico-ins-color)';
+        container.innerHTML = '<div style="padding:0.5rem 1rem;border-radius:var(--pico-border-radius);margin-bottom:1rem;background:' + bg + ';color:#fff">' + msg + '</div>';
+        setTimeout(function() { container.innerHTML = ''; }, 4000);
+    }
+    // ---------------------------------------------------------------------------
+    // Fetch with loading state: disables button, restores on complete
+    // ---------------------------------------------------------------------------
+    function fetchWithLoading(btn, url, opts) {
+        if (btn && btn.disabled) return Promise.resolve();
+        var origText = btn ? btn.textContent : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+        }
+        function restore() {
+            if (btn) {
+                btn.disabled = false;
+                btn.removeAttribute('aria-busy');
+                btn.textContent = origText;
+            }
+        }
+        return fetch(url, opts).then(function(r) {
+            restore();
+            return r;
+        }).catch(function(err) {
+            restore();
+            throw err;
+        });
+    }
+
     // ---------------------------------------------------------------------------
     // Clickable table rows (Issue #8)
     // ---------------------------------------------------------------------------

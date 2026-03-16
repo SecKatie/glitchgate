@@ -74,7 +74,7 @@
 {{end}}
 
 {{define "content"}}
-<h3>Teams</h3>
+<h2>Teams</h2>
 
 <div id="team-message"></div>
 
@@ -94,17 +94,31 @@
 
 {{if .Teams}}
 {{range .Teams}}
+{{$team := .}}
 <div class="team-card" id="team-card-{{.ID}}">
     <div class="team-card-header">
-        <h4 style="margin:0 0 0.25rem">{{.Name}} <small style="font-weight:400;color:var(--pico-muted-color)">({{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}})</small></h4>
+        <h4 class="mb-0">{{.Name}} <small class="text-muted" style="font-weight:400">({{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}})</small></h4>
         {{if $.IsGA}}
-        <button class="outline secondary" style="margin:0;padding:0.2rem 0.6rem;font-size:0.8em" onclick="deleteTeam('{{.ID}}','{{.Name}}')">Delete</button>
+        <button class="outline secondary btn-sm" onclick="deleteTeam('{{.ID}}','{{.Name}}')">Delete</button>
         {{end}}
     </div>
     {{if .Description}}<div class="team-meta">{{.Description}}</div>{{end}}
 
     <div id="members-{{.ID}}">
-        <!-- Members loaded inline from server render -->
+        {{if .Members}}
+        {{range .Members}}
+        <div class="member-row">
+            <span class="member-email">{{.Email}}</span>
+            <span class="role-badge role-{{.Role}}">{{.Role}}</span>
+            {{if $.IsGA}}
+            <button class="outline secondary btn-danger btn-sm"
+                onclick="removeMember('{{$team.ID}}','{{.ID}}','{{.Email}}')">Remove</button>
+            {{end}}
+        </div>
+        {{end}}
+        {{else}}
+        <small class="text-muted">No members yet</small>
+        {{end}}
     </div>
 
     {{if $.IsGA}}
@@ -121,23 +135,23 @@
 </div>
 {{end}}
 {{else}}
-<p style="color:var(--pico-muted-color);text-align:center;padding:2rem 0">No teams yet.{{if .IsGA}} <a href="#create-team-form">Create a team</a>.{{end}}</p>
+<div class="empty-state">
+    <strong>No teams yet</strong>
+    <p>Teams let you group users and manage budgets together.{{if .IsGA}} Use the form above to create your first team.{{end}}</p>
+</div>
 {{end}}
 
 <script>
 function showMsg(msg, isError) {
-    var el = document.getElementById('team-message');
-    el.innerHTML = '<div style="padding:0.5rem 1rem;border-radius:var(--pico-border-radius);margin-bottom:1rem;background:'
-        + (isError ? 'var(--pico-del-color)' : 'var(--pico-ins-color)')
-        + ';color:#fff">' + msg + '</div>';
-    setTimeout(function() { el.innerHTML = ''; }, 4000);
+    showFlash(document.getElementById('team-message'), msg, isError);
 }
 
 function createTeam(e) {
     e.preventDefault();
     var name = document.getElementById('team-name').value;
     var desc = document.getElementById('team-desc').value;
-    fetch('/ui/api/teams', {
+    var btn = document.querySelector('#create-team-form button[type="submit"]');
+    fetchWithLoading(btn, '/ui/api/teams', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: 'name=' + encodeURIComponent(name) + '&description=' + encodeURIComponent(desc)
@@ -155,7 +169,8 @@ function addMember(teamID) {
     var sel = document.getElementById('user-select-' + teamID);
     var userID = sel.value;
     if (!userID) { showMsg('Select a user first.', true); return; }
-    fetch('/ui/api/teams/' + teamID + '/members', {
+    var btn = sel.parentElement.querySelector('button');
+    fetchWithLoading(btn, '/ui/api/teams/' + teamID + '/members', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: 'user_id=' + encodeURIComponent(userID)
@@ -171,7 +186,9 @@ function addMember(teamID) {
 
 function removeMember(teamID, userID, email) {
     if (!confirm('Remove ' + email + ' from this team?')) return;
-    fetch('/ui/api/teams/' + teamID + '/members/' + userID, {method: 'DELETE'})
+    var row = event.target.closest('.member-row');
+    var btn = row ? row.querySelector('button') : null;
+    fetchWithLoading(btn, '/ui/api/teams/' + teamID + '/members/' + userID, {method: 'DELETE'})
         .then(function(r) {
             if (r.ok) {
                 showMsg('Member removed.', false);
@@ -184,7 +201,9 @@ function removeMember(teamID, userID, email) {
 
 function deleteTeam(teamID, teamName) {
     if (!confirm('Delete team "' + teamName + '"? All member assignments will be removed.')) return;
-    fetch('/ui/api/teams/' + teamID, {method: 'DELETE'})
+    var card = document.getElementById('team-card-' + teamID);
+    var btn = card ? card.querySelector('.team-card-header button') : null;
+    fetchWithLoading(btn, '/ui/api/teams/' + teamID, {method: 'DELETE'})
         .then(function(r) {
             if (r.ok) {
                 showMsg('Team deleted.', false);

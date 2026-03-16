@@ -55,7 +55,7 @@ func (s *SQLiteStore) GetApplicableBudgets(ctx context.Context, proxyKeyID strin
 // GetSpendSince returns the total cost_usd from request_logs since the given
 // timestamp for the specified scope.
 func (s *SQLiteStore) GetSpendSince(ctx context.Context, scope, scopeID string, since time.Time) (float64, error) {
-	sinceUTC := since.UTC().Format("2006-01-02 15:04:05")
+	sinceUTC := fmtTime(since)
 
 	var query string
 	var args []any

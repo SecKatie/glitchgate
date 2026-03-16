@@ -3,7 +3,7 @@
 {{define "title"}}Logs - glitchgate{{end}}
 
 {{define "content"}}
-<h3>Request Logs</h3>
+<h2>Request Logs</h2>
 
 <form id="filter-form" class="filter-bar" hx-get="/ui/api/logs" hx-target="#log-figure" hx-swap="outerHTML" hx-trigger="submit" hx-push-url="false">
     <div>
@@ -33,7 +33,7 @@
         <input type="date" id="to" name="to" value="{{.To}}">
     </div>
     <div>
-        <button type="submit" style="margin-bottom:0">Filter</button>
+        <button type="submit" class="mb-0">Filter</button>
     </div>
     <a href="#" id="clear-filters" style="display:none;font-size:0.85em;align-self:center" onclick="clearFilters(); return false;">Clear</a>
 </form>
@@ -42,14 +42,14 @@
     <small id="log-entry-count">{{.Total}} entries</small>
     <span style="display:flex;align-items:center;gap:0.75rem;">
         <small id="refresh-status" class="refresh-status">Auto-refreshing (10s)</small>
-        <button id="refresh-toggle" class="outline secondary" style="padding:0.1rem 0.5rem;font-size:0.8em;margin:0"
+        <button id="refresh-toggle" class="outline secondary btn-sm"
             onclick="toggleRefresh(this)">Pause</button>
     </span>
 </div>
 
 <div id="new-entries-banner" style="display:none" role="alert" class="new-entries-banner">
     <span><strong><span id="new-entries-count"></span> new entries</strong> — <a href="/ui/logs">view latest</a></span>
-    <button class="outline secondary" style="padding:0.1rem 0.4rem;font-size:0.8em;margin:0"
+    <button class="outline secondary btn-sm"
         onclick="document.getElementById('new-entries-banner').style.display='none'">×</button>
 </div>
 
@@ -64,7 +64,7 @@
 <table role="grid">
     <thead>
         <tr>
-            <th>Time (ET)</th>
+            <th>Time ({{tzAbbrev}})</th>
             <th>Model</th>
             <th>Key</th>
             <th>Status</th>

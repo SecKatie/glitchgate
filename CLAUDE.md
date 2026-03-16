@@ -105,7 +105,8 @@ internal/
 ├── provider/           # Provider interface
 │   ├── anthropic/      # Anthropic API client
 │   ├── openai/         # OpenAI-compatible client
-│   └── copilot/        # GitHub Copilot OAuth client
+│   ├── copilot/        # GitHub Copilot OAuth client
+│   └── vertex/         # Google Vertex AI Claude client
 ├── proxy/              # Core proxy handlers + SSE streaming + pipeline
 ├── store/              # SQLite data access + migrations
 │   └── migrations/     # goose migration files

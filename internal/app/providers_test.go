@@ -18,6 +18,7 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 		Providers: []config.ProviderConfig{
 			{Name: "chatgpt-pro", Type: "openai", AuthMode: "proxy_key", MonthlySubscriptionCost: float64ptr(20)},
 			{Name: "segment", Type: "openai", BaseURL: "https://api.synthetic.new/v1"},
+			{Name: "gemini-api", Type: "gemini", AuthMode: "proxy_key", APIKey: "test-gemini-key"},
 			{Name: "copilot", Type: "github_copilot"},
 		},
 		ModelList: []config.ModelMapping{
@@ -39,15 +40,17 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	require.NoError(t, err)
 
 	providers := registry.Providers()
-	require.Len(t, providers, 3)
+	require.Len(t, providers, 4)
 	require.Equal(t, "openai", providers["chatgpt-pro"].APIFormat())
 	require.Equal(t, "openai", providers["segment"].APIFormat())
+	require.Equal(t, "gemini", providers["gemini-api"].APIFormat())
 	require.Equal(t, "openai", providers["copilot"].APIFormat())
 
 	providerNames := registry.ProviderNames()
 	require.Equal(t, "chatgpt-pro", providerNames["chatgpt-pro"])
 	require.Equal(t, "chatgpt-pro", providerNames["openai:api.openai.com"])
 	require.Equal(t, "segment", providerNames["openai:api.synthetic.new"])
+	require.Equal(t, "gemini-api", providerNames["gemini:generativelanguage.googleapis.com"])
 	require.Equal(t, "copilot", providerNames["github_copilot:api.githubcopilot.com"])
 
 	subscriptions := registry.ProviderMonthlySubscriptions()
@@ -66,6 +69,11 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	segment, ok := calc.Lookup("segment", "hf:MiniMaxAI/MiniMax-M2.5")
 	require.True(t, ok)
 	require.Equal(t, 0.60, segment.InputPerMillion)
+
+	geminiFlash, ok := calc.Lookup("gemini-api", "gemini-2.5-flash")
+	require.True(t, ok)
+	require.Equal(t, 0.30, geminiFlash.InputPerMillion)
+	require.Equal(t, 2.50, geminiFlash.OutputPerMillion)
 
 	copilot, ok := calc.Lookup("copilot", "gpt-5.4")
 	require.True(t, ok)

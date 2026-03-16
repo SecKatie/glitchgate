@@ -3,7 +3,12 @@
 {{define "title"}}{{.ProviderName}} — glitchgate{{end}}
 
 {{define "content"}}
-<p><a href="/ui/providers">&larr; Back to Providers</a></p>
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+        <li><a href="/ui/providers">Providers</a></li>
+        <li>{{.ProviderName}}</li>
+    </ol>
+</nav>
 
 <h2>{{.ProviderName}}</h2>
 
@@ -41,10 +46,10 @@
         {{range .Models}}
         <tr data-href="/ui/models/{{.EncodedName}}">
             <td class="mono"><a href="/ui/models/{{.EncodedName}}" class="row-link">{{.ModelName}}</a></td>
-            <td class="mono">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
-            <td class="cost">{{if .InputPerMTok}}${{printf "%.2f" (deref .InputPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
-            <td class="cost">{{if .OutputPerMTok}}${{printf "%.2f" (deref .OutputPerMTok)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
-            <td class="cost">{{if .TotalSpendUSD}}${{printf "%.4f" .TotalSpendUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td class="mono">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .InputPerMTok}}${{printf "%.2f" (deref .InputPerMTok)}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .OutputPerMTok}}${{printf "%.2f" (deref .OutputPerMTok)}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .TotalSpendUSD}}${{printf "%.4f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
         </tr>
         {{end}}
     </tbody>

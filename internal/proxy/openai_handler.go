@@ -115,11 +115,13 @@ func (h *OpenAIHandler) handleOpenAINonStreaming(w http.ResponseWriter, resp *pr
 			slog.Warn("write OpenAI error response", "error", err)
 		}
 		return handlerResult{
-			InputTokens:  resp.InputTokens,
-			OutputTokens: resp.OutputTokens,
-			Status:       resp.StatusCode,
-			Body:         resp.Body,
-			ErrDetails:   &s,
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
 		}
 	}
 
@@ -226,6 +228,9 @@ func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oa
 		},
 		"responses": func(attempt chainAttempt) (*routePlan, bool) {
 			return h.buildResponsesRoute(w, r, oaiReq, rawBody, &attempt.Mapping)
+		},
+		"gemini": func(attempt chainAttempt) (*routePlan, bool) {
+			return h.buildGeminiRoute(w, r, oaiReq, rawBody, &attempt.Mapping)
 		},
 	}
 }
@@ -429,6 +434,160 @@ func (h *OpenAIHandler) handleResponsesProviderStreamingToCC(w http.ResponseWrit
 		Body:                     result.Body,
 		ErrDetails:               errDetails,
 		IsStreaming:              true,
+	}
+}
+
+// buildGeminiRoute handles CC requests that need to be sent to a native Gemini
+// (Vertex AI) provider. Translates CC→Gemini on request and Gemini→CC on response.
+func (h *OpenAIHandler) buildGeminiRoute(w http.ResponseWriter, r *http.Request,
+	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
+	mapping *config.DispatchTarget,
+) (*routePlan, bool) {
+	oaiReqCopy := *oaiReq
+	oaiReqCopy.Model = mapping.UpstreamModel
+	gemReq, err := translate.OpenAIToGeminiRequest(&oaiReqCopy)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Translation error: %s", err.Error()))
+		return nil, true
+	}
+
+	gemBody, err := json.Marshal(gemReq)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
+		return nil, true
+	}
+
+	forceNonStream := false
+	if provCfg, cfgErr := h.cfg.FindProvider(mapping.Provider); cfgErr == nil && provCfg.Stream != nil && !*provCfg.Stream {
+		forceNonStream = true
+	}
+
+	return &routePlan{
+		ProviderRequest: &provider.Request{
+			Body:        gemBody,
+			Headers:     r.Header.Clone(),
+			Model:       mapping.UpstreamModel,
+			IsStreaming: oaiReq.Stream && !forceNonStream,
+		},
+		RequestBody: rawBody,
+		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			switch {
+			case oaiReq.Stream && forceNonStream:
+				return h.handleGeminiForcedStreamToCC(w, provResp, oaiReq.Model)
+			case oaiReq.Stream:
+				return h.handleGeminiStreamingToCC(w, provResp, oaiReq.Model)
+			default:
+				return h.handleGeminiNonStreamingToCC(w, provResp, oaiReq.Model)
+			}
+		},
+	}, false
+}
+
+func (h *OpenAIHandler) handleGeminiNonStreamingToCC(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.StatusCode >= 400 {
+		s := string(resp.Body)
+		writeOpenAIError(w, resp.StatusCode, "api_error", s)
+		return handlerResult{
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
+		}
+	}
+
+	ccResp := translate.GeminiToOpenAIResponse(resp.Body, modelRequested)
+	ccBody, err := json.Marshal(ccResp)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
+		s := "Internal server error"
+		return handlerResult{Status: http.StatusInternalServerError, ErrDetails: &s}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(ccBody); err != nil {
+		slog.Warn("write OpenAI response", "error", err)
+	}
+	return handlerResult{
+		InputTokens:          resp.InputTokens,
+		OutputTokens:         resp.OutputTokens,
+		CacheReadInputTokens: resp.CacheReadInputTokens,
+		ReasoningTokens:      resp.ReasoningTokens,
+		Status:               http.StatusOK,
+		Body:                 ccBody,
+	}
+}
+
+func (h *OpenAIHandler) handleGeminiStreamingToCC(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.Stream == nil {
+		return h.handleGeminiForcedStreamToCC(w, resp, modelRequested)
+	}
+
+	result, err := translate.GeminiSSEToOpenAISSE(w, resp.Stream, modelRequested)
+
+	var errDetails *string
+	if err != nil {
+		errDetails = streamRelayErrorDetails(err)
+		if errDetails != nil {
+			slog.Warn("gemini stream relay error", "error", err)
+		}
+	}
+
+	status := resp.StatusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return handlerResult{
+		InputTokens:              result.InputTokens,
+		OutputTokens:             result.OutputTokens,
+		CacheCreationInputTokens: result.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.CacheReadInputTokens,
+		ReasoningTokens:          result.ReasoningTokens,
+		Status:                   status,
+		Body:                     result.Body,
+		ErrDetails:               errDetails,
+		IsStreaming:              true,
+	}
+}
+
+func (h *OpenAIHandler) handleGeminiForcedStreamToCC(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+	if resp.StatusCode >= 400 {
+		s := string(resp.Body)
+		writeOpenAIError(w, resp.StatusCode, "api_error", s)
+		return handlerResult{
+			InputTokens:          resp.InputTokens,
+			OutputTokens:         resp.OutputTokens,
+			CacheReadInputTokens: resp.CacheReadInputTokens,
+			ReasoningTokens:      resp.ReasoningTokens,
+			Status:               resp.StatusCode,
+			Body:                 resp.Body,
+			ErrDetails:           &s,
+			IsStreaming:          true,
+		}
+	}
+
+	ccResp := translate.GeminiToOpenAIResponse(resp.Body, modelRequested)
+	result, err := SynthesizeOpenAISSE(w, ccResp)
+
+	var errDetails *string
+	if err != nil {
+		s := fmt.Sprintf("stream synthesis error: %v", err)
+		errDetails = &s
+		slog.Warn("stream synthesis error", "error", err)
+	}
+
+	return handlerResult{
+		InputTokens:          resp.InputTokens,
+		OutputTokens:         resp.OutputTokens,
+		CacheReadInputTokens: resp.CacheReadInputTokens,
+		ReasoningTokens:      resp.ReasoningTokens,
+		Status:               http.StatusOK,
+		Body:                 result.Body,
+		ErrDetails:           errDetails,
+		IsStreaming:          true,
 	}
 }
 

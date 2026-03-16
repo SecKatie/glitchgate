@@ -11,9 +11,9 @@
             name="label"
             aria-label="Edit label for {{.KeyPrefix}}">
     </td>
-    <td>{{fmtET .CreatedAt "2006-01-02 15:04 ET"}}</td>
+    <td>{{fmtTz .CreatedAt "2006-01-02 15:04"}} {{tzAbbrev}}</td>
     <td>
-        <button class="outline btn-danger" style="padding:0.15rem 0.5rem;margin:0;font-size:0.85em"
+        <button class="outline btn-danger btn-sm"
             hx-post="/ui/api/keys/{{.KeyPrefix}}/revoke"
             hx-target="#key-table-body"
             hx-swap="innerHTML"
