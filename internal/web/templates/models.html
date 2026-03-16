@@ -121,7 +121,7 @@
       <th data-col="name"     data-type="str" >Model Name</th>
       <th data-col="prov"     data-type="str" >Provider</th>
       <th data-col="upstream" data-type="str" >Upstream Model</th>
-      <th data-col="pricing"  data-type="num" >Pricing $/MTok</th>
+      <th data-col="pricing"  data-type="num" >Pricing <abbr title="per million tokens">$/MTok</abbr></th>
       <th data-col="spend"    data-type="num"  class="cost">Total Spend</th>
     </tr>
   </thead>
@@ -149,7 +149,7 @@
       <td>{{if .IsVirtual}}&mdash;{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
       <td class="upstream-cell">&mdash;</td>
       <td class="pricing-cell">&mdash;</td>
-      <td class="cost">{{if gt .TotalSpendUSD 0.0}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+      <td class="cost">{{if gt .TotalSpendUSD 0.0}}${{printf "%.2f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
     </tr>
     {{/* ── Child rows ──────────────────────────────────────────── */}}
     {{range .Children}}
@@ -170,7 +170,7 @@
       <td>{{if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
       <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
       <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
-      <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+      <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
     </tr>
     {{end}}
     {{else}}
@@ -193,7 +193,7 @@
       <td>{{if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
       <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
       <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
-      <td class="cost">{{if .HasPricing}}${{printf "%.4f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+      <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
     </tr>
     {{end}}
     {{end}}
@@ -209,15 +209,19 @@
     return row.dataset[col] || '';
   }
 
-  function cmp(a, b, type) {
+  function cmp(a, b, type, dir) {
     if (type === 'num') {
       var an = parseFloat(a), bn = parseFloat(b);
-      if (an === -1 && bn === -1) return 0;
-      if (an === -1) return 1;
-      if (bn === -1) return -1;
-      return an - bn;
+      var aMissing = an === -1 || Number.isNaN(an);
+      var bMissing = bn === -1 || Number.isNaN(bn);
+
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      return dir === 1 ? an - bn : bn - an;
     }
-    return a.toLowerCase().localeCompare(b.toLowerCase());
+    var result = a.toLowerCase().localeCompare(b.toLowerCase());
+    return result * dir;
   }
 
   // Get all top-level rows (group headers + non-child rows) with their children.
@@ -256,7 +260,7 @@
 
     var groups = getGroups();
     groups.sort(function(a, b) {
-      return cmp(val(a.header, col), val(b.header, col), type) * sortDir;
+      return cmp(val(a.header, col), val(b.header, col), type, sortDir);
     });
 
     var tbody = document.querySelector('#models-table tbody');

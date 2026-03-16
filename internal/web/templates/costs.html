@@ -206,7 +206,7 @@
 {{define "content"}}
 <h2>Cost Dashboard</h2>
 
-<form class="filter-bar" action="/ui/costs" method="get" hx-get="/ui/costs" hx-select="#cost-content" hx-target="#cost-content" hx-swap="outerHTML" hx-push-url="true">
+<form id="costs-filter-form" class="filter-bar" action="/ui/costs" method="get" hx-get="/ui/costs" hx-select="#cost-content" hx-target="#cost-content" hx-swap="outerHTML" hx-push-url="true">
     <div>
         <label for="from">From</label>
         <input type="date" id="from" name="from" value="{{.From}}">
@@ -230,9 +230,21 @@
                value="{{.GroupFilter}}">
     </div>
     <div>
-        <button type="submit" style="margin-bottom:0">Update</button>
+        <button type="submit" id="costs-update-btn" style="margin-bottom:0">Update</button>
     </div>
 </form>
+<script>
+document.querySelectorAll('#costs-filter-form input, #costs-filter-form select').forEach(function(el) {
+    el.addEventListener('change', function() {
+        var btn = document.getElementById('costs-update-btn');
+        if (btn) btn.classList.add('btn-dirty');
+    });
+});
+document.addEventListener('htmx:afterSettle', function() {
+    var btn = document.getElementById('costs-update-btn');
+    if (btn) btn.classList.remove('btn-dirty');
+});
+</script>
 <script>
 function updateGroupFilter(v) {
     var lbl = document.getElementById('group-filter-label');

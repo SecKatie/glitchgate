@@ -173,7 +173,7 @@ func runUsersRole(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("updating role: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(ctx, "user_role_changed", "", fmt.Sprintf("user=%s role=%s", userID, role)); err != nil {
+	if err := st.RecordAuditEvent(ctx, "user_role_changed", "", fmt.Sprintf("user=%s role=%s", userID, role), "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 
@@ -219,7 +219,7 @@ func runUsersDeactivate(_ *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "WARNING: clearing sessions: %v\n", err)
 	}
 
-	if err := st.RecordAuditEvent(ctx, "user_deactivated", "", fmt.Sprintf("user=%s", userID)); err != nil {
+	if err := st.RecordAuditEvent(ctx, "user_deactivated", "", fmt.Sprintf("user=%s", userID), "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 
@@ -241,7 +241,7 @@ func runUsersReactivate(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("reactivating user: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(ctx, "user_reactivated", "", fmt.Sprintf("user=%s", userID)); err != nil {
+	if err := st.RecordAuditEvent(ctx, "user_reactivated", "", fmt.Sprintf("user=%s", userID), "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 

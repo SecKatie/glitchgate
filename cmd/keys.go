@@ -72,7 +72,7 @@ func init() {
 // keyStore combines the store operations needed by CLI key management commands.
 type keyStore interface {
 	store.ProxyKeyStore
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 	Migrate(ctx context.Context) error
 	Close() error
 }
@@ -110,7 +110,7 @@ func runKeysCreate(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("storing key: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(context.Background(), "key_created", prefix, keyLabel); err != nil {
+	if err := st.RecordAuditEvent(context.Background(), "key_created", prefix, keyLabel, "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 
@@ -157,7 +157,7 @@ func runKeysDelete(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("revoking key: %w", err)
 	}
 
-	if err := st.RecordAuditEvent(context.Background(), "key_revoked", prefix, ""); err != nil {
+	if err := st.RecordAuditEvent(context.Background(), "key_revoked", prefix, "", "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
 	}
 

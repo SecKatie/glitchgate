@@ -68,13 +68,13 @@
         {{end}}
     </div>
     {{else}}
-    <p style="color: var(--pico-muted-color);">No budgets configured yet.</p>
+    <p style="color: var(--pico-muted-color);">No budgets configured yet. {{if $.IsAdmin}}<a href="#set-budget">Set a budget ↑</a>{{end}}</p>
     {{end}}
 </div>
 
 {{if $.IsAdmin}}
 <hr>
-<h4>Set New Budget</h4>
+<h4 id="set-budget">Set New Budget</h4>
 <div style="padding: 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);">
     <form id="new-budget-form" class="budget-form" style="gap: 0.75rem;">
         <label>

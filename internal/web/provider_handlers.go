@@ -81,9 +81,13 @@ func (h *ProviderHandlers) ProvidersPageHandler(w http.ResponseWriter, r *http.R
 	costParams := costParamsLast30Days(h.tz, "provider")
 	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &costParams)
 
+	mtdCostParams := costParamsMonthToDate(h.tz, "provider")
+	applyScopeToCostParams(auth.SessionFromContext(r.Context()), &mtdCostParams)
+
 	var (
 		pricingGroups           []store.CostPricingGroup
 		timeseriesPricingGroups []store.CostTimeseriesPricingGroup
+		mtdPricingGroups        []store.CostPricingGroup
 	)
 
 	g, ctx := errgroup.WithContext(r.Context())
@@ -95,6 +99,11 @@ func (h *ProviderHandlers) ProvidersPageHandler(w http.ResponseWriter, r *http.R
 	g.Go(func() error {
 		var err error
 		timeseriesPricingGroups, err = h.costStore.GetCostTimeseriesPricingGroups(ctx, costParams)
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		mtdPricingGroups, err = h.costStore.GetCostPricingGroups(ctx, mtdCostParams)
 		return err
 	})
 	if err := g.Wait(); err != nil {
@@ -111,6 +120,13 @@ func (h *ProviderHandlers) ProvidersPageHandler(w http.ResponseWriter, r *http.R
 		pricingGroups, timeseriesPricingGroups,
 		h.calc, h.providerNames, h.providerMonthlySubscriptions, 30,
 	)
+
+	mtdCosts := computeAggregateCostBreakdownWithAliases(mtdPricingGroups, h.calc, h.providerNames)
+	var subscriptionCostUSD float64
+	if subsidyAnalysis != nil {
+		subscriptionCostUSD = subsidyAnalysis.SubscriptionCostUSD
+	}
+	monthlyProjection := buildMonthlyProjection(mtdCosts.TotalCostUSD, h.tz, subscriptionCostUSD)
 
 	// Build provider rows from breakdown.
 	var rows []ProviderRow
@@ -173,6 +189,7 @@ func (h *ProviderHandlers) ProvidersPageHandler(w http.ResponseWriter, r *http.R
 		"Title":                     "Providers",
 		"Providers":                 rows,
 		"SubsidyAnalysis":           subsidyAnalysis,
+		"MonthlyProjection":         monthlyProjection,
 		"ProviderComparisons":       providerComparisons,
 		"ProviderComparisonSummary": providerComparisonSummary,
 		"ProviderNames":             h.providerNames,

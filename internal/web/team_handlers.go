@@ -140,7 +140,7 @@ func (h *TeamHandlers) CreateTeamHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "team.created", "", id+" "+name); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "team.created", "", id+" "+name, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 
@@ -176,7 +176,7 @@ func (h *TeamHandlers) AddTeamMemberHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "team.member_added", "", teamID+" "+userID); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "team.member_added", "", teamID+" "+userID, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 
@@ -202,7 +202,7 @@ func (h *TeamHandlers) DeleteTeamHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "team.deleted", "", teamID+" "+team.Name); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "team.deleted", "", teamID+" "+team.Name, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 
@@ -239,7 +239,7 @@ func (h *TeamHandlers) RemoveTeamMemberHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.store.RecordAuditEvent(r.Context(), "team.member_removed", "", teamID+" "+userID); err != nil {
+	if err := h.store.RecordAuditEvent(r.Context(), "team.member_removed", "", teamID+" "+userID, sessionActorEmail(r.Context())); err != nil {
 		slog.Warn("record audit event", "error", err)
 	}
 

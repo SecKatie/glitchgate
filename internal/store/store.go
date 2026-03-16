@@ -19,7 +19,7 @@ type UserAdminStore interface {
 	UpdateOIDCUserRole(ctx context.Context, id, role string) error
 	SetOIDCUserActive(ctx context.Context, id string, active bool) error
 	DeleteUISessionsByUserID(ctx context.Context, userID string) error
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 }
 
 // TeamAdminStore contains the team-management operations used by the admin UI.
@@ -34,7 +34,7 @@ type TeamAdminStore interface {
 	DeleteTeam(ctx context.Context, teamID string) error
 	GetTeamMembership(ctx context.Context, userID string) (*TeamMembership, error)
 	RemoveUserFromTeam(ctx context.Context, userID string) error
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 }
 
 // SessionReaderStore contains the user lookups needed while validating UI sessions.
@@ -139,12 +139,12 @@ type BudgetAdminStore interface {
 	ClearTeamBudget(ctx context.Context, teamID string) error
 	SetKeyBudget(ctx context.Context, keyID string, limitUSD float64, period string) error
 	ClearKeyBudget(ctx context.Context, keyID string) error
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 }
 
 // AuditStore contains query operations for the audit event log.
 type AuditStore interface {
-	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail string) error
+	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 	ListAuditEvents(ctx context.Context, params ListAuditParams) ([]AuditEvent, int64, error)
 	ListDistinctAuditActions(ctx context.Context) ([]string, error)
 }
@@ -381,11 +381,12 @@ type ModelLatencyTimeseriesEntry struct {
 
 // AuditEvent records an administrative action for the audit trail.
 type AuditEvent struct {
-	ID        int64
-	Action    string
-	KeyPrefix string
-	Detail    string
-	CreatedAt time.Time
+	ID         int64
+	Action     string
+	KeyPrefix  string
+	Detail     string
+	ActorEmail string // empty for pre-migration rows and system events
+	CreatedAt  time.Time
 }
 
 // OIDCUser represents an OIDC-authenticated user account.

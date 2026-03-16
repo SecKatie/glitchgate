@@ -197,6 +197,36 @@ func costParamsLast30Days(tz *time.Location, groupBy string) store.CostParams {
 	}
 }
 
+// costParamsMonthToDate builds a CostParams from the 1st of the current
+// calendar month (local time) up to the current moment.
+func costParamsMonthToDate(tz *time.Location, groupBy string) store.CostParams {
+	now := time.Now().In(tz)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, tz)
+	_, offsetSecs := monthStart.Zone()
+	return store.CostParams{
+		From:            monthStart.UTC().Format("2006-01-02 15:04:05"),
+		To:              now.UTC().Format("2006-01-02 15:04:05"),
+		GroupBy:         groupBy,
+		TzOffsetSeconds: offsetSecs,
+		TzLocation:      tz,
+	}
+}
+
+// costParamsToday builds a CostParams for today with the given groupBy dimension.
+func costParamsToday(tz *time.Location, groupBy string) store.CostParams {
+	now := time.Now().In(tz)
+	todayStart := startOfDay(now, tz)
+	todayEnd := todayStart.AddDate(0, 0, 1).Add(-time.Second)
+	_, offsetSecs := todayStart.Zone()
+	return store.CostParams{
+		From:            todayStart.UTC().Format("2006-01-02 15:04:05"),
+		To:              todayEnd.UTC().Format("2006-01-02 15:04:05"),
+		GroupBy:         groupBy,
+		TzOffsetSeconds: offsetSecs,
+		TzLocation:      tz,
+	}
+}
+
 // daysInRange returns the number of days between two date strings (inclusive).
 // Falls back to 30 if either date fails to parse.
 func daysInRange(from, to string) int {
@@ -799,7 +829,7 @@ func (h *CostHandlers) SetGlobalBudgetHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.global.set",
-		"", fmt.Sprintf("limit=$%.2f period=%s", limit, period))
+		"", fmt.Sprintf("limit=$%.2f period=%s", limit, period), sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }
@@ -811,7 +841,7 @@ func (h *CostHandlers) ClearGlobalBudgetHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.global.clear", "", "")
+	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.global.clear", "", "", sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }
@@ -836,7 +866,7 @@ func (h *CostHandlers) SetUserBudgetHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.user.set",
-		"", fmt.Sprintf("user=%s limit=$%.2f period=%s", userID, limit, period))
+		"", fmt.Sprintf("user=%s limit=$%.2f period=%s", userID, limit, period), sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }
@@ -855,7 +885,7 @@ func (h *CostHandlers) ClearUserBudgetHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.user.clear",
-		"", fmt.Sprintf("user=%s", userID))
+		"", fmt.Sprintf("user=%s", userID), sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }
@@ -880,7 +910,7 @@ func (h *CostHandlers) SetTeamBudgetHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.team.set",
-		"", fmt.Sprintf("team=%s limit=$%.2f period=%s", teamID, limit, period))
+		"", fmt.Sprintf("team=%s limit=$%.2f period=%s", teamID, limit, period), sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }
@@ -899,7 +929,7 @@ func (h *CostHandlers) ClearTeamBudgetHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.team.clear",
-		"", fmt.Sprintf("team=%s", teamID))
+		"", fmt.Sprintf("team=%s", teamID), sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }
@@ -924,7 +954,7 @@ func (h *CostHandlers) SetKeyBudgetHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.key.set",
-		"", fmt.Sprintf("key=%s limit=$%.2f period=%s", keyID, limit, period))
+		"", fmt.Sprintf("key=%s limit=$%.2f period=%s", keyID, limit, period), sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }
@@ -943,7 +973,7 @@ func (h *CostHandlers) ClearKeyBudgetHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	_ = h.budgetAdminStore.RecordAuditEvent(r.Context(), "budget.key.clear",
-		"", fmt.Sprintf("key=%s", keyID))
+		"", fmt.Sprintf("key=%s", keyID), sessionActorEmail(r.Context()))
 
 	h.renderBudgetFragment(w, r)
 }

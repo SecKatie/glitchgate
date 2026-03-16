@@ -75,10 +75,6 @@
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
-  .placeholder-value {
-    color: var(--pico-muted-color);
-    font-weight: 500;
-  }
   .pricing-card-unit {
     font-size: 0.75em;
     color: var(--pico-muted-color);
@@ -225,7 +221,7 @@
     <div class="stat-label">Output Tokens</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{if or .HasPricing .HasCostData}}${{printf "%.4f" .Usage.TotalCostUSD}}{{else}}<span class="placeholder-value">&mdash;</span>{{end}}</div>
+    <div class="stat-value">{{if or .HasPricing .HasCostData}}${{printf "%.4f" .Usage.TotalCostUSD}}{{else}}<span class="cost-unknown">n/a</span>{{end}}</div>
     <div class="stat-label">Total Spend</div>
   </div>
 </div>
@@ -233,28 +229,32 @@
 {{/* ── Pricing (non-virtual only — virtual models show pricing in fallback table) */}}
 {{if not .IsVirtual}}
 <div class="section-label">Pricing</div>
+{{if .HasPricing}}
 <div class="pricing-grid">
   <div class="pricing-card">
     <div class="pricing-card-label">Input</div>
-    <div class="pricing-card-value">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}}{{else}}<span class="placeholder-value">&mdash;</span>{{end}}</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.InputPerMillion}}</div>
     <div class="pricing-card-unit">per MTok</div>
   </div>
   <div class="pricing-card">
     <div class="pricing-card-label">Output</div>
-    <div class="pricing-card-value">{{if .HasPricing}}${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}<span class="placeholder-value">&mdash;</span>{{end}}</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.OutputPerMillion}}</div>
     <div class="pricing-card-unit">per MTok</div>
   </div>
   <div class="pricing-card">
     <div class="pricing-card-label">Cache Write</div>
-    <div class="pricing-card-value">{{if .HasPricing}}${{printf "%.2f" .Pricing.CacheWritePerMillion}}{{else}}<span class="placeholder-value">&mdash;</span>{{end}}</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.CacheWritePerMillion}}</div>
     <div class="pricing-card-unit">per MTok</div>
   </div>
   <div class="pricing-card">
     <div class="pricing-card-label">Cache Read</div>
-    <div class="pricing-card-value">{{if .HasPricing}}${{printf "%.2f" .Pricing.CacheReadPerMillion}}{{else}}<span class="placeholder-value">&mdash;</span>{{end}}</div>
+    <div class="pricing-card-value">${{printf "%.2f" .Pricing.CacheReadPerMillion}}</div>
     <div class="pricing-card-unit">per MTok</div>
   </div>
 </div>
+{{else}}
+<p class="no-pricing">No pricing data available for this model.</p>
+{{end}}
 {{end}}
 
 {{/* ── Performance chart ────────────────────────────────────── */}}

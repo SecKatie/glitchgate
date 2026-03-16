@@ -155,7 +155,7 @@
             <td class="mono">{{.DisplayName}}</td>
             <td>{{.Type}}</td>
             <td>{{.Requests}}</td>
-            <td class="cost">{{if .TokenCostUSD}}${{printf "%.4f" .TokenCostUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
+            <td class="cost">{{if .TokenCostUSD}}${{printf "%.2f" .TokenCostUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
             <td class="cost">{{if .HasSubscription}}${{printf "%.2f" .MonthlySubscriptionUSD}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
             <td class="cost">{{if .SavingsPct}}{{printf "%+.1f%%" (deref .SavingsPct)}}{{else}}<span style="color:var(--pico-muted-color)">&mdash;</span>{{end}}</td>
         </tr>

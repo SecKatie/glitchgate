@@ -30,3 +30,6 @@ Thumbs.db
 
 # Distribution
 dist/
+
+# Rodney browser automation tool
+.rodney/

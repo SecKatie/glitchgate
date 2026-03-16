@@ -354,24 +354,4 @@ func TestModelDetailPage(t *testing.T) {
 		h.ModelDetailPage(rec, makeRequest("/ui/models/claude-sonnet"))
 		require.Contains(t, rec.Body.String(), "YOUR_PROXY_KEY")
 	})
-
-	t.Run("unknown pricing shows placeholder cards", func(t *testing.T) {
-		models := []config.ModelMapping{
-			{ModelName: "unknown-model", Provider: "anthropic", UpstreamModel: "no-such-model"},
-		}
-		h := &Handlers{
-			calc:        pricing.NewCalculator(map[string]pricing.Entry{}),
-			providerMap: providerMap,
-			cfg:         &config.Config{ModelList: models},
-			templates:   templates,
-			store:       &stubModelStore{summary: zeroUsage},
-		}
-		rec := httptest.NewRecorder()
-		h.ModelDetailPage(rec, makeRequest("/ui/models/unknown-model"))
-		body := rec.Body.String()
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, body, `class="stat-value"><span class="placeholder-value">&mdash;</span></div>`)
-		require.Contains(t, body, `class="pricing-card-value"><span class="placeholder-value">&mdash;</span></div>`)
-		require.NotContains(t, body, "No pricing data available for this model.")
-	})
 }
