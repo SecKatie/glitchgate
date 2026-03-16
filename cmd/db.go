@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -42,10 +43,26 @@ The target database is determined by the config file (--config flag).`,
 	RunE: runDBImport,
 }
 
+var dbTrimCmd = &cobra.Command{
+	Use:   "trim",
+	Short: "Replace request/response bodies with '[trimmed]' in old log entries",
+	Long: `Strip large request_body and response_body fields from log entries older
+than the specified threshold. The log metadata (timestamps, tokens, costs,
+status codes) is preserved. Already-trimmed rows are skipped.
+
+Use --dry-run to see how many rows would be affected without making changes.`,
+	RunE: runDBTrim,
+}
+
 func init() {
 	dbCmd.AddCommand(dbExportCmd)
 	dbCmd.AddCommand(dbImportCmd)
+	dbCmd.AddCommand(dbTrimCmd)
 	rootCmd.AddCommand(dbCmd)
+
+	dbTrimCmd.Flags().Duration("older-than", 7*24*time.Hour, "trim logs older than this duration")
+	dbTrimCmd.Flags().Int("batch-size", 1000, "rows to update per batch")
+	dbTrimCmd.Flags().Bool("dry-run", false, "show how many rows would be trimmed without making changes")
 }
 
 func openSQLiteStore() (*store.SQLiteStore, error) {
@@ -122,5 +139,45 @@ func runDBImport(_ *cobra.Command, args []string) error {
 	if len(stats.Tables) == 0 {
 		fmt.Println("  (no new rows imported)")
 	}
+	return nil
+}
+
+func runDBTrim(cmd *cobra.Command, _ []string) error {
+	st, err := openSQLiteStore()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+
+	olderThan, _ := cmd.Flags().GetDuration("older-than")
+	batchSize, _ := cmd.Flags().GetInt("batch-size")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	ctx := context.Background()
+	cutoff := time.Now().UTC().Add(-olderThan)
+
+	if dryRun {
+		count, err := st.CountTrimmableLogBodies(ctx, cutoff)
+		if err != nil {
+			return fmt.Errorf("count: %w", err)
+		}
+		fmt.Printf("Would trim %d rows (older than %s)\n", count, cutoff.Format("2006-01-02"))
+		return nil
+	}
+
+	var total int64
+	for {
+		n, err := st.TrimRequestLogBodies(ctx, cutoff, batchSize)
+		if err != nil {
+			return fmt.Errorf("trim: %w", err)
+		}
+		if n == 0 {
+			break
+		}
+		total += n
+		fmt.Fprintf(os.Stderr, "  Trimmed %d rows (%d total)...\n", n, total)
+	}
+
+	fmt.Printf("Trim complete: %d rows trimmed (older than %s)\n", total, cutoff.Format("2006-01-02"))
 	return nil
 }

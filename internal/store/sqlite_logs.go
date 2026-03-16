@@ -97,6 +97,55 @@ func (s *SQLiteStore) PruneRequestLogs(ctx context.Context, before time.Time, li
 	return deleted, nil
 }
 
+// TrimRequestLogBodies replaces request_body and response_body with '[trimmed]'
+// for log rows older than before, in bounded batches. Already-trimmed rows are
+// skipped, making the operation idempotent.
+func (s *SQLiteStore) TrimRequestLogBodies(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	const query = `
+		UPDATE request_logs
+		SET request_body = '[trimmed]', response_body = '[trimmed]'
+		WHERE id IN (
+			SELECT id
+			FROM request_logs
+			WHERE timestamp < ?
+			AND request_body != '[trimmed]'
+			ORDER BY timestamp ASC
+			LIMIT ?
+		)`
+
+	res, err := s.db.ExecContext(ctx, query, before, limit)
+	if err != nil {
+		return 0, fmt.Errorf("trim request log bodies: %w", err)
+	}
+
+	trimmed, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("trim request log bodies rows affected: %w", err)
+	}
+
+	return trimmed, nil
+}
+
+// CountTrimmableLogBodies returns how many log rows older than before still
+// have untrimmed bodies. Used for --dry-run estimates.
+func (s *SQLiteStore) CountTrimmableLogBodies(ctx context.Context, before time.Time) (int64, error) {
+	const query = `
+		SELECT COUNT(*)
+		FROM request_logs
+		WHERE timestamp < ?
+		AND request_body != '[trimmed]'`
+
+	var count int64
+	if err := s.db.QueryRowContext(ctx, query, before).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count trimmable log bodies: %w", err)
+	}
+	return count, nil
+}
+
 // --------------------------------------------------------------------------
 // Request log listing and detail
 // --------------------------------------------------------------------------
