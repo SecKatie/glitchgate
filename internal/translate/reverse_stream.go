@@ -46,7 +46,8 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 	}
 	toolCalls := make(map[int]*toolCallState) // OAI index → state
 	nextBlockIndex := 0
-	textBlockIndex := -1 // -1 = no text block started yet
+	textBlockIndex := -1     // -1 = no text block started yet
+	thinkingBlockIndex := -1 // -1 = no thinking block started yet
 
 	scanner := newSSEScanner(upstream)
 	for scanner.Scan() {
@@ -59,6 +60,14 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		data := line[6:]
 
 		if data == "[DONE]" {
+			// Close thinking block if open.
+			if thinkingBlockIndex >= 0 {
+				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
+					map[string]interface{}{"type": "content_block_stop", "index": thinkingBlockIndex}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+			}
+
 			// Close text block if open.
 			if textBlockIndex >= 0 {
 				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
@@ -179,8 +188,53 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 			finishReason = *choice.FinishReason
 		}
 
-		// Handle text content deltas.
-		if text, ok := delta.Content.(string); ok && text != "" {
+		// Handle reasoning/thinking content deltas.
+		// OpenAI-compatible providers use "reasoning" or "reasoning_content".
+		thinkingText := delta.Reasoning
+		if thinkingText == "" {
+			thinkingText = delta.ReasoningContent
+		}
+		if thinkingText != "" {
+			if thinkingBlockIndex < 0 {
+				thinkingBlockIndex = nextBlockIndex
+				nextBlockIndex++
+				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+					map[string]interface{}{
+						"type":          "content_block_start",
+						"index":         thinkingBlockIndex,
+						"content_block": map[string]interface{}{"type": "thinking", "thinking": ""},
+					}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+			}
+
+			if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+				map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": thinkingBlockIndex,
+					"delta": map[string]interface{}{"type": "thinking_delta", "thinking": thinkingText},
+				}); err != nil {
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+			}
+		}
+
+		// Handle text content deltas (string or []ContentPart).
+		var textContent string
+		switch c := delta.Content.(type) {
+		case string:
+			textContent = c
+		case []interface{}:
+			// Content may arrive as an array of content parts.
+			for _, part := range c {
+				if m, ok := part.(map[string]interface{}); ok {
+					if t, ok := m["text"].(string); ok {
+						textContent += t
+					}
+				}
+			}
+		}
+
+		if textContent != "" {
 			if textBlockIndex < 0 {
 				textBlockIndex = nextBlockIndex
 				nextBlockIndex++
@@ -198,7 +252,33 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": textBlockIndex,
-					"delta": map[string]interface{}{"type": "text_delta", "text": text},
+					"delta": map[string]interface{}{"type": "text_delta", "text": textContent},
+				}); err != nil {
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+			}
+		}
+
+		// Handle refusal content — emit as a text block since Anthropic has no
+		// dedicated refusal type.
+		if delta.Refusal != "" {
+			if textBlockIndex < 0 {
+				textBlockIndex = nextBlockIndex
+				nextBlockIndex++
+				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+					map[string]interface{}{
+						"type":          "content_block_start",
+						"index":         textBlockIndex,
+						"content_block": map[string]interface{}{"type": "text", "text": ""},
+					}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+			}
+
+			if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+				map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": textBlockIndex,
+					"delta": map[string]interface{}{"type": "text_delta", "text": delta.Refusal},
 				}); err != nil {
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}

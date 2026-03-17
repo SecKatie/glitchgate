@@ -17,12 +17,14 @@ type ChatCompletionRequest struct {
 
 // ChatMessage represents a single message in the OpenAI conversation format.
 type ChatMessage struct {
-	Role       string      `json:"role"`
-	Content    interface{} `json:"content"` // string or []ContentPart
-	Refusal    string      `json:"refusal,omitempty"`
-	Name       string      `json:"name,omitempty"`
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string      `json:"tool_call_id,omitempty"`
+	Role             string      `json:"role"`
+	Content          interface{} `json:"content"` // string or []ContentPart
+	Refusal          string      `json:"refusal,omitempty"`
+	Name             string      `json:"name,omitempty"`
+	ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID       string      `json:"tool_call_id,omitempty"`
+	Reasoning        string      `json:"reasoning,omitempty"`
+	ReasoningContent string      `json:"reasoning_content,omitempty"`
 }
 
 // ImageURLContent holds the URL and optional detail level for an image_url content part.
