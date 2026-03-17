@@ -33,6 +33,14 @@ func TestExtractTokens_CacheFields(t *testing.T) {
 			wantOutput: 99,
 		},
 		{
+			name:              "message_delta with cache tokens",
+			data:              `{"type":"message_delta","usage":{"input_tokens":2258,"output_tokens":94,"cache_creation_input_tokens":0,"cache_read_input_tokens":29056}}`,
+			wantInput:         2258,
+			wantOutput:        94,
+			wantCacheCreation: 0,
+			wantCacheRead:     29056,
+		},
+		{
 			name: "unrelated event type is ignored",
 			data: `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}`,
 		},
