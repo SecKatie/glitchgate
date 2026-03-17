@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
 )
@@ -29,7 +30,7 @@ type handlerResult struct {
 // logEntry records one request/response cycle to the database.
 // This is the single log call site; individual handle* functions never call it directly.
 func (l *AsyncLogger) logEntry(
-	proxyKeyID, sourceFormat, providerName, modelRequested, modelUpstream, resolvedModelName string,
+	proxyKeyID, keyPrefix, sourceFormat, providerName, modelRequested, modelUpstream, resolvedModelName string,
 	latencyMs int64, requestBody []byte, attemptCount int64, r handlerResult,
 	calc *pricing.Calculator,
 ) {
@@ -50,7 +51,7 @@ func (l *AsyncLogger) logEntry(
 			r.ReasoningTokens)
 	}
 
-	l.Log(&store.RequestLogEntry{
+	entry := &store.RequestLogEntry{
 		ID:                       uuid.New().String(),
 		ProxyKeyID:               proxyKeyID,
 		Timestamp:                time.Now().UTC(),
@@ -72,7 +73,10 @@ func (l *AsyncLogger) logEntry(
 		IsStreaming:              r.IsStreaming,
 		FallbackAttempts:         attemptCount,
 		CostUSD:                  costUSD,
-	})
+	}
+
+	metrics.RecordRequest(entry, keyPrefix)
+	l.Log(entry)
 }
 
 func truncateLoggedBody(body string, maxBytes int) string {

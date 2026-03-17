@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/store"
 )
 
@@ -195,6 +196,7 @@ func (l *AsyncLogger) noteDropped(entryID, reason string) {
 
 func (l *AsyncLogger) logSummary() {
 	stats := l.Stats()
+	metrics.RecordLoggerStats(stats.Enqueued, stats.Persisted, stats.Dropped, stats.Failed)
 	if stats.Dropped == 0 && stats.Failed == 0 && stats.TimedOut == 0 {
 		return
 	}

@@ -89,6 +89,13 @@ type providerNameRewrite struct {
 // NormalizeLoggedProviderNames rewrites legacy canonical provider keys in
 // request_logs to the configured provider names used for runtime identity.
 func (s *SQLiteStore) NormalizeLoggedProviderNames(ctx context.Context, cfg *config.Config) error {
+	return normalizeLoggedProviderNames(ctx, s.db, cfg, false)
+}
+
+// normalizeLoggedProviderNames is the shared implementation for both SQLite and
+// PostgreSQL. When usePositionalParams is true, query placeholders are rewritten
+// from ? to $N for PostgreSQL compatibility.
+func normalizeLoggedProviderNames(ctx context.Context, db *sql.DB, cfg *config.Config, usePositionalParams bool) error {
 	if cfg == nil {
 		return nil
 	}
@@ -101,7 +108,7 @@ func (s *SQLiteStore) NormalizeLoggedProviderNames(ctx context.Context, cfg *con
 		return nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin provider-name normalization: %w", err)
 	}
@@ -117,6 +124,9 @@ func (s *SQLiteStore) NormalizeLoggedProviderNames(ctx context.Context, cfg *con
 		if rewrite.modelPrefix != "" {
 			query = `UPDATE request_logs SET provider_name = ? WHERE provider_name = ? AND model_requested LIKE ? ESCAPE '\'`
 			args = []any{rewrite.newName, rewrite.oldName, escapeLikePattern(rewrite.modelPrefix) + "%"}
+		}
+		if usePositionalParams {
+			query = rebindForPostgres(query)
 		}
 		if _, err = tx.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("normalize provider name %q -> %q: %w", rewrite.oldName, rewrite.newName, err)
@@ -197,6 +207,11 @@ func rewritePattern(rewrite providerNameRewrite) string {
 		return rewrite.modelExact
 	}
 	return rewrite.modelPrefix + "*"
+}
+
+// Ping verifies the database connection is alive.
+func (s *SQLiteStore) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
 }
 
 // Close closes the underlying database connection.

@@ -11,16 +11,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
 	"github.com/seckatie/glitchgate/internal/app"
 	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/proxy"
 	"github.com/seckatie/glitchgate/internal/ratelimit"
 	"github.com/seckatie/glitchgate/internal/web"
@@ -49,7 +52,10 @@ func runServe(_ *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = logFile.Close() }()
 	logDest := io.MultiWriter(logFile, os.Stdout)
-	slog.SetDefault(slog.New(slog.NewJSONHandler(logDest, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	logLevel := parseLogLevel(cfg.LogLevel)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logDest, &slog.HandlerOptions{Level: logLevel})))
+
+	metrics.Enabled = cfg.MetricsEnabled
 
 	runtime, err := app.Bootstrap(context.Background(), cfg)
 	if err != nil {
@@ -126,6 +132,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	// Protected web routes.
 	r.Route("/ui", func(r chi.Router) {
+		r.Use(web.CSRFMiddleware)
 		r.Use(web.UISessionMiddleware(sessions, runtime.Store))
 		r.Post("/api/logout", webHandlers.LogoutHandler)
 
@@ -211,11 +218,23 @@ func runServe(_ *cobra.Command, _ []string) error {
 		http.Redirect(w, r, "/ui/dashboard", http.StatusSeeOther)
 	})
 
-	// Health check.
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+	// Health check — pings the database to verify connectivity.
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := runtime.Store.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("database unavailable"))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+
+	// Prometheus metrics endpoint.
+	if cfg.MetricsEnabled {
+		r.Get("/metrics", promhttp.Handler().ServeHTTP)
+	}
 
 	srv := &http.Server{
 		Addr:         cfg.Listen,
@@ -254,4 +273,17 @@ func positiveInt(value, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+func parseLogLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
