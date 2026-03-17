@@ -94,12 +94,23 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 	// Auth mode: either use the proxy's own API key or forward the client's.
 	switch c.authMode {
 	case "proxy_key":
-		httpReq.Header.Set("X-Api-Key", c.apiKey)
+		// Anthropic's official API expects X-Api-Key header.
+		// Third-party Anthropic-compatible APIs (like Minimax) expect Bearer prefix.
+		if strings.Contains(c.baseURL, "minimax.io") {
+			httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		} else {
+			httpReq.Header.Set("X-Api-Key", c.apiKey)
+		}
 	case "forward":
 		if auth := req.Headers.Get("Authorization"); auth != "" {
 			httpReq.Header.Set("Authorization", auth)
 		}
+	default:
+		slog.Warn("unknown auth mode, falling back to api_key", "auth_mode", c.authMode)
+		httpReq.Header.Set("Authorization", c.apiKey)
 	}
+
+	slog.Debug("sending request", "url", url, "auth_mode", c.authMode, "x_api_key", redactKey(httpReq.Header.Get("X-Api-Key")), "auth", redactKey(httpReq.Header.Get("Authorization")))
 
 	for hdr, values := range req.Headers {
 		if !shouldForwardHeader(hdr) {
@@ -169,4 +180,17 @@ func shouldForwardHeader(hdr string) bool {
 	default:
 		return false
 	}
+}
+
+// redactKey returns a redacted version of an API key for logging.
+// Shows first 7 characters followed by "..." for easy identification.
+func redactKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	const prefixLen = 7
+	if len(key) <= prefixLen {
+		return "***"
+	}
+	return key[:prefixLen] + "***"
 }
