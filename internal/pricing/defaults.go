@@ -67,6 +67,7 @@ var CopilotDefaults = map[string]Entry{
 	"gpt-5.2":           {InputPerMillion: 0, OutputPerMillion: 0},
 	"gpt-5.4":           {InputPerMillion: 0, OutputPerMillion: 0},
 	"gpt-5.4-pro":       {InputPerMillion: 0, OutputPerMillion: 0},
+	"gpt-5-mini":        {InputPerMillion: 0, OutputPerMillion: 0},
 	"o4-mini":           {InputPerMillion: 0, OutputPerMillion: 0},
 	"o3":                {InputPerMillion: 0, OutputPerMillion: 0},
 	"gemini-3-flash":    {InputPerMillion: 0, OutputPerMillion: 0},
@@ -106,6 +107,11 @@ var OpenAIDefaults = map[string]Entry{
 		InputPerMillion:     2.50,
 		OutputPerMillion:    15.00,
 		CacheReadPerMillion: 0.25,
+	},
+	"gpt-5-mini": {
+		InputPerMillion:     0.125,
+		OutputPerMillion:    1.00,
+		CacheReadPerMillion: 0.025,
 	},
 	"o3": {
 		InputPerMillion:  2.00,
@@ -183,6 +189,11 @@ var GeminiDefaults = map[string]Entry{
 		OutputPerMillion:    12.00,
 		CacheReadPerMillion: 0.20,
 	},
+	"google/gemini-3.1-lite-preview": {
+		InputPerMillion:     0.25,
+		OutputPerMillion:    1.50,
+		CacheReadPerMillion: 0.03,
+	},
 	"google/gemini-3.1-flash-lite-preview": {
 		InputPerMillion:     0.25,
 		OutputPerMillion:    1.50,
@@ -228,6 +239,11 @@ var GeminiDefaults = map[string]Entry{
 		InputPerMillion:     2.00,
 		OutputPerMillion:    12.00,
 		CacheReadPerMillion: 0.20,
+	},
+	"gemini-3.1-lite-preview": {
+		InputPerMillion:     0.25,
+		OutputPerMillion:    1.50,
+		CacheReadPerMillion: 0.03,
 	},
 	"gemini-3.1-flash-lite-preview": {
 		InputPerMillion:     0.25,
