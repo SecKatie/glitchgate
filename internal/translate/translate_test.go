@@ -757,6 +757,30 @@ func TestAnthropicToOpenAIRequest_SystemMessage(t *testing.T) {
 	require.Equal(t, "You are a helpful assistant.", result.Messages[0].Content)
 }
 
+func TestAnthropicToOpenAIRequest_SystemDropsBillingHeader(t *testing.T) {
+	systemBlocks := []interface{}{
+		map[string]interface{}{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.77; cch=abc123;"},
+		map[string]interface{}{"type": "text", "text": "You are a helpful assistant."},
+		map[string]interface{}{"type": "text", "text": "Be concise."},
+	}
+
+	req := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		System:    systemBlocks,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "Hi"},
+		},
+	}
+
+	result, err := AnthropicToOpenAIRequest(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "system", result.Messages[0].Role)
+	require.Equal(t, "You are a helpful assistant.\nBe concise.", result.Messages[0].Content,
+		"billing header block must be dropped to preserve upstream prefix caching")
+}
+
 // --- helpers ---
 
 func strPtr(s string) *string { return &s }
@@ -926,6 +950,44 @@ func TestAnthropicToOpenAIRequest_ImageBlockURL(t *testing.T) {
 	require.Equal(t, "image_url", parts[0].Type)
 	require.NotNil(t, parts[0].ImageURL)
 	require.Equal(t, "https://example.com/photo.jpg", parts[0].ImageURL.URL)
+}
+
+func TestAnthropicToOpenAIRequest_ThinkingBlocksPreserved(t *testing.T) {
+	// When an Anthropic client sends a multi-turn conversation that includes
+	// a previous assistant response with thinking blocks, the thinking content
+	// must be preserved as reasoning_content on the OpenAI ChatMessage.
+	req := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "Think step by step about why the sky is blue."},
+			{
+				Role: "assistant",
+				Content: []anthropic.ContentBlock{
+					{Type: "thinking", Thinking: "Rayleigh scattering causes shorter wavelengths..."},
+					{Type: "text", Text: "The sky is blue because of Rayleigh scattering."},
+				},
+			},
+			{Role: "user", Content: "Can you elaborate?"},
+		},
+	}
+
+	result, err := AnthropicToOpenAIRequest(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Find the assistant message.
+	var assistantMsg *ChatMessage
+	for i := range result.Messages {
+		if result.Messages[i].Role == "assistant" {
+			assistantMsg = &result.Messages[i]
+			break
+		}
+	}
+	require.NotNil(t, assistantMsg, "expected an assistant message")
+	require.Equal(t, "The sky is blue because of Rayleigh scattering.", assistantMsg.Content)
+	require.Equal(t, "Rayleigh scattering causes shorter wavelengths...", assistantMsg.ReasoningContent,
+		"thinking block must be preserved as reasoning_content on subsequent turns")
 }
 
 func TestAnthropicToOpenAIRequest_MixedTextAndImage(t *testing.T) {

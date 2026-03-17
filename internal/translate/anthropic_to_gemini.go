@@ -199,6 +199,9 @@ func extractSystemText(system interface{}) string {
 			}
 			if t, _ := m["type"].(string); t == "text" {
 				if text, _ := m["text"].(string); text != "" {
+					if strings.HasPrefix(text, "x-anthropic-") {
+						continue
+					}
 					parts = append(parts, text)
 				}
 			}

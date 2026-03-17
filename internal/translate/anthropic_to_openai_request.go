@@ -118,7 +118,9 @@ func extractToolResultText(b anthropic.ContentBlock) string {
 }
 
 // extractAnthropicSystem extracts a plain text string from the Anthropic system
-// field, which can be a string or an array of system blocks.
+// field, which can be a string or an array of system blocks. Anthropic-internal
+// metadata blocks (e.g. x-anthropic-billing-header) are dropped because they
+// contain per-request hashes that defeat upstream prefix caching.
 func extractAnthropicSystem(system interface{}) string {
 	switch v := system.(type) {
 	case string:
@@ -129,6 +131,9 @@ func extractAnthropicSystem(system interface{}) string {
 			if m, ok := item.(map[string]interface{}); ok {
 				if t, ok := m["type"].(string); ok && t == "text" {
 					if text, ok := m["text"].(string); ok {
+						if strings.HasPrefix(text, "x-anthropic-") {
+							continue
+						}
 						parts = append(parts, text)
 					}
 				}
@@ -263,6 +268,8 @@ func translateAnthropicAssistantBlocks(blocks []anthropic.ContentBlock) ([]ChatM
 
 	for _, b := range blocks {
 		switch b.Type {
+		case "thinking":
+			msg.ReasoningContent = b.Thinking
 		case "text":
 			textParts = append(textParts, b.Text)
 		case "tool_use":
