@@ -36,10 +36,11 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (*Runtime, error) {
 		return nil, fmt.Errorf("bootstrap requires config")
 	}
 
-	st, err := store.NewSQLiteStore(cfg.DatabasePath)
+	st, err := store.Open(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
+	slog.Info("database connected", "backend", cfg.DBBackend())
 
 	cleanupOnErr := true
 	defer func() {
@@ -51,8 +52,10 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (*Runtime, error) {
 	if err := st.Migrate(ctx); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
-	if err := st.NormalizeLoggedProviderNames(ctx, cfg); err != nil {
-		return nil, fmt.Errorf("normalizing logged provider names: %w", err)
+	if sqliteSt, ok := st.(*store.SQLiteStore); ok {
+		if err := sqliteSt.NormalizeLoggedProviderNames(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("normalizing logged provider names: %w", err)
+		}
 	}
 
 	registry, err := NewProviderRegistry(cfg, positiveDuration(cfg.UpstreamRequestTimeout, config.DefaultUpstreamRequestTimeout))

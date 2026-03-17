@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package store
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// GetApplicableBudgets returns all budget policies that apply to a given proxy key.
+func (s *PostgreSQLStore) GetApplicableBudgets(ctx context.Context, proxyKeyID string) ([]ApplicableBudget, error) {
+	const query = `
+		SELECT 'key' AS scope, pkb.proxy_key_id AS scope_id, pkb.limit_usd, pkb.period
+		  FROM proxy_key_budgets pkb
+		  WHERE pkb.proxy_key_id = $1 AND pkb.limit_usd IS NOT NULL
+		UNION ALL
+		SELECT 'user', ub.user_id, ub.limit_usd, ub.period
+		  FROM proxy_key_owners pko
+		  JOIN user_budgets ub ON ub.user_id = pko.owner_user_id
+		  WHERE pko.proxy_key_id = $2 AND ub.limit_usd IS NOT NULL
+		UNION ALL
+		SELECT 'team', tb.team_id, tb.limit_usd, tb.period
+		  FROM proxy_key_owners pko
+		  JOIN team_memberships tm ON tm.user_id = pko.owner_user_id
+		  JOIN team_budgets tb ON tb.team_id = tm.team_id
+		  WHERE pko.proxy_key_id = $3 AND tb.limit_usd IS NOT NULL
+		UNION ALL
+		SELECT 'global', '', gbs.limit_usd, gbs.period
+		  FROM global_budget_settings gbs
+		  WHERE gbs.id = 1 AND gbs.limit_usd IS NOT NULL`
+
+	rows, err := s.db.QueryContext(ctx, query, proxyKeyID, proxyKeyID, proxyKeyID)
+	if err != nil {
+		return nil, fmt.Errorf("get applicable budgets: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var budgets []ApplicableBudget
+	for rows.Next() {
+		var b ApplicableBudget
+		if err := rows.Scan(&b.Scope, &b.ScopeID, &b.LimitUSD, &b.Period); err != nil {
+			return nil, fmt.Errorf("scan applicable budget: %w", err)
+		}
+		budgets = append(budgets, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate applicable budgets: %w", err)
+	}
+	return budgets, nil
+}
+
+// GetSpendSince returns the total cost_usd from request_logs since the given
+// timestamp for the specified scope.
+func (s *PostgreSQLStore) GetSpendSince(ctx context.Context, scope, scopeID string, since time.Time) (float64, error) {
+	var query string
+	var args []any
+
+	switch scope {
+	case "key":
+		query = `SELECT COALESCE(SUM(cost_usd), 0) FROM request_logs WHERE proxy_key_id = $1 AND timestamp >= $2`
+		args = []any{scopeID, since.UTC()}
+	case "user":
+		query = `SELECT COALESCE(SUM(rl.cost_usd), 0)
+			FROM request_logs rl
+			JOIN proxy_key_owners pko ON pko.proxy_key_id = rl.proxy_key_id
+			WHERE pko.owner_user_id = $1 AND rl.timestamp >= $2`
+		args = []any{scopeID, since.UTC()}
+	case "team":
+		query = `SELECT COALESCE(SUM(rl.cost_usd), 0)
+			FROM request_logs rl
+			JOIN proxy_key_owners pko ON pko.proxy_key_id = rl.proxy_key_id
+			JOIN team_memberships tm ON tm.user_id = pko.owner_user_id
+			WHERE tm.team_id = $1 AND rl.timestamp >= $2`
+		args = []any{scopeID, since.UTC()}
+	case "global":
+		query = `SELECT COALESCE(SUM(cost_usd), 0) FROM request_logs WHERE timestamp >= $1`
+		args = []any{since.UTC()}
+	default:
+		return 0, fmt.Errorf("unknown budget scope: %s", scope)
+	}
+
+	var spend float64
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&spend); err != nil {
+		return 0, fmt.Errorf("get spend since for %s: %w", scope, err)
+	}
+	return spend, nil
+}
+
+// GetBudgetsForScope returns configured budgets visible to the given session scope.
+func (s *PostgreSQLStore) GetBudgetsForScope(ctx context.Context, scopeType, userID, teamID string) ([]ApplicableBudget, error) {
+	var parts []string
+	var args []any
+
+	// Global budget is always visible.
+	parts = append(parts, `SELECT 'global' AS scope, '' AS scope_id, limit_usd, period
+		FROM global_budget_settings WHERE id = 1 AND limit_usd IS NOT NULL`)
+
+	switch scopeType {
+	case "all":
+		// Admin sees all user, team, and key budgets.
+		parts = append(parts, `SELECT 'user', user_id, limit_usd, period
+			FROM user_budgets WHERE limit_usd IS NOT NULL`)
+		parts = append(parts, `SELECT 'team', team_id, limit_usd, period
+			FROM team_budgets WHERE limit_usd IS NOT NULL`)
+		parts = append(parts, `SELECT 'key', proxy_key_id, limit_usd, period
+			FROM proxy_key_budgets WHERE limit_usd IS NOT NULL`)
+	case "team":
+		if teamID != "" {
+			parts = append(parts, `SELECT 'team', team_id, limit_usd, period
+				FROM team_budgets WHERE team_id = ? AND limit_usd IS NOT NULL`)
+			args = append(args, teamID)
+		}
+		if userID != "" {
+			parts = append(parts, `SELECT 'user', user_id, limit_usd, period
+				FROM user_budgets WHERE user_id = ? AND limit_usd IS NOT NULL`)
+			args = append(args, userID)
+		}
+		// Team admins see key budgets for keys owned by their team members.
+		if teamID != "" {
+			parts = append(parts, `SELECT 'key', pkb.proxy_key_id, pkb.limit_usd, pkb.period
+				FROM proxy_key_budgets pkb
+				JOIN proxy_key_owners pko ON pko.proxy_key_id = pkb.proxy_key_id
+				JOIN team_memberships tm ON tm.user_id = pko.owner_user_id
+				WHERE tm.team_id = ? AND pkb.limit_usd IS NOT NULL`)
+			args = append(args, teamID)
+		}
+	case "user":
+		if userID != "" {
+			parts = append(parts, `SELECT 'user', user_id, limit_usd, period
+				FROM user_budgets WHERE user_id = ? AND limit_usd IS NOT NULL`)
+			args = append(args, userID)
+			// Members see key budgets for their own keys.
+			parts = append(parts, `SELECT 'key', pkb.proxy_key_id, pkb.limit_usd, pkb.period
+				FROM proxy_key_budgets pkb
+				JOIN proxy_key_owners pko ON pko.proxy_key_id = pkb.proxy_key_id
+				WHERE pko.owner_user_id = ? AND pkb.limit_usd IS NOT NULL`)
+			args = append(args, userID)
+		}
+	}
+
+	query := rebindForPostgres(strings.Join(parts, " UNION ALL "))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get budgets for scope: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var budgets []ApplicableBudget
+	for rows.Next() {
+		var b ApplicableBudget
+		if err := rows.Scan(&b.Scope, &b.ScopeID, &b.LimitUSD, &b.Period); err != nil {
+			return nil, fmt.Errorf("scan budget for scope: %w", err)
+		}
+		budgets = append(budgets, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate budgets for scope: %w", err)
+	}
+	return budgets, nil
+}

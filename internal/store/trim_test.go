@@ -24,7 +24,7 @@ func TestTrimRequestLogBodies(t *testing.T) {
 
 	now := time.Now().UTC()
 	old := now.Add(-30 * 24 * time.Hour) // 30 days ago
-	recent := now.Add(-1 * time.Hour)     // 1 hour ago
+	recent := now.Add(-1 * time.Hour)    // 1 hour ago
 
 	// Insert an old log and a recent log.
 	err = st.InsertRequestLog(ctx, &RequestLogEntry{

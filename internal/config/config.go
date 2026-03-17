@@ -19,6 +19,7 @@ type Config struct {
 	MasterKey                 string           `mapstructure:"master_key"    yaml:"master_key"`
 	Listen                    string           `mapstructure:"listen"        yaml:"listen"`
 	DatabasePath              string           `mapstructure:"database_path" yaml:"database_path"`
+	DatabaseURL               string           `mapstructure:"database_url"  yaml:"database_url"`
 	LogPath                   string           `mapstructure:"log_path"      yaml:"log_path"` // Path to log file; default "glitchgate.log"
 	Timezone                  string           `mapstructure:"timezone"      yaml:"timezone"` // IANA timezone name, e.g. "America/New_York"
 	ProxyMaxBodyBytes         int              `mapstructure:"proxy_max_body_bytes"          yaml:"proxy_max_body_bytes"`
@@ -77,6 +78,14 @@ type OIDCConfig struct {
 // OIDCEnabled returns true when a complete OIDC configuration is present.
 func (c *Config) OIDCEnabled() bool {
 	return c.OIDC != nil && c.OIDC.IssuerURL != "" && c.OIDC.ClientID != "" && c.OIDC.ClientSecret != ""
+}
+
+// DBBackend returns "postgres" when a database_url is configured, otherwise "sqlite".
+func (c *Config) DBBackend() string {
+	if c.DatabaseURL != "" {
+		return "postgres"
+	}
+	return "sqlite"
 }
 
 // ProviderConfig describes an upstream LLM provider endpoint.
@@ -184,6 +193,7 @@ func Load(configFile string) (*Config, error) {
 	// Defaults.
 	v.SetDefault("listen", ":4000")
 	v.SetDefault("database_path", "glitchgate.db")
+	v.SetDefault("database_url", "")
 	v.SetDefault("log_path", "glitchgate.log")
 	v.SetDefault("timezone", "UTC")
 	v.SetDefault("proxy_max_body_bytes", DefaultProxyMaxBodyBytes)
@@ -219,6 +229,11 @@ func Load(configFile string) (*Config, error) {
 	cfg.DatabasePath = expandTilde(cfg.DatabasePath)
 	// Expand ~ prefix in log path.
 	cfg.LogPath = expandTilde(cfg.LogPath)
+
+	// Validate that database_url and a non-default database_path are not both set.
+	if cfg.DatabaseURL != "" && cfg.DatabasePath != "glitchgate.db" && cfg.DatabasePath != "" {
+		return nil, errors.New("cannot set both database_url and database_path; choose one database backend")
+	}
 
 	// Apply provider defaults and expand env vars.
 	for i := range cfg.Providers {

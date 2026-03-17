@@ -137,7 +137,7 @@ func templateFuncs(tz *time.Location) template.FuncMap {
 		"fmtTz":    fmtInTz,
 		"fmtET":    fmtInTz, // legacy alias
 		"tzAbbrev": tzAbbrev,
-		"not": func(b bool) bool { return !b },
+		"not":      func(b bool) bool { return !b },
 		"deref": func(p any) any {
 			switch v := p.(type) {
 			case *float64:

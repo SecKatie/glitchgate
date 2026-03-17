@@ -21,6 +21,7 @@ import (
 	"github.com/seckatie/glitchgate/internal/translate"
 )
 
+// DefaultBaseURL is the base URL for the Gemini Developer API.
 const DefaultBaseURL = "https://generativelanguage.googleapis.com"
 
 // Client implements provider.Provider for the Gemini Developer API.
@@ -205,7 +206,6 @@ func shouldForwardHeader(hdr string) bool {
 func extractGeminiTokens(body []byte, resp *provider.Response) {
 	var gr translate.GeminiResponse
 	if err := json.Unmarshal(body, &gr); err == nil && gr.UsageMetadata != nil {
-		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens =
-			translate.GeminiUsageTotals(gr.UsageMetadata)
+		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = translate.GeminiUsageTotals(gr.UsageMetadata)
 	}
 }

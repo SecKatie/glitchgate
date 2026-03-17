@@ -404,14 +404,14 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 			groupReqs += ch.RequestCount
 		}
 		filtered = append(filtered, ModelListItem{
-			ModelName:     "Seen in logs",
-			IsLogGroup:    true,
+			ModelName:      "Seen in logs",
+			IsLogGroup:     true,
 			IsUnconfigured: true,
-			Children:      logOnly,
-			ChildCount:    len(logOnly),
-			TotalSpendUSD: groupSpend,
-			RequestCount:  groupReqs,
-			EncodedName:   "_log_group",
+			Children:       logOnly,
+			ChildCount:     len(logOnly),
+			TotalSpendUSD:  groupSpend,
+			RequestCount:   groupReqs,
+			EncodedName:    "_log_group",
 		})
 		items = filtered
 	}
