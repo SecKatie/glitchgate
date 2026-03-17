@@ -4,6 +4,7 @@ package translate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,8 +18,10 @@ import (
 // Anthropic-compatible SSE events, and writes them to the client. This is the
 // reverse of SSEStream and is used when an Anthropic-format client sends a
 // streaming request to an OpenAI-native provider.
-func ReverseSSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
+func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
+	stop := closeOnCancel(ctx, upstream)
+	defer stop()
 
 	rc := http.NewResponseController(w)
 

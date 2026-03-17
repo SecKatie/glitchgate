@@ -3,6 +3,7 @@ package translate
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,6 +37,22 @@ type StreamResult struct {
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
 	ReasoningTokens          int64
+}
+
+// closeOnCancel starts a goroutine that closes r when ctx is cancelled,
+// unblocking any in-progress reads (e.g. a bufio.Scanner). Returns a cleanup
+// function that must be deferred to prevent a goroutine leak when the stream
+// finishes normally before the context is cancelled.
+func closeOnCancel(ctx context.Context, r io.Closer) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = r.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
 }
 
 // SSEStream reads Anthropic SSE events from upstream, translates

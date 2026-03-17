@@ -136,7 +136,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 			slog.Warn("closing response body", "error", cerr)
 		}
 	}()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, provider.MaxUpstreamResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("reading response from %s: %w", c.name, err)
 	}

@@ -4,6 +4,7 @@ package translate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,8 +14,10 @@ import (
 
 // ResponsesSSEToAnthropicSSE reads Responses API SSE events from upstream,
 // translates each to Anthropic SSE events, and writes them to the client.
-func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
+func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
+	stop := closeOnCancel(ctx, upstream)
+	defer stop()
 
 	rc := http.NewResponseController(w)
 
@@ -281,8 +284,10 @@ func ResponsesSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 
 // ResponsesSSEToOpenAISSE reads Responses API SSE events from upstream,
 // translates each to Chat Completions SSE events, and writes them to the client.
-func ResponsesSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
+func ResponsesSSEToOpenAISSE(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
+	stop := closeOnCancel(ctx, upstream)
+	defer stop()
 
 	rc := http.NewResponseController(w)
 

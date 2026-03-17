@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/seckatie/glitchgate/internal/provider"
 )
 
 const (
@@ -55,7 +57,7 @@ func RequestDeviceCode(ctx context.Context) (*DeviceFlowResponse, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, provider.MaxOAuthResponseBytes))
 		return nil, fmt.Errorf("device code request failed (%d): %s", resp.StatusCode, string(body))
 	}
 
@@ -174,7 +176,7 @@ func ExchangeForCopilotToken(ctx context.Context, githubToken string) (*SessionT
 		return nil, fmt.Errorf("GitHub token is invalid or revoked — please re-run: glitchgate auth copilot")
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, provider.MaxOAuthResponseBytes))
 		return nil, fmt.Errorf("copilot token exchange failed (%d): %s", resp.StatusCode, string(body))
 	}
 

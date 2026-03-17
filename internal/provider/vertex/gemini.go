@@ -138,7 +138,7 @@ func (c *GeminiClient) SendRequest(ctx context.Context, req *provider.Request) (
 			slog.Warn("closing response body", "error", cerr)
 		}
 	}()
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, provider.MaxUpstreamResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("reading response from %s: %w", c.name, err)
 	}

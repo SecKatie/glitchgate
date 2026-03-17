@@ -7,6 +7,16 @@ import (
 	"net/http"
 )
 
+const (
+	// MaxUpstreamResponseBytes is the maximum number of bytes to read from a
+	// non-streaming upstream response body. This prevents OOM from malformed or
+	// adversarial responses.
+	MaxUpstreamResponseBytes = 32 << 20 // 32 MB
+
+	// MaxOAuthResponseBytes is the maximum size for OAuth/error response bodies.
+	MaxOAuthResponseBytes = 1 << 20 // 1 MB
+)
+
 // Request holds the data needed to forward a call to an upstream LLM provider.
 type Request struct {
 	Body        []byte
