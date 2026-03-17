@@ -3,7 +3,6 @@
 package web
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -116,13 +115,15 @@ func TestParseConversation(t *testing.T) {
 	})
 
 	t.Run("long text is truncated with FullText preserved", func(t *testing.T) {
-		longText := strings.Repeat("a", 600)
+		// Use newlines to test line-based truncation (3 lines)
+		// JSON-escaped newlines since we're building a JSON string
+		longText := "line1\\nline2\\nline3\\nline4\\nline5"
 		req := `{"model":"claude-test","messages":[{"role":"user","content":"` + longText + `"}]}`
 		cd := parseConversation(req, "")
 		require.False(t, cd.ParseFailed)
 		require.True(t, cd.LatestPrompt.Blocks[0].Truncated)
-		require.Equal(t, 500, len([]rune(cd.LatestPrompt.Blocks[0].Text)))
-		require.Equal(t, longText, cd.LatestPrompt.Blocks[0].FullText)
+		require.Equal(t, "line1\nline2\nline3", cd.LatestPrompt.Blocks[0].Text)
+		require.Equal(t, "line1\nline2\nline3\nline4\nline5", cd.LatestPrompt.Blocks[0].FullText)
 	})
 
 	t.Run("raw bodies are always populated even on parse failure", func(t *testing.T) {
