@@ -8,7 +8,11 @@ data:
   config.yaml: |
     # Glitchgate configuration
     # Managed via Kubernetes ConfigMap - do not edit directly
+    # Sensitive values use ${VAR} placeholders expanded by the config-init
+    # init container via envsubst before the main container starts.
 
+    master_key: "${GLITCHGATE_MASTER_KEY}"
+    database_url: "${DATABASE_URL}"
     listen: ":4000"
     log_path: "/data/glitchgate.log"
     timezone: "UTC"
@@ -43,3 +47,10 @@ data:
       - model_name: claude-sonnet-4-6
         provider: anthropic
         upstream_model: claude-sonnet-4-6-20251001
+
+    # OIDC Authentication (optional)
+    # oidc:
+    #   issuer_url: "https://auth.example.com"
+    #   client_id: "glitchgate"
+    #   client_secret: "${OIDC_CLIENT_SECRET}"
+    #   redirect_url: "https://glitchgate.example.com/ui/auth/callback"
