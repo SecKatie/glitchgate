@@ -61,6 +61,9 @@ func OpenAIToAnthropicResponse(resp *ChatCompletionResponse, model string) *anth
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
 		}
+		if resp.Usage.PromptTokensDetails != nil {
+			result.Usage.CacheReadInputTokens = resp.Usage.PromptTokensDetails.CachedTokens
+		}
 	}
 
 	return result

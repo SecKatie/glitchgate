@@ -82,6 +82,11 @@ func AnthropicToOpenAIRequest(req *anthropic.MessagesRequest) (*ChatCompletionRe
 		result.ReasoningEffort = &effort
 	}
 
+	// Request stream_options.include_usage for streaming to get token counts.
+	if result.Stream {
+		result.StreamOptions = &StreamOptions{IncludeUsage: true}
+	}
+
 	return result, nil
 }
 

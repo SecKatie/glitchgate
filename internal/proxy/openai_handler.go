@@ -255,6 +255,11 @@ func (h *OpenAIHandler) buildOpenAINativeRoute(w http.ResponseWriter, r *http.Re
 		return nil, true
 	}
 	bodyMap["model"] = mapping.UpstreamModel
+	if oaiReq.Stream {
+		if _, alreadySet := bodyMap["stream_options"]; !alreadySet {
+			bodyMap["stream_options"] = map[string]bool{"include_usage": true}
+		}
+	}
 	nativeBody, err := json.Marshal(bodyMap)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "Internal server error")
