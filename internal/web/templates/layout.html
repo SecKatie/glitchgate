@@ -201,6 +201,33 @@
             color: var(--pico-primary);
             cursor: pointer;
         }
+        /* Thinking block (reasoning/extended thinking) */
+        .conv-thinking {
+            background: var(--pico-card-background-color);
+            border: 1px solid var(--pico-muted-border-color);
+            border-left: 3px solid var(--pico-primary);
+            border-radius: var(--pico-border-radius);
+            padding: 0.5rem 0.75rem;
+            margin: 0.5rem 0;
+            font-size: 0.9em;
+        }
+        .conv-thinking summary {
+            cursor: pointer;
+            color: var(--pico-primary);
+            font-weight: 600;
+        }
+        .conv-thinking p {
+            margin: 0.5rem 0 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--pico-muted-color);
+        }
+        .thinking-expand-link {
+            display: block;
+            font-size: 0.78em;
+            margin-top: 0.2rem;
+            color: var(--pico-primary);
+        }
         /* Cost headline */
         .cost-headline {
             display: grid;
@@ -708,6 +735,21 @@
         full.hidden  = !expanding;
         short.hidden = expanding;
         link.textContent = expanding ? 'show less' : 'show full result';
+        return false;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Expand/collapse truncated thinking text
+    // ---------------------------------------------------------------------------
+    function expandThinkingText(link) {
+        var block = link.parentElement;
+        var short = block.querySelector('.conv-thinking-short');
+        var full  = block.querySelector('.conv-thinking-full');
+        if (!full) return false;
+        var expanding = full.hidden;
+        full.hidden   = !expanding;
+        if (short) short.hidden = expanding;
+        link.textContent = expanding ? 'show less' : 'show full thinking';
         return false;
     }
 
