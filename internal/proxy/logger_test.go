@@ -94,6 +94,7 @@ func TestAsyncLoggerTruncatesBodiesBeforePersisting(t *testing.T) {
 
 	logger.logEntry(
 		"proxy-key",
+		"",
 		"anthropic",
 		"anthropic",
 		"claude-sonnet",

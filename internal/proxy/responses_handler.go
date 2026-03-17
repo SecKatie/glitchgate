@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 	"github.com/seckatie/glitchgate/internal/translate"
@@ -107,9 +108,14 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get the authenticated proxy key for logging.
 	pk := KeyFromContext(r.Context())
 	proxyKeyID := ""
+	keyPrefix := ""
 	if pk != nil {
 		proxyKeyID = pk.ID
+		keyPrefix = pk.KeyPrefix
 	}
+
+	metrics.RecordActiveRequest("responses")
+	defer metrics.FinishActiveRequest("responses")
 
 	if h.budgetChecker != nil && proxyKeyID != "" {
 		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
@@ -126,6 +132,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
 		SourceFormat: "responses",
 		ProxyKeyID:   proxyKeyID,
+		KeyPrefix:    keyPrefix,
 		ModelRequest: req.Model,
 		IsStreaming:  isStreaming,
 		Start:        start,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 	anthropic "github.com/seckatie/glitchgate/internal/provider/anthropic"
@@ -74,9 +75,14 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get the authenticated proxy key for logging.
 	pk := KeyFromContext(r.Context())
 	proxyKeyID := ""
+	keyPrefix := ""
 	if pk != nil {
 		proxyKeyID = pk.ID
+		keyPrefix = pk.KeyPrefix
 	}
+
+	metrics.RecordActiveRequest("openai")
+	defer metrics.FinishActiveRequest("openai")
 
 	if h.budgetChecker != nil && proxyKeyID != "" {
 		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
@@ -93,6 +99,7 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
 		SourceFormat: "openai",
 		ProxyKeyID:   proxyKeyID,
+		KeyPrefix:    keyPrefix,
 		ModelRequest: oaiReq.Model,
 		IsStreaming:  oaiReq.Stream,
 		Start:        start,
@@ -365,7 +372,7 @@ func (h *OpenAIHandler) buildResponsesRoute(w http.ResponseWriter, r *http.Reque
 		RequestBody: rawBody,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
 			if oaiReq.Stream {
-				return h.handleResponsesProviderStreamingToCC(w, provResp, oaiReq.Model)
+				return h.handleResponsesProviderStreamingToCC(w, r, provResp, oaiReq.Model)
 			}
 			return h.handleResponsesProviderNonStreamingToCC(w, provResp, oaiReq.Model)
 		},
@@ -409,8 +416,8 @@ func (h *OpenAIHandler) handleResponsesProviderNonStreamingToCC(w http.ResponseW
 	}
 }
 
-func (h *OpenAIHandler) handleResponsesProviderStreamingToCC(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
-	result, err := translate.ResponsesSSEToOpenAISSE(w, resp.Stream, modelRequested)
+func (h *OpenAIHandler) handleResponsesProviderStreamingToCC(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
+	result, err := translate.ResponsesSSEToOpenAISSE(r.Context(), w, resp.Stream, modelRequested)
 
 	var errDetails *string
 	if err != nil {

@@ -39,6 +39,8 @@ type Config struct {
 	Providers                 []ProviderConfig `mapstructure:"providers"  yaml:"providers"`
 	ModelList                 []ModelMapping   `mapstructure:"model_list" yaml:"model_list"`
 	OIDC                      *OIDCConfig      `mapstructure:"oidc"       yaml:"oidc"`
+	MetricsEnabled            bool             `mapstructure:"metrics_enabled" yaml:"metrics_enabled"`
+	LogLevel                  string           `mapstructure:"log_level"       yaml:"log_level"`
 
 	// resolvedChains is populated at Load time. It maps every non-wildcard model
 	// name to its ordered dispatch slice (one entry for direct models, multiple
@@ -210,6 +212,8 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("request_log_prune_interval", DefaultRequestLogPruneInterval)
 	v.SetDefault("request_log_prune_batch_size", DefaultRequestLogPruneBatchSize)
 	v.SetDefault("request_log_body_max_bytes", DefaultRequestLogBodyMaxBytes)
+	v.SetDefault("metrics_enabled", true)
+	v.SetDefault("log_level", "info")
 	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
 
 	// Read config file (not an error if none exists).

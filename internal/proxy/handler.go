@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/seckatie/glitchgate/internal/config"
+	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 	anthropic "github.com/seckatie/glitchgate/internal/provider/anthropic"
@@ -88,9 +89,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get the authenticated proxy key for logging.
 	pk := KeyFromContext(r.Context())
 	proxyKeyID := ""
+	keyPrefix := ""
 	if pk != nil {
 		proxyKeyID = pk.ID
+		keyPrefix = pk.KeyPrefix
 	}
+
+	metrics.RecordActiveRequest("anthropic")
+	defer metrics.FinishActiveRequest("anthropic")
 
 	if h.budgetChecker != nil && proxyKeyID != "" {
 		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
@@ -107,6 +113,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
 		SourceFormat: "anthropic",
 		ProxyKeyID:   proxyKeyID,
+		KeyPrefix:    keyPrefix,
 		ModelRequest: reqBody.Model,
 		IsStreaming:  reqBody.Stream,
 		Start:        start,
@@ -279,7 +286,7 @@ func (h *Handler) buildOpenAIProviderRoute(w http.ResponseWriter, r *http.Reques
 			case reqBody.Stream && forceNonStream:
 				return h.handleOpenAIProviderForcedStream(w, provResp, reqBody.Model)
 			case reqBody.Stream:
-				return h.handleOpenAIProviderStreaming(w, provResp, reqBody.Model)
+				return h.handleOpenAIProviderStreaming(w, r, provResp, reqBody.Model)
 			default:
 				return h.handleOpenAIProviderNonStreaming(w, provResp, reqBody.Model)
 			}
@@ -337,8 +344,8 @@ func (h *Handler) handleOpenAIProviderNonStreaming(w http.ResponseWriter, resp *
 	}
 }
 
-func (h *Handler) handleOpenAIProviderStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
-	result, err := translate.ReverseSSEStream(w, resp.Stream, modelRequested)
+func (h *Handler) handleOpenAIProviderStreaming(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
+	result, err := translate.ReverseSSEStream(r.Context(), w, resp.Stream, modelRequested)
 
 	var errDetails *string
 	if err != nil {
@@ -459,7 +466,7 @@ func (h *Handler) buildResponsesProviderRoute(w http.ResponseWriter, r *http.Req
 		RequestBody: body,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
 			if reqBody.Stream {
-				return h.handleResponsesProviderStreaming(w, provResp, reqBody.Model)
+				return h.handleResponsesProviderStreaming(w, r, provResp, reqBody.Model)
 			}
 			return h.handleResponsesProviderNonStreaming(w, provResp, reqBody.Model)
 		},
@@ -504,12 +511,12 @@ func (h *Handler) handleResponsesProviderNonStreaming(w http.ResponseWriter, res
 	}
 }
 
-func (h *Handler) handleResponsesProviderStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+func (h *Handler) handleResponsesProviderStreaming(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
 	// The upstream (Responses API) doesn't send anthropic-beta, but the
 	// translator can produce thinking content blocks. Inject the header so
 	// Claude Code knows to process and render them.
 	w.Header().Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
-	result, err := translate.ResponsesSSEToAnthropicSSE(w, resp.Stream, modelRequested)
+	result, err := translate.ResponsesSSEToAnthropicSSE(r.Context(), w, resp.Stream, modelRequested)
 
 	var errDetails *string
 	if err != nil {

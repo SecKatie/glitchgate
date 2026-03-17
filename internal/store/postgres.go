@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
 	"github.com/pressly/goose/v3"
+	"github.com/seckatie/glitchgate/internal/config"
 )
 
 //go:embed migrations_pg/*.sql
@@ -56,6 +57,17 @@ func (s *PostgreSQLStore) Migrate(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// Ping verifies the database connection is alive.
+func (s *PostgreSQLStore) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
+// NormalizeLoggedProviderNames rewrites legacy canonical provider keys in
+// request_logs to the configured provider names used for runtime identity.
+func (s *PostgreSQLStore) NormalizeLoggedProviderNames(ctx context.Context, cfg *config.Config) error {
+	return normalizeLoggedProviderNames(ctx, s.db, cfg, true)
 }
 
 // Close closes the underlying database connection.
