@@ -74,3 +74,19 @@ func TestAnthropicDefaultsHasCacheRates(t *testing.T) {
 		})
 	}
 }
+
+func TestLookup(t *testing.T) {
+	calc := pricing.NewCalculator(map[string]pricing.Entry{
+		"provider-a/model-1": {
+			InputPerMillion: 1.23,
+		},
+	})
+
+	entry, ok := calc.Lookup("provider-a", "model-1")
+	require.True(t, ok)
+	require.Equal(t, pricing.Entry{InputPerMillion: 1.23}, entry)
+
+	entry, ok = calc.Lookup("provider-a", "missing")
+	require.False(t, ok)
+	require.Equal(t, pricing.Entry{}, entry)
+}
