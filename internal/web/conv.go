@@ -37,7 +37,7 @@ type ConvTurn struct {
 
 // ConvBlock is a typed content block within a turn.
 type ConvBlock struct {
-	// Type is one of: "text", "tool_use", "tool_result", "image", "document", "unknown"
+	// Type is one of: "text", "tool_use", "tool_result", "image", "document", "thinking", "unknown"
 	Type string
 
 	// For Type="text"
@@ -58,6 +58,10 @@ type ConvBlock struct {
 
 	// For Type="image" or "document" — label only, no raw data
 	MediaLabel string // e.g. "[image/jpeg]" or "[application/pdf]"
+
+	// For Type="thinking" — extended reasoning/reasoning_tokens content
+	ThinkingContent string // the thinking/reasoning text content
+	ThinkingTrunc   bool   // true if ThinkingContent was truncated
 }
 
 // ToolArg is a single key/value pair from a tool_use input object.
@@ -78,6 +82,7 @@ type LogDetailData struct {
 
 const (
 	truncateAt        = 500
+	truncateAtLines   = 3
 	toolArgTruncateAt = 100
 )
 
@@ -87,6 +92,19 @@ func truncateRunes(s string) (short string, full string, truncated bool) {
 		return s, "", false
 	}
 	return string(r[:truncateAt]), s, true
+}
+
+// truncateLines truncates a string to a maximum number of lines.
+// Returns (truncated text, full text, was truncated).
+func truncateLines(s string, maxLines int) (short string, full string, truncated bool) {
+	if s == "" {
+		return "", "", false
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s, "", false
+	}
+	return strings.Join(lines[:maxLines], "\n"), s, true
 }
 
 // truncationMarker is the prefix of the suffix appended by truncateLoggedBody.
@@ -461,6 +479,17 @@ func normalizeOpenAIContent(content interface{}) string {
 func openAIMessageToTurn(msg translate.ChatMessage, toolNameMap map[string]string) ConvTurn {
 	turn := ConvTurn{Role: msg.Role}
 
+	// Handle reasoning content first (appears before main content in reasoning models)
+	if msg.ReasoningContent != "" {
+		short, full, trunc := truncateLines(msg.ReasoningContent, truncateAtLines)
+		turn.Blocks = append(turn.Blocks, ConvBlock{
+			Type:            "thinking",
+			ThinkingContent: short,
+			ThinkingTrunc:   trunc,
+			FullText:        full,
+		})
+	}
+
 	// Handle content - can be string or array of content parts.
 	// For "tool" role messages, skip the content here — it's captured in the
 	// tool_result block below to avoid duplicating the result text.
@@ -468,7 +497,7 @@ func openAIMessageToTurn(msg translate.ChatMessage, toolNameMap map[string]strin
 		switch content := msg.Content.(type) {
 		case string:
 			if content != "" {
-				short, full, trunc := truncateRunes(content)
+				short, full, trunc := truncateLines(content, truncateAtLines)
 				turn.Blocks = append(turn.Blocks, ConvBlock{
 					Type:      "text",
 					Text:      short,
@@ -531,7 +560,7 @@ func openAIContentPartToBlock(m map[string]interface{}) ConvBlock {
 	switch partType {
 	case "text":
 		if text, ok := m["text"].(string); ok {
-			short, full, trunc := truncateRunes(text)
+			short, full, trunc := truncateLines(text, truncateAtLines)
 			return ConvBlock{
 				Type:      "text",
 				Text:      short,
@@ -663,7 +692,7 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 
 	// Add accumulated text if present.
 	if text := textBuf.String(); text != "" {
-		short, full, trunc := truncateRunes(text)
+		short, full, trunc := truncateLines(text, truncateAtLines)
 		turn.Blocks = append(turn.Blocks, ConvBlock{
 			Type:      "text",
 			Text:      short,
@@ -772,7 +801,7 @@ func appendConvBlock(turn *ConvTurn, cb ConvBlock) {
 			incoming = cb.Text
 		}
 		merged := existing + "\n\n" + incoming
-		short, full, trunc := truncateRunes(merged)
+		short, full, trunc := truncateLines(merged, truncateAtLines)
 		last.Text = short
 		last.Truncated = trunc
 		last.FullText = full
@@ -795,10 +824,11 @@ func extractContentBlocks(content interface{}) []anthropic.ContentBlock {
 				continue
 			}
 			b := anthropic.ContentBlock{
-				Type: stringField(m, "type"),
-				Text: stringField(m, "text"),
-				ID:   stringField(m, "id"),
-				Name: stringField(m, "name"),
+				Type:     stringField(m, "type"),
+				Text:     stringField(m, "text"),
+				Thinking: stringField(m, "thinking"),
+				ID:       stringField(m, "id"),
+				Name:     stringField(m, "name"),
 			}
 			if inp, ok := m["input"]; ok {
 				b.Input = inp
@@ -844,7 +874,7 @@ func stringField(m map[string]interface{}, key string) string {
 func contentBlockToConvBlock(b anthropic.ContentBlock, toolNameMap map[string]string) ConvBlock {
 	switch b.Type {
 	case "text":
-		short, full, trunc := truncateRunes(b.Text)
+		short, full, trunc := truncateLines(b.Text, truncateAtLines)
 		return ConvBlock{
 			Type:      "text",
 			Text:      short,
@@ -888,6 +918,15 @@ func contentBlockToConvBlock(b anthropic.ContentBlock, toolNameMap map[string]st
 			label = "[" + mediaType
 		}
 		return ConvBlock{Type: "document", MediaLabel: label + "]"}
+
+	case "thinking":
+		short, full, trunc := truncateLines(b.Thinking, truncateAtLines)
+		return ConvBlock{
+			Type:            "thinking",
+			ThinkingContent: short,
+			ThinkingTrunc:   trunc,
+			FullText:        full,
+		}
 
 	default:
 		return ConvBlock{Type: "unknown", Text: "[" + b.Type + " block]"}
@@ -996,7 +1035,7 @@ func responsesMessageContentBlock(item translate.InputItem) ConvBlock {
 }
 
 func responsesInputTextBlock(text string) ConvBlock {
-	short, full, trunc := truncateRunes(text)
+	short, full, trunc := truncateLines(text, truncateAtLines)
 	return ConvBlock{
 		Type:      "text",
 		Text:      short,
@@ -1028,6 +1067,16 @@ func responsesFunctionCallBlock(callID, name, arguments string) ConvBlock {
 		ToolInput: toolInput,
 		ToolID:    callID,
 		ToolArgs:  parseToolArgs(parsedInput),
+	}
+}
+
+func responsesReasoningBlock(text string) ConvBlock {
+	short, full, trunc := truncateLines(text, truncateAtLines)
+	return ConvBlock{
+		Type:            "thinking",
+		ThinkingContent: short,
+		ThinkingTrunc:   trunc,
+		FullText:        full,
 	}
 }
 
@@ -1126,6 +1175,15 @@ func responsesOutputItemBlocks(item translate.OutputItem, toolNameMap map[string
 			toolNameMap[item.CallID] = item.Name
 		}
 		return []ConvBlock{responsesFunctionCallBlock(item.CallID, item.Name, item.Arguments)}
+	case "reasoning":
+		// Reasoning output items contain a summary array with the thinking content
+		var blocks []ConvBlock
+		for _, summary := range item.Summary {
+			if summary.Text != "" {
+				blocks = append(blocks, responsesReasoningBlock(summary.Text))
+			}
+		}
+		return blocks
 	default:
 		if item.Type == "" {
 			return nil
@@ -1351,11 +1409,12 @@ func parseSSEResponse(body string) []anthropic.ContentBlock {
 	}
 
 	type blockState struct {
-		blockType string
-		name      string
-		id        string
-		textBuf   strings.Builder
-		inputBuf  strings.Builder
+		blockType   string
+		name        string
+		id          string
+		textBuf     strings.Builder
+		thinkingBuf strings.Builder
+		inputBuf    strings.Builder
 	}
 
 	blocks := make(map[int]*blockState)
@@ -1380,6 +1439,7 @@ func parseSSEResponse(body string) []anthropic.ContentBlock {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
+				Thinking    string `json:"thinking"`
 			} `json:"delta"`
 		}
 
@@ -1404,6 +1464,8 @@ func parseSSEResponse(body string) []anthropic.ContentBlock {
 			switch envelope.Delta.Type {
 			case "text_delta":
 				bs.textBuf.WriteString(envelope.Delta.Text)
+			case "thinking_delta":
+				bs.thinkingBuf.WriteString(envelope.Delta.Thinking)
 			case "input_json_delta":
 				bs.inputBuf.WriteString(envelope.Delta.PartialJSON)
 			}
@@ -1421,6 +1483,10 @@ func parseSSEResponse(body string) []anthropic.ContentBlock {
 		case "text":
 			if text := bs.textBuf.String(); text != "" {
 				result = append(result, anthropic.ContentBlock{Type: "text", Text: text})
+			}
+		case "thinking":
+			if thinking := bs.thinkingBuf.String(); thinking != "" {
+				result = append(result, anthropic.ContentBlock{Type: "thinking", Thinking: thinking})
 			}
 		case "tool_use":
 			var input interface{}
