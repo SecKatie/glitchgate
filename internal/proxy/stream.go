@@ -781,6 +781,7 @@ func extractOpenAITokens(data string, inputTokens, outputTokens, cacheReadTokens
 		Usage *struct {
 			PromptTokens        int64 `json:"prompt_tokens"`
 			CompletionTokens    int64 `json:"completion_tokens"`
+			ReasoningTokens     int64 `json:"reasoning_tokens"`
 			PromptTokensDetails *struct {
 				CachedTokens int64 `json:"cached_tokens"`
 			} `json:"prompt_tokens_details"`
@@ -805,6 +806,9 @@ func extractOpenAITokens(data string, inputTokens, outputTokens, cacheReadTokens
 		}
 		if chunk.Usage.CompletionTokensDetails != nil {
 			*reasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
+		}
+		if *reasoningTokens == 0 && chunk.Usage.ReasoningTokens > 0 {
+			*reasoningTokens = chunk.Usage.ReasoningTokens
 		}
 	}
 }
