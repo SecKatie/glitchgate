@@ -1,0 +1,53 @@
+# Production overlay for glitchgate
+# Usage: kubectl apply -k ./overlays/production
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: glitchgate
+      spec:
+        replicas: 2
+        template:
+          spec:
+            containers:
+              - name: glitchgate
+                image: ghcr.io/seckatie/glitchgate:v0.1.0
+                imagePullPolicy: Always
+    target:
+      kind: Deployment
+      name: glitchgate
+
+configMapGenerator:
+  - name: glitchgate-config
+    behavior: replace
+    literals:
+      - GLITCHGATE_LOG_LEVEL=warn
+
+secretGenerator:
+  - name: glitchgate-secrets
+    behavior: replace
+    envs:
+      - secrets.env
+    options:
+      labels:
+        app: glitchgate
+
+vars:
+  - name: IMAGE_TAG
+    objref:
+      kind: Deployment
+      name: glitchgate
+      apiVersion: apps/v1
+      fieldSpec:
+        path: spec/template/spec/containers/0/image
+        kind: Deployment
+        name: glitchgate
+        apiVersion: apps/v1

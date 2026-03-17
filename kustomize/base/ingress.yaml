@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: glitchgate
+  labels:
+    app: glitchgate
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  rules:
+    - host: glitchgate.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: glitchgate
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - glitchgate.example.com
+      secretName: glitchgate-tls
