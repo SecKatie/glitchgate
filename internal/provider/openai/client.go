@@ -230,6 +230,7 @@ func (c *Client) extractTokens(body []byte, resp *provider.Response) {
 		Usage *struct {
 			PromptTokens        int64 `json:"prompt_tokens"`
 			CompletionTokens    int64 `json:"completion_tokens"`
+			ReasoningTokens     int64 `json:"reasoning_tokens"`
 			PromptTokensDetails *struct {
 				CachedTokens int64 `json:"cached_tokens"`
 			} `json:"prompt_tokens_details"`
@@ -250,6 +251,9 @@ func (c *Client) extractTokens(body []byte, resp *provider.Response) {
 		}
 		if cc.Usage.CompletionTokensDetails != nil {
 			resp.ReasoningTokens = cc.Usage.CompletionTokensDetails.ReasoningTokens
+		}
+		if resp.ReasoningTokens == 0 && cc.Usage.ReasoningTokens > 0 {
+			resp.ReasoningTokens = cc.Usage.ReasoningTokens
 		}
 	}
 }
