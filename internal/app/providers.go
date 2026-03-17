@@ -15,8 +15,10 @@ import (
 	"github.com/seckatie/glitchgate/internal/provider/vertex"
 )
 
-const defaultOpenAIBaseURL = "https://api.openai.com"
-const defaultGeminiBaseURL = gemini.DefaultBaseURL
+const (
+	defaultOpenAIBaseURL = "https://api.openai.com"
+	defaultGeminiBaseURL = gemini.DefaultBaseURL
+)
 
 // ProviderRegistry compiles configured provider clients, pricing tables, and
 // legacy provider-name aliases into one runtime dependency.

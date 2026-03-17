@@ -10,14 +10,14 @@ import (
 	"github.com/seckatie/glitchgate/internal/store"
 )
 
-// openDB loads config, opens the SQLite store, and runs migrations.
+// openDB loads config, opens the configured store backend, and runs migrations.
 // The caller must defer st.Close().
 func openDB() (store.Store, *config.Config, error) {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading config: %w", err)
 	}
-	st, err := store.NewSQLiteStore(cfg.DatabasePath)
+	st, err := store.Open(cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening database: %w", err)
 	}

@@ -76,7 +76,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	defer func() { _ = dst.Close() }()
 	require.NoError(t, dst.Migrate(ctx))
 
-	stats, err := dst.Import(ctx, bytes.NewReader(exported), nil)
+	stats, err := dst.Import(ctx, bytes.NewReader(exported), nil, 1)
 	require.NoError(t, err)
 
 	// Verify stats.
@@ -139,7 +139,7 @@ func TestExportImportWithNewlines(t *testing.T) {
 	defer func() { _ = dst.Close() }()
 	require.NoError(t, dst.Migrate(ctx))
 
-	_, err = dst.Import(ctx, &buf, nil)
+	_, err = dst.Import(ctx, &buf, nil, 1)
 	require.NoError(t, err)
 
 	// Verify the newlines survived the round trip.
@@ -165,15 +165,15 @@ func TestImportSkipsDuplicates(t *testing.T) {
 	// Build a gzip'd SQL dump with a conflicting key.
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
-	fmt.Fprintln(gz, "-- glitchgate database export")
-	fmt.Fprintln(gz, "-- version: 1")
-	fmt.Fprintf(gz, "-- exported_at: %s\n", time.Now().UTC().Format(time.RFC3339))
-	fmt.Fprintln(gz)
-	fmt.Fprintf(gz, "INSERT OR IGNORE INTO proxy_keys (id, key_hash, key_prefix, label, created_at) VALUES ('key-1', 'hash-xyz', 'sk_dup', 'imported label', '%s');\n",
+	_, _ = fmt.Fprintln(gz, "-- glitchgate database export")
+	_, _ = fmt.Fprintln(gz, "-- version: 1")
+	_, _ = fmt.Fprintf(gz, "-- exported_at: %s\n", time.Now().UTC().Format(time.RFC3339))
+	_, _ = fmt.Fprintln(gz)
+	_, _ = fmt.Fprintf(gz, "INSERT OR IGNORE INTO proxy_keys (id, key_hash, key_prefix, label, created_at) VALUES ('key-1', 'hash-xyz', 'sk_dup', 'imported label', '%s');\n",
 		time.Now().UTC().Format(time.RFC3339))
 	require.NoError(t, gz.Close())
 
-	stats, err := st.Import(ctx, &buf, nil)
+	stats, err := st.Import(ctx, &buf, nil, 1)
 	require.NoError(t, err)
 
 	// Key should not have been imported (duplicate PK).

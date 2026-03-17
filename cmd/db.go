@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/store"
 )
 
@@ -60,33 +59,24 @@ func init() {
 	dbCmd.AddCommand(dbTrimCmd)
 	rootCmd.AddCommand(dbCmd)
 
+	dbImportCmd.Flags().IntP("workers", "j", 4, "parallel insert workers (PostgreSQL only; SQLite always uses 1)")
+
 	dbTrimCmd.Flags().Duration("older-than", 7*24*time.Hour, "trim logs older than this duration")
 	dbTrimCmd.Flags().Int("batch-size", 1000, "rows to update per batch")
 	dbTrimCmd.Flags().Bool("dry-run", false, "show how many rows would be trimmed without making changes")
 }
 
-func openSQLiteStore() (*store.SQLiteStore, error) {
-	cfg, err := config.Load(cfgFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
-	}
-	st, err := store.NewSQLiteStore(cfg.DatabasePath)
-	if err != nil {
-		return nil, fmt.Errorf("opening database: %w", err)
-	}
-	if err := st.Migrate(context.Background()); err != nil {
-		_ = st.Close()
-		return nil, fmt.Errorf("running migrations: %w", err)
-	}
-	return st, nil
-}
-
 func runDBExport(_ *cobra.Command, args []string) error {
-	st, err := openSQLiteStore()
+	st, _, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
+
+	bs, ok := st.(store.BackupStore)
+	if !ok {
+		return fmt.Errorf("current database backend does not support export")
+	}
 
 	w := os.Stdout
 	if len(args) == 1 {
@@ -101,7 +91,7 @@ func runDBExport(_ *cobra.Command, args []string) error {
 	progress := func(table string, rows int64) {
 		fmt.Fprintf(os.Stderr, "  %-20s %d rows\n", table, rows)
 	}
-	if err := st.Export(context.Background(), w, progress); err != nil {
+	if err := bs.Export(context.Background(), w, progress); err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
 
@@ -111,12 +101,17 @@ func runDBExport(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-func runDBImport(_ *cobra.Command, args []string) error {
-	st, err := openSQLiteStore()
+func runDBImport(cmd *cobra.Command, args []string) error {
+	st, _, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
+
+	bs, ok := st.(store.BackupStore)
+	if !ok {
+		return fmt.Errorf("current database backend does not support import")
+	}
 
 	f, err := os.Open(args[0])
 	if err != nil {
@@ -124,10 +119,23 @@ func runDBImport(_ *cobra.Command, args []string) error {
 	}
 	defer func() { _ = f.Close() }()
 
+	importStart := time.Now()
+	lastReport := importStart
+	var lastRows int64
 	progress := func(table string, rows int64) {
-		fmt.Fprintf(os.Stderr, "  %-20s %d rows\n", table, rows)
+		now := time.Now()
+		elapsed := now.Sub(lastReport).Seconds()
+		var rps float64
+		if elapsed > 0 {
+			rps = float64(rows-lastRows) / elapsed
+		}
+		total := now.Sub(importStart).Truncate(time.Second)
+		fmt.Fprintf(os.Stderr, "  %-20s %d rows  (%s elapsed, %.0f rows/s)\n", table, rows, total, rps)
+		lastReport = now
+		lastRows = rows
 	}
-	stats, err := st.Import(context.Background(), f, progress)
+	workers, _ := cmd.Flags().GetInt("workers")
+	stats, err := bs.Import(context.Background(), f, progress, workers)
 	if err != nil {
 		return fmt.Errorf("import: %w", err)
 	}
@@ -143,7 +151,7 @@ func runDBImport(_ *cobra.Command, args []string) error {
 }
 
 func runDBTrim(cmd *cobra.Command, _ []string) error {
-	st, err := openSQLiteStore()
+	st, _, err := openDB()
 	if err != nil {
 		return err
 	}
