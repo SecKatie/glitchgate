@@ -3,6 +3,7 @@
 package translate
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http/httptest"
@@ -154,7 +155,7 @@ func TestResponsesSSEToAnthropicSSE_PreservesReasoningBlocks(t *testing.T) {
 	rec := httptest.NewRecorder()
 	upstream := io.NopCloser(strings.NewReader(sseInput))
 
-	result, err := ResponsesSSEToAnthropicSSE(rec, upstream, "claude-sonnet")
+	result, err := ResponsesSSEToAnthropicSSE(context.Background(), rec, upstream, "claude-sonnet")
 	require.NoError(t, err)
 	require.Equal(t, int64(8), result.CacheReadInputTokens)
 
