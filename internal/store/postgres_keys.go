@@ -125,9 +125,21 @@ func (s *PostgreSQLStore) UpdateKeyLabel(ctx context.Context, prefix, label stri
 func (s *PostgreSQLStore) RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error {
 	const query = `INSERT INTO audit_events (action, key_prefix, detail, actor_email, created_at) VALUES ($1, $2, $3, $4, $5)`
 
-	_, err := s.db.ExecContext(ctx, query, action, keyPrefix, detail, actorEmail, time.Now().UTC())
+	now := time.Now().UTC()
+
+	_, err := s.db.ExecContext(ctx, query, action, keyPrefix, detail, actorEmail, now)
 	if err != nil {
-		return fmt.Errorf("record audit event: %w", err)
+		if !isPostgresConstraintViolation(err, "audit_events_pkey") {
+			return fmt.Errorf("record audit event: %w", err)
+		}
+
+		if repairErr := syncAuditEventsSequence(ctx, s.db); repairErr != nil {
+			return fmt.Errorf("record audit event: %w", repairErr)
+		}
+
+		if _, retryErr := s.db.ExecContext(ctx, query, action, keyPrefix, detail, actorEmail, now); retryErr != nil {
+			return fmt.Errorf("record audit event: %w", retryErr)
+		}
 	}
 
 	return nil
