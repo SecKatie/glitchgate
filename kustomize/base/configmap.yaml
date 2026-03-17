@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: glitchgate-config
+  labels:
+    app: glitchgate
+data:
+  config.yaml: |
+    # Glitchgate configuration
+    # Managed via Kubernetes ConfigMap - do not edit directly
+
+    listen: ":4000"
+    log_path: "/data/glitchgate.log"
+    timezone: "UTC"
+    log_level: "info"
+    metrics_enabled: true
+
+    # Rate limiting
+    login_rate_limit_per_minute: 10
+    login_rate_limit_burst: 5
+    proxy_rate_limit_per_minute: 120
+    proxy_rate_limit_burst: 30
+    proxy_ip_rate_limit_per_minute: 240
+    proxy_ip_rate_limit_burst: 60
+
+    # Request logging
+    request_log_retention: "720h"
+    request_log_prune_interval: "1h"
+    request_log_prune_batch_size: 1000
+    request_log_body_max_bytes: 4194304
+
+    # Providers - API keys injected from secrets
+    providers:
+      - name: anthropic
+        type: anthropic
+        base_url: https://api.anthropic.com
+        auth_mode: proxy_key
+        api_key: "${ANTHROPIC_API_KEY}"
+        default_version: "2023-06-01"
+
+    # Model mappings
+    model_list:
+      - model_name: claude-sonnet-4-6
+        provider: anthropic
+        upstream_model: claude-sonnet-4-6-20251001

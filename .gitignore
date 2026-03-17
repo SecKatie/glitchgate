@@ -30,6 +30,9 @@ Thumbs.db
 .env
 .env.*
 
+# Kubernetes secrets
+kustomize/overlays/*/secrets.env
+
 # Distribution
 dist/
 
