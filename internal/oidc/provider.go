@@ -56,7 +56,11 @@ func (p *Provider) Enabled() bool { return p != nil }
 
 // AuthURL generates the IDP authorization URL including the PKCE challenge.
 func (p *Provider) AuthURL(state, pkceChallenge string) string {
-	return p.oauth2.AuthCodeURL(state, oauth2.S256ChallengeOption(pkceChallenge))
+	return p.oauth2.AuthCodeURL(
+		state,
+		oauth2.SetAuthURLParam("code_challenge", pkceChallenge),
+		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+	)
 }
 
 // Exchange completes the authorization code flow: exchanges the code for tokens,
