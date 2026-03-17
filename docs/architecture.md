@@ -93,59 +93,25 @@ glitchgate/
 
 ## Request Flow
 
-```
-Client (any format)
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      chi router (/v1/*)                      │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │  Middleware Stack:                                      │ │
-│  │  1. RealIP       - Extract client IP                    │ │
-│  │  2. Recoverer    - Panic recovery                       │ │
-│  │  3. SecurityHeaders - CSP, XSS protection               │ │
-│  │  4. IPRateLimit  - Per-IP rate limiting                 │ │
-│  │  5. Auth         - Proxy key validation                 │ │
-│  │  6. KeyRateLimit - Per-key rate limiting                │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Format Handler                            │
-│  (AnthropicHandler / OpenAIHandler / ResponsesHandler)      │
-│                                                              │
-│  1. Parse request body, extract model name                   │
-│  2. config.FindModel() → dispatch chain                     │
-│  3. executeFallbackChain()                                   │
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Fallback Chain Execution                    │
-│                                                              │
-│  For each model in dispatch chain:                          │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  1. Build route plan (translate if needed)             │ │
-│  │  2. provider.SendRequest()                             │ │
-│  │  3. Handle response (translate back if needed)         │ │
-│  │  4. On success: log + return                           │ │
-│  │  5. On 5xx/429: retry next model in chain              │ │
-│  │  6. On other error: log + return error                 │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    AsyncLogger                               │
-│  • Channel buffer (default: 1000)                           │
-│  • Background goroutine writes batches                      │
-│  • Logs: tokens, latency, status, bodies, errors            │
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-    Response to client
-```
+1. **Client Request** → chi router (`/v1/*`)
+2. **Middleware Stack**:
+   - `RealIP` - Extract client IP
+   - `Recoverer` - Panic recovery
+   - `SecurityHeaders` - CSP, XSS protection
+   - `IPRateLimit` - Per-IP rate limiting
+   - `Auth` - Proxy key validation
+   - `KeyRateLimit` - Per-key rate limiting
+3. **Format Handler** (Anthropic/OpenAI/Responses):
+   - Parse request body, extract model name
+   - `config.FindModel()` → dispatch chain
+   - `executeFallbackChain()`
+4. **Fallback Chain Execution**:
+   - Build route plan (translate if needed)
+   - `provider.SendRequest()`
+   - Handle response (translate back if needed)
+   - On 5xx/429: retry next model in chain
+5. **AsyncLogger** - Background write to database
+6. **Response to client**
 
 ---
 
@@ -286,9 +252,19 @@ type Provider interface {
 
 ### Storage Layer
 
-**Database**: SQLite via `modernc.org/sqlite` (pure Go, no CGO)
-- WAL mode for concurrent reads
-- Foreign key constraints enforced
+**Database**: SQLite (default) or PostgreSQL via `modernc.org/sqlite` (pure Go) or `jackc/pgx/v5`
+
+SQLite uses WAL mode for concurrent reads with foreign key constraints enforced. PostgreSQL is recommended for multi-instance deployments.
+
+Choose SQLite for:
+- Single-node deployments
+- Simple setup (no external dependencies)
+- Development and testing
+
+Choose PostgreSQL for:
+- Multi-instance/high availability setups
+- Existing PostgreSQL infrastructure
+- Advanced backup/recovery requirements
 
 **Narrow interfaces** for dependency injection:
 
@@ -425,7 +401,24 @@ func UISessionMiddleware(sessions *auth.UISessionStore, store SessionReaderStore
 
 ---
 
-## Extending Glitchgate
+## Database Backends
+
+glitchgate supports SQLite (default) and PostgreSQL.
+
+| Use Case | Recommended Backend |
+|----------|---------------------|
+| Single-node deployments | SQLite |
+| Multi-instance/HA setups | PostgreSQL |
+| Development/testing | SQLite |
+| Existing PostgreSQL infra | PostgreSQL |
+
+**SQLite**: Pure Go via `modernc.org/sqlite` (no CGO), WAL mode for concurrency.
+
+**PostgreSQL**: Via `jackc/pgx/v5`, connection pooling, external session store for multi-instance deployments.
+
+---
+
+## Contributing
 
 ### Adding a New Provider
 

@@ -11,6 +11,63 @@ Searched in order (first found wins):
 3. `./config.yaml`
 4. `/etc/glitchgate/config.yaml`
 
+## Quick Examples
+
+### Minimal (Single Provider)
+
+```yaml
+master_key: "change-me-to-something-secure"
+
+providers:
+  - name: "anthropic"
+    base_url: "https://api.anthropic.com"
+    auth_mode: "proxy_key"
+    api_key: "${ANTHROPIC_API_KEY}"
+    default_version: "2023-06-01"
+
+model_list:
+  - model_name: "claude-sonnet"
+    provider: "anthropic"
+    upstream_model: "claude-sonnet-4-6"
+```
+
+### Fallback Chain (Resilience)
+
+```yaml
+providers:
+  - name: "anthropic"
+    base_url: "https://api.anthropic.com"
+    auth_mode: "proxy_key"
+    api_key: "${ANTHROPIC_API_KEY}"
+  - name: "openai"
+    type: "openai"
+    auth_mode: "proxy_key"
+    api_key: "${OPENAI_API_KEY}"
+
+model_list:
+  - model_name: "resilient"
+    fallbacks: ["claude-sonnet", "gpt-4o"]
+  - model_name: "claude-sonnet"
+    provider: "anthropic"
+    upstream_model: "claude-sonnet-4-6"
+  - model_name: "gpt-4o"
+    provider: "openai"
+    upstream_model: "gpt-4o"
+```
+
+### PostgreSQL (Multi-Instance)
+
+```yaml
+master_key: "change-me"
+
+# Use database_url instead of database_path for PostgreSQL
+database_url: "postgres://user:pass@localhost/glitchgate?sslmode=require"
+
+providers:
+  - name: "anthropic"
+    # ...
+```
+
 ## Environment Variables
 
 Scalar keys can be set via `GLITCHGATE_` prefixed env vars:
@@ -24,114 +81,57 @@ Scalar keys can be set via `GLITCHGATE_` prefixed env vars:
 
 Env vars override config file values. `providers`, `model_list`, and `oidc` require a config file.
 
-## Full Config Reference
+---
+
+## Common Patterns
+
+### Single Provider Setup
+
+The simplest configuration. All requests route to one upstream provider.
 
 ```yaml
-# REQUIRED. Web UI password. Set here or via GLITCHGATE_MASTER_KEY.
-master_key: "change-me-to-something-secure"
-
-# Address to listen on. Default: ":4000"
-listen: ":4000"
-
-# Path to the SQLite database. Default: "glitchgate.db". Supports ~.
-database_path: "~/data/glitchgate/proxy.db"
-
-# Path to the structured JSON log file. Default: "glitchgate.log". Supports ~.
-log_path: "~/data/glitchgate/proxy.log"
-
-# IANA timezone for the web UI. Default: "UTC"
-timezone: "America/New_York"
-
-# Proxy body size limit. Default: 4 MiB.
-proxy_max_body_bytes: 4194304
-
-# Default upstream timeouts. Defaults: 2m non-streaming, 30m streaming.
-upstream_request_timeout: 2m
-upstream_stream_timeout: 30m
-
-# Async request log writer settings.
-async_log_buffer_size: 1000
-async_log_write_timeout: 5s
-
-# Login throttling by client IP.
-login_rate_limit_per_minute: 10
-login_rate_limit_burst: 5
-
-# Proxy throttling by authenticated key plus a coarse IP guard before auth.
-proxy_rate_limit_per_minute: 120
-proxy_rate_limit_burst: 30
-proxy_ip_rate_limit_per_minute: 240
-proxy_ip_rate_limit_burst: 60
-
-# Request log retention and stored-body truncation.
-# Set request_log_retention: 0 to disable pruning.
-request_log_retention: 720h
-request_log_prune_interval: 1h
-request_log_prune_batch_size: 1000
-request_log_body_max_bytes: 4194304
+master_key: "secure-password"
 
 providers:
   - name: "anthropic"
-    type: "anthropic"            # default type; can be omitted
     base_url: "https://api.anthropic.com"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
 
-  - name: "openai-chat"
-    type: "openai"
-    auth_mode: "proxy_key"
-    api_key: "${OPENAI_API_KEY}"
-    monthly_subscription_cost: 20.00
-
-  - name: "openai-resp"
-    type: "openai_responses"
-    auth_mode: "proxy_key"
-    api_key: "${OPENAI_API_KEY}"
-
-  - name: "gemini"
-    type: "gemini"
-    auth_mode: "proxy_key"
-    api_key: "${GEMINI_API_KEY}"
-    # base_url: "https://generativelanguage.googleapis.com"  # optional default
-
-  - name: "copilot"
-    type: "github_copilot"
-    # token_dir: "~/.config/glitchgate/copilot/"  # optional; default shown
-
-  - name: "vertex-claude"
-    type: "vertex_claude"
-    project: "my-gcp-project"
-    region: "us-east5"
-    # credentials_file: "/path/to/sa.json"  # optional; omit for ADC
-
-  - name: "vertex-gemini"
-    type: "vertex_gemini"
-    project: "my-gcp-project"
-    # region: "us-central1"  # optional; defaults to "us-central1"
-
 model_list:
-  - model_name: "claude-sonnet"
+  - model_name: "claude"
     provider: "anthropic"
     upstream_model: "claude-sonnet-4-6"
-
-  - model_name: "gpt-4o"
-    provider: "openai-chat"
-    upstream_model: "gpt-4o"
-    metadata:                        # optional: override built-in pricing
-      input_token_cost: 2.50         # USD per 1M tokens
-      output_token_cost: 10.00
-      cache_read_cost: 1.25
-      cache_write_cost: 3.13
-
-  - model_name: "claude-resilient"   # virtual model with fallback chain
-    fallbacks: ["claude-sonnet", "gpt-4o"]
-
-  - model_name: "gc/*"               # wildcard: gc/<model> → copilot
-    provider: "copilot"
 ```
 
-## Providers
+### Multiple Copilot Accounts
+
+Separate work and personal Copilot subscriptions with prefix routing:
+
+```yaml
+providers:
+  - name: copilot-work
+    type: github_copilot
+    token_dir: ~/.config/glitchgate/copilot/work/
+  - name: copilot-personal
+    type: github_copilot
+    token_dir: ~/.config/glitchgate/copilot/personal/
+
+model_list:
+  - model_name: "work/*"
+    provider: copilot-work
+  - model_name: "personal/*"
+    provider: copilot-personal
+```
+
+Authenticate each:
+```bash
+glitchgate auth copilot --name copilot-work
+glitchgate auth copilot --name copilot-personal
+```
+
+---
 
 | Field             | Required | Description |
 |-------------------|----------|-------------|
@@ -237,6 +237,8 @@ glitchgate auth copilot --name copilot-personal
 #### Token Storage
 
 Tokens are stored in `token_dir` with `0600` permissions. The short-lived Copilot session token is refreshed automatically.
+
+---
 
 ### Vertex Claude Provider
 
@@ -345,6 +347,8 @@ model_list:
 - Supports `auth_mode: forward` by forwarding the incoming `X-Goog-Api-Key` header upstream
 - Accepts upstream model names with or without the `google/` prefix; the provider strips it before building the URL
 - Built-in Gemini pricing defaults are applied automatically for known Gemini models
+
+---
 
 ## Security and Operational Controls
 
@@ -496,6 +500,72 @@ The first OIDC user is automatically `global_admin`.
 ### Break-Glass
 
 When OIDC is configured, the master key login is hidden. Access it at `/ui/login?master=1`.
+
+---
+
+## Full Config Reference
+
+```yaml
+# REQUIRED. Web UI password. Set here or via GLITCHGATE_MASTER_KEY.
+master_key: "change-me-to-something-secure"
+
+# Address to listen on. Default: ":4000"
+listen: ":4000"
+
+# Path to the SQLite database. Default: "glitchgate.db". Supports ~.
+# Note: Use either database_path (SQLite) OR database_url (PostgreSQL), not both.
+database_path: "~/data/glitchgate/proxy.db"
+
+# PostgreSQL connection string. Use instead of database_path for multi-instance setups.
+# database_url: "postgres://user:pass@localhost/glitchgate?sslmode=require"
+
+# Path to the structured JSON log file. Default: "glitchgate.log". Supports ~.
+log_path: "~/data/glitchgate/proxy.log"
+
+# IANA timezone for the web UI. Default: "UTC"
+timezone: "America/New_York"
+
+# Proxy body size limit. Default: 4 MiB.
+proxy_max_body_bytes: 4194304
+
+# Default upstream timeouts. Defaults: 2m non-streaming, 30m streaming.
+upstream_request_timeout: 2m
+upstream_stream_timeout: 30m
+
+# Async request log writer settings.
+async_log_buffer_size: 1000
+async_log_write_timeout: 5s
+
+# Login throttling by client IP.
+login_rate_limit_per_minute: 10
+login_rate_limit_burst: 5
+
+# Proxy throttling by authenticated key plus a coarse IP guard before auth.
+proxy_rate_limit_per_minute: 120
+proxy_rate_limit_burst: 30
+proxy_ip_rate_limit_per_minute: 240
+proxy_ip_rate_limit_burst: 60
+
+# Request log retention and stored-body truncation.
+# Set request_log_retention: 0 to disable pruning.
+request_log_retention: 720h
+request_log_prune_interval: 1h
+request_log_prune_batch_size: 1000
+request_log_body_max_bytes: 4194304
+
+providers:
+  - name: "anthropic"
+    type: "anthropic"            # default type; can be omitted
+    base_url: "https://api.anthropic.com"
+    auth_mode: "proxy_key"
+    api_key: "${ANTHROPIC_API_KEY}"
+    default_version: "2023-06-01"
+
+model_list:
+  - model_name: "claude-sonnet"
+    provider: "anthropic"
+    upstream_model: "claude-sonnet-4-6"
+```
 
 ## Example Configs
 

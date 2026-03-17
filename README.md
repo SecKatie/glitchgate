@@ -2,46 +2,81 @@
 
 A self-hosted reverse proxy for LLM APIs with request logging, cost monitoring, team management, and a lightweight web UI.
 
-Routes requests to upstream providers, logs all traffic to a local SQLite database, and calculates per-request costs. Supports Anthropic, OpenAI, Gemini, GitHub Copilot, and Vertex AI upstreams with automatic format translation between API formats.
+Supports Anthropic, OpenAI, Gemini, GitHub Copilot, and Vertex AI upstreams with automatic format translation between API formats.
+
+## Quick Start
+
+```bash
+# Install
+go install github.com/seckatie/glitchgate@latest
+
+# Configure
+mkdir -p ~/.config/glitchgate
+cat > ~/.config/glitchgate/config.yaml << 'EOF'
+master_key: "change-me-to-something-secure"
+
+providers:
+  - name: "anthropic"
+    base_url: "https://api.anthropic.com"
+    auth_mode: "proxy_key"
+    api_key: "$ANTHROPIC_API_KEY"
+    default_version: "2023-06-01"
+
+model_list:
+  - model_name: "claude-sonnet"
+    provider: "anthropic"
+    upstream_model: "claude-sonnet-4-6"
+EOF
+
+# Run
+glitchgate serve
+```
+
+Browse to http://localhost:4000/ui and log in with your `master_key`.
+
+See [docs/quickstart.md](docs/quickstart.md) for the full 5-minute setup and [docs/configuration.md](docs/configuration.md) for complete configuration options.
 
 ## Features
 
-- **Multi-Provider Proxy**: Route requests to Anthropic, OpenAI, Gemini, GitHub Copilot, and Vertex AI upstreams
-- **Gemini Support**: Route to the Gemini Developer API or Vertex AI Gemini with native format translation
-- **Universal API Format**: Clients can use Anthropic, OpenAI Chat Completions, or OpenAI Responses API format regardless of upstream provider
-- **Full 3×3 Translation Matrix**: Seamless conversion between all three API formats
-- **Authentication**: OIDC/SSO support with user accounts and role-based access (global_admin, team_admin, member)
-- **Team Management**: Organize users into teams with shared resources
-- **GitHub Copilot Integration**: OAuth device flow authentication (`glitchgate auth copilot`)
-- **API Key Management**: Multiple proxy API keys with per-key cost attribution and budget enforcement
-- **Wildcard Model Routing**: Prefix-based model matching with fallback chains
-- **Budget Enforcement**: Per-key, per-user, per-team, and global spend limits (daily, weekly, monthly)
-- **Cost Tracking**: Detailed per-request cost calculation with dashboard visualization
-- **Cache Token Logging**: Anthropic prompt caching support
-- **Multi-Modal**: Image content handling across all providers
-- **Request Security**: Validation, sanitization, and configurable size limits
-- **Rate Limiting**: Per-key request throttling with configurable limits
-- **Provider Timeouts**: Configurable connection and request deadlines
-- **Thinking/Reasoning Tokens**: Extended thinking support for Claude models
-- **Web UI**: Embedded HTMX + Pico CSS interface for browsing logs, usage, and managing keys
+**Core Proxy**
+- Multi-provider support: Anthropic, OpenAI, Gemini, GitHub Copilot, Vertex AI
+- Universal API format: Use Anthropic, OpenAI Chat Completions, or OpenAI Responses format with any upstream
+- Automatic format translation between all three API styles
+- Streaming support (SSE passthrough and synthesis)
+- Fallback chains for resilient model routing
+
+**Operations**
+- Per-request cost tracking with built-in pricing for major providers
+- Budget enforcement at global, team, user, and API key scopes
+- Async request logging to SQLite with retention policies
+- Rate limiting (per-key and per-IP)
+- Prometheus metrics endpoint
+
+**Security**
+- OIDC/SSO authentication with PKCE
+- Role-based access control (global_admin, team_admin, member)
+- Audit logging for sensitive operations
+- Input validation and size limits
+- CSRF protection and security headers
+
+**Management**
+- Web UI for logs, costs, keys, and team administration
+- CLI for key management and GitHub Copilot OAuth
+- Team management with user assignments
+- Wildcard model routing (`prefix/*`)
 
 ## Usage
 
 ```sh
+# Build from source
 make build
 ./glitchgate serve
+
+# Or install directly
+go install github.com/seckatie/glitchgate@latest
 ```
 
-See `make help` or the `cmd/` directory for all available commands. See [docs/configuration.md](docs/configuration.md) for full configuration reference including OIDC setup and GitHub Copilot authentication.
-
-## Recent Changes
-
-- **OIDC/SSO Authentication**: Full user account support with external identity providers
-- **Team Management**: Create teams, assign users, and manage team-level resources
-- **Budget Enforcement**: Spend limits at global, team, user, and API key scopes
-- **OpenAI Upstream Support**: Full proxy support for OpenAI-compatible endpoints
-- **Security Hardening**: Request validation, input sanitization, rate limiting, timeouts
-- **Cost Query Performance**: Optimized indexing for spend lookups and log pruning
+See `make help` for all available commands.
 
 ## Development
 
