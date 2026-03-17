@@ -52,8 +52,10 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (*Runtime, error) {
 	if err := st.Migrate(ctx); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
-	if sqliteSt, ok := st.(*store.SQLiteStore); ok {
-		if err := sqliteSt.NormalizeLoggedProviderNames(ctx, cfg); err != nil {
+	if normalizer, ok := st.(interface {
+		NormalizeLoggedProviderNames(context.Context, *config.Config) error
+	}); ok {
+		if err := normalizer.NormalizeLoggedProviderNames(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("normalizing logged provider names: %w", err)
 		}
 	}
