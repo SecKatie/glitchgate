@@ -4,6 +4,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -308,7 +309,7 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		masterKey = body.MasterKey
 	}
 
-	if masterKey != h.masterKey {
+	if len(masterKey) == 0 || subtle.ConstantTimeCompare([]byte(masterKey), []byte(h.masterKey)) != 1 {
 		if err := h.store.RecordAuditEvent(r.Context(), "master_key.login_failed", "", "", ""); err != nil {
 			slog.Warn("record audit event", "error", err)
 		}

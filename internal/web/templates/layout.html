@@ -790,5 +790,11 @@
         else el.textContent = 'Updated ' + Math.floor(sec / 60) + 'm ago';
     }, 5000);
     </script>
+    <script>
+    document.body.addEventListener('htmx:configRequest', function(e) {
+        var m = document.cookie.match(/glitchgate_csrf=([^;]+)/);
+        if (m) e.detail.headers['X-CSRF-Token'] = m[1];
+    });
+    </script>
 </body>
 </html>
