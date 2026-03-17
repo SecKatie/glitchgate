@@ -843,6 +843,16 @@ func extractTokens(data string, inputTokens, outputTokens, cacheCreationTokens, 
 	case "message_delta":
 		if envelope.Usage != nil {
 			*outputTokens = envelope.Usage.OutputTokens
+			// message_delta may also include updated cache token counts and input_tokens.
+			if envelope.Usage.InputTokens > 0 {
+				*inputTokens = envelope.Usage.InputTokens
+			}
+			if envelope.Usage.CacheCreationInputTokens > 0 {
+				*cacheCreationTokens = envelope.Usage.CacheCreationInputTokens
+			}
+			if envelope.Usage.CacheReadInputTokens > 0 {
+				*cacheReadTokens = envelope.Usage.CacheReadInputTokens
+			}
 		}
 	}
 }

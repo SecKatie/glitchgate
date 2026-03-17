@@ -131,9 +131,12 @@ type MessageDelta struct {
 	StopSequence *string `json:"stop_sequence,omitempty"`
 }
 
-// DeltaUsage reports the final output token count in a streaming response.
+// DeltaUsage reports the final token counts in a streaming response message_delta event.
 type DeltaUsage struct {
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 }
 
 // ErrorResponse is the Anthropic error envelope.
