@@ -26,11 +26,46 @@ func OpenAIToAnthropicResponse(resp *ChatCompletionResponse, model string) *anth
 		msg := choice.Message
 
 		if msg != nil {
+			// Convert reasoning/thinking content to Anthropic thinking block.
+			reasoning := msg.Reasoning
+			if reasoning == "" {
+				reasoning = msg.ReasoningContent
+			}
+			if reasoning != "" {
+				result.Content = append(result.Content, anthropic.ContentBlock{
+					Type:     "thinking",
+					Thinking: reasoning,
+				})
+			}
+
 			// Convert text content to Anthropic text block.
-			if text, ok := msg.Content.(string); ok && text != "" {
+			switch c := msg.Content.(type) {
+			case string:
+				if c != "" {
+					result.Content = append(result.Content, anthropic.ContentBlock{
+						Type: "text",
+						Text: c,
+					})
+				}
+			case []interface{}:
+				// Content may be an array of content parts.
+				for _, part := range c {
+					if m, ok := part.(map[string]interface{}); ok {
+						if t, ok := m["text"].(string); ok && t != "" {
+							result.Content = append(result.Content, anthropic.ContentBlock{
+								Type: "text",
+								Text: t,
+							})
+						}
+					}
+				}
+			}
+
+			// Convert refusal content to a text block.
+			if msg.Refusal != "" {
 				result.Content = append(result.Content, anthropic.ContentBlock{
 					Type: "text",
-					Text: text,
+					Text: msg.Refusal,
 				})
 			}
 
