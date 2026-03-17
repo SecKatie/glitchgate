@@ -32,7 +32,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 	w.WriteHeader(http.StatusOK)
 
 	var captured bytes.Buffer
-	var inputTokens, outputTokens int64
+	var inputTokens, outputTokens, cacheReadTokens int64
 	sentMessageStart := false
 	sentDone := false
 	messageID := ""
@@ -63,7 +63,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 			if textBlockIndex >= 0 {
 				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": textBlockIndex}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 				}
 			}
 
@@ -81,7 +81,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 			for _, e := range entries {
 				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": e.state.blockIndex}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 				}
 			}
 
@@ -95,14 +95,19 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				map[string]interface{}{
 					"type":  "message_delta",
 					"delta": map[string]interface{}{"stop_reason": stopReason},
-					"usage": map[string]interface{}{"output_tokens": outputTokens},
+					"usage": map[string]interface{}{
+						"output_tokens":               outputTokens,
+						"input_tokens":                inputTokens,
+						"cache_creation_input_tokens": int64(0),
+						"cache_read_input_tokens":     cacheReadTokens,
+					},
 				}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 			}
 
 			if err := writeAnthropicSSE(w, rc, &captured, "message_stop",
 				map[string]interface{}{"type": "message_stop"}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 			}
 
 			sentDone = true
@@ -124,6 +129,9 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		if chunk.Usage != nil {
 			inputTokens = chunk.Usage.PromptTokens
 			outputTokens = chunk.Usage.CompletionTokens
+			if chunk.Usage.PromptTokensDetails != nil {
+				cacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			}
 		}
 
 		// Send message_start on first chunk.
@@ -137,10 +145,15 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 						"role":    "assistant",
 						"content": []interface{}{},
 						"model":   model,
-						"usage":   map[string]interface{}{"input_tokens": 0, "output_tokens": 0},
+						"usage": map[string]interface{}{
+							"input_tokens":                0,
+							"output_tokens":               0,
+							"cache_creation_input_tokens": 0,
+							"cache_read_input_tokens":     0,
+						},
 					},
 				}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 			}
 			sentMessageStart = true
 		}
@@ -171,7 +184,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 						"index":         textBlockIndex,
 						"content_block": map[string]interface{}{"type": "text", "text": ""},
 					}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 				}
 			}
 
@@ -181,7 +194,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 					"index": textBlockIndex,
 					"delta": map[string]interface{}{"type": "text_delta", "text": text},
 				}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 			}
 		}
 
@@ -212,7 +225,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 							"input": map[string]interface{}{},
 						},
 					}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 				}
 			}
 
@@ -226,7 +239,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 							"partial_json": tc.Function.Arguments,
 						},
 					}); err != nil {
-					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 				}
 			}
 		}
@@ -236,7 +249,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		slog.Warn("upstream OpenAI stream ended without [DONE] after message_start was sent")
 	}
 
-	return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), scanner.Err()
+	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), scanner.Err()
 }
 
 // writeAnthropicSSE writes a single Anthropic-format SSE event to the client.

@@ -37,15 +37,21 @@ type ImageSource struct {
 	URL       string `json:"url,omitempty"`
 }
 
+// CacheControl marks a content block as a cache breakpoint.
+type CacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
 // ContentBlock represents a typed content element within a message.
 type ContentBlock struct {
-	Type     string       `json:"type"`
-	Text     string       `json:"text,omitempty"`
-	Thinking string       `json:"thinking,omitempty"`
-	ID       string       `json:"id,omitempty"`
-	Name     string       `json:"name,omitempty"`
-	Input    interface{}  `json:"input,omitempty"`
-	Source   *ImageSource `json:"source,omitempty"`
+	Type         string        `json:"type"`
+	Text         string        `json:"text,omitempty"`
+	Thinking     string        `json:"thinking,omitempty"`
+	ID           string        `json:"id,omitempty"`
+	Name         string        `json:"name,omitempty"`
+	Input        interface{}   `json:"input,omitempty"`
+	Source       *ImageSource  `json:"source,omitempty"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 	// tool_result fields
 	ToolUseID string      `json:"tool_use_id,omitempty"`
 	Content   interface{} `json:"content,omitempty"` // string or []ContentBlock
