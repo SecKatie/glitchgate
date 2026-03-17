@@ -429,6 +429,12 @@ func importFromDump(ctx context.Context, db *sql.DB, r io.Reader, progress Progr
 	}
 	reportProgress()
 
+	if dialect == "postgres" {
+		if err = syncAuditEventsSequence(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+
 	return stats, nil
 }
 
