@@ -1,6 +1,9 @@
 package web
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -31,6 +34,10 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 		}
 		if h.Get("Permissions-Policy") == "" {
 			h.Set("Permissions-Policy", permissionsPolicyValue)
+		}
+		if h.Get("Content-Security-Policy") == "" {
+			h.Set("Content-Security-Policy",
+				"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -75,4 +82,67 @@ func remoteAddrKey(remoteAddr string) string {
 
 func safeLogValue(value string) string {
 	return strconv.QuoteToASCII(strings.ToValidUTF8(value, ""))
+}
+
+const (
+	csrfCookieName = "glitchgate_csrf"
+	csrfHeaderName = "X-CSRF-Token"
+	csrfTokenBytes = 32
+)
+
+// CSRFMiddleware implements the double-submit cookie pattern.
+// On GET/HEAD/OPTIONS it ensures a CSRF cookie is set.
+// On POST/PUT/DELETE it validates the X-CSRF-Token header matches the cookie.
+func CSRFMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			ensureCSRFCookie(w, r)
+			next.ServeHTTP(w, r)
+		default:
+			cookie, err := r.Cookie(csrfCookieName)
+			if err != nil || cookie.Value == "" {
+				writeCSRFError(w, r)
+				return
+			}
+			header := r.Header.Get(csrfHeaderName)
+			if header == "" || subtle.ConstantTimeCompare([]byte(header), []byte(cookie.Value)) != 1 {
+				writeCSRFError(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
+func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) {
+	if _, err := r.Cookie(csrfCookieName); err == nil {
+		return // cookie already exists
+	}
+	raw := make([]byte, csrfTokenBytes)
+	if _, err := rand.Read(raw); err != nil {
+		slog.Error("generate CSRF token", "error", err)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    hex.EncodeToString(raw),
+		Path:     "/ui",
+		HttpOnly: false, // JS/HTMX must read the cookie value
+		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil,
+	})
+}
+
+func writeCSRFError(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") == "application/json" ||
+		r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"CSRF token missing or invalid"}`))
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte("CSRF token missing or invalid"))
 }
