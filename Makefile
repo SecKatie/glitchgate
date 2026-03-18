@@ -38,7 +38,6 @@ image:
 image-push:
 	podman manifest push $(IMAGE):$(TAG) docker://$(IMAGE):$(TAG)
 
-VERSION ?=
 image-push-version:
 	@test -n "$(VERSION)" || (echo "VERSION is required: make image-push-version VERSION=v1.0.0" && exit 1)
 	$(MAKE) image-push TAG=$(VERSION)
