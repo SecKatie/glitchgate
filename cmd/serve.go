@@ -71,6 +71,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	proxyHandler := proxy.NewHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
 	openaiHandler := proxy.NewOpenAIHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
 	responsesHandler := proxy.NewResponsesHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
+	modelsHandler := proxy.NewModelsHandler(cfg, runtime.Calculator, runtime.AsyncLogger)
 
 	// Build chi router.
 	r := chi.NewRouter()
@@ -103,6 +104,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Post("/messages", proxyHandler.ServeHTTP)
 		r.Post("/chat/completions", openaiHandler.ServeHTTP)
 		r.Post("/responses", responsesHandler.ServeHTTP)
+		r.Get("/models", modelsHandler.ServeHTTP)
 	})
 
 	// Web UI.

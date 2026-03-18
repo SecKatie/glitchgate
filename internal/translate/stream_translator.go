@@ -130,8 +130,11 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			var cbEvent anthropic.ContentBlockStartEvent
 			if err := json.Unmarshal([]byte(data), &cbEvent); err != nil {
 				slog.Warn("failed to parse content_block_start event", "error", err)
-			} else if cbEvent.ContentBlock.Type == "thinking" {
-				thinkingBlockIndices[cbEvent.Index] = true
+			} else {
+				slog.Debug("content_block_start", "index", cbEvent.Index, "type", cbEvent.ContentBlock.Type)
+				if cbEvent.ContentBlock.Type == "thinking" {
+					thinkingBlockIndices[cbEvent.Index] = true
+				}
 			}
 
 		case "content_block_delta":
@@ -143,8 +146,10 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 
 			// Skip thinking block deltas — OpenAI CC doesn't stream reasoning.
 			if thinkingBlockIndices[event.Index] {
+				slog.Debug("skipping thinking delta", "index", event.Index, "delta_type", event.Delta.Type)
 				continue
 			}
+			slog.Debug("content_block_delta", "index", event.Index, "delta_type", event.Delta.Type, "text_len", len(event.Delta.Text))
 
 			switch event.Delta.Type {
 			case "text_delta":
