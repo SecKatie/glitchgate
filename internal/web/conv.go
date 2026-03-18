@@ -700,6 +700,17 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 	// Build the turn.
 	turn := ConvTurn{Role: "assistant"}
 
+	// Add accumulated reasoning first (appears before main content).
+	if reasoning := reasoningBuf.String(); reasoning != "" {
+		short, full, trunc := truncateLines(reasoning, truncateAtLines)
+		turn.Blocks = append(turn.Blocks, ConvBlock{
+			Type:             "reasoning",
+			ReasoningContent: short,
+			ReasoningTrunc:   trunc,
+			FullText:         full,
+		})
+	}
+
 	// Add accumulated text if present.
 	if text := textBuf.String(); text != "" {
 		short, full, trunc := truncateLines(text, truncateAtLines)
@@ -708,17 +719,6 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 			Text:      short,
 			Truncated: trunc,
 			FullText:  full,
-		})
-	}
-
-	// Add accumulated reasoning if present (OpenAI extended reasoning).
-	if reasoning := reasoningBuf.String(); reasoning != "" {
-		short, full, trunc := truncateLines(reasoning, truncateAtLines)
-		turn.Blocks = append(turn.Blocks, ConvBlock{
-			Type:             "reasoning",
-			ReasoningContent: short,
-			ReasoningTrunc:   trunc,
-			FullText:         full,
 		})
 	}
 
