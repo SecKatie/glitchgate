@@ -16,7 +16,7 @@ import (
 func TestGeminiUsageTotals(t *testing.T) {
 	t.Parallel()
 
-	input, output, cacheRead, reasoning := gemini.GeminiUsageTotals(&gemini.GeminiUsageMetadata{
+	input, output, cacheRead, reasoning := gemini.UsageTotals(&gemini.UsageMetadata{
 		PromptTokenCount:        42,
 		CachedContentTokenCount: 10,
 		CandidatesTokenCount:    17,

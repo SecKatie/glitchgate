@@ -41,12 +41,90 @@ data:
         auth_mode: proxy_key
         api_key: "${ANTHROPIC_API_KEY}"
         default_version: "2023-06-01"
+      - name: copilot
+        type: github_copilot
 
     # Model mappings
     model_list:
+      # Anthropic - built-in pricing
       - model_name: claude-sonnet-4-6
         provider: anthropic
         upstream_model: claude-sonnet-4-6-20251001
+
+      # GitHub Copilot models - track notional OpenAI API costs
+      - model_name: gc/claude-sonnet-4-6
+        provider: copilot
+        upstream_model: claude-sonnet-4-6
+        metadata:
+          input_token_cost: 3.00
+          output_token_cost: 15.00
+          cache_write_cost: 3.75
+          cache_read_cost: 0.30
+      - model_name: gc/claude-sonnet-4-5
+        provider: copilot
+        upstream_model: claude-sonnet-4-5
+        metadata:
+          input_token_cost: 3.00
+          output_token_cost: 15.00
+          cache_write_cost: 3.75
+          cache_read_cost: 0.30
+      - model_name: gc/claude-opus-4-6
+        provider: copilot
+        upstream_model: claude-opus-4-6
+        metadata:
+          input_token_cost: 5.00
+          output_token_cost: 25.00
+          cache_write_cost: 6.25
+          cache_read_cost: 0.50
+      - model_name: gc/claude-opus-4-5
+        provider: copilot
+        upstream_model: claude-opus-4-5
+        metadata:
+          input_token_cost: 5.00
+          output_token_cost: 25.00
+          cache_write_cost: 6.25
+          cache_read_cost: 0.50
+      - model_name: gc/claude-haiku-4-5
+        provider: copilot
+        upstream_model: claude-haiku-4-5
+        metadata:
+          input_token_cost: 1.00
+          output_token_cost: 5.00
+          cache_write_cost: 1.25
+          cache_read_cost: 0.10
+      - model_name: gc/gpt-4.1
+        provider: copilot
+        upstream_model: gpt-4.1
+        metadata:
+          input_token_cost: 2.00
+          output_token_cost: 8.00
+          cache_read_cost: 0.50
+      - model_name: gc/gpt-5
+        provider: copilot
+        upstream_model: gpt-5
+        metadata:
+          input_token_cost: 1.25
+          output_token_cost: 10.00
+      - model_name: gc/gpt-5-mini
+        provider: copilot
+        upstream_model: gpt-5-mini
+        metadata:
+          input_token_cost: 0.25
+          output_token_cost: 2.00
+          cache_read_cost: 0.025
+      - model_name: gc/gpt-5.1
+        provider: copilot
+        upstream_model: gpt-5.1
+        metadata:
+          input_token_cost: 1.25
+          output_token_cost: 10.00
+      - model_name: gc/gpt-5.4
+        provider: copilot
+        upstream_model: gpt-5.4
+        metadata:
+          input_token_cost: 2.50
+          output_token_cost: 15.00
+          cache_read_cost: 0.25
 
     # OIDC Authentication (optional)
     # oidc:

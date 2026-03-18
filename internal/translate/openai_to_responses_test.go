@@ -184,7 +184,7 @@ func TestOpenAIToResponses(t *testing.T) {
 				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
-				Tools: []openai.OpenAITool{
+				Tools: []openai.Tool{
 					{
 						Type: "function",
 						Function: openai.ToolFunction{

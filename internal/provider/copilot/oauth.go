@@ -50,7 +50,7 @@ func RequestDeviceCode(ctx context.Context) (*DeviceFlowResponse, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL from hardcoded GitHub API constants, not user input
 	if err != nil {
 		return nil, fmt.Errorf("requesting device code: %w", err)
 	}
@@ -121,7 +121,7 @@ func exchangeDeviceCode(ctx context.Context, deviceCode string) (token *GitHubTo
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL from hardcoded GitHub API constants, not user input
 	if err != nil {
 		return nil, false, fmt.Errorf("exchanging device code: %w", err)
 	}
@@ -166,7 +166,7 @@ func ExchangeForCopilotToken(ctx context.Context, githubToken string) (*SessionT
 	req.Header.Set("Editor-Plugin-Version", editorPluginVersion)
 	req.Header.Set("User-Agent", copilotUserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL from hardcoded GitHub API constants, not user input
 	if err != nil {
 		return nil, fmt.Errorf("exchanging for copilot token: %w", err)
 	}

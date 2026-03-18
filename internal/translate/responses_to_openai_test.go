@@ -214,10 +214,10 @@ func TestResponsesToOpenAI_Streaming(t *testing.T) {
 	require.True(t, result.StreamOptions.IncludeUsage)
 }
 
-func TestResponsesToOpenAI_InputFileError(t *testing.T) {
+func TestResponsesToOpenAI_InputFile(t *testing.T) {
 	t.Parallel()
 	items := []openai.InputItem{
-		{Type: "input_file", FileData: "base64data"},
+		{Type: "input_file", FileData: "data:application/pdf;base64,JVBER", Filename: "test.pdf"},
 	}
 	input, _ := json.Marshal(items)
 	req := &openai.ResponsesRequest{
@@ -225,9 +225,18 @@ func TestResponsesToOpenAI_InputFileError(t *testing.T) {
 		Input: input,
 	}
 
-	_, err := ResponsesToOpenAI(req, "gpt-4o")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "input_file")
+	result, err := ResponsesToOpenAI(req, "gpt-4o")
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+	msg := result.Messages[0]
+	require.Equal(t, "user", msg.Role)
+	parts, ok := msg.Content.([]openai.ContentPart)
+	require.True(t, ok)
+	require.Len(t, parts, 1)
+	require.Equal(t, "file", parts[0].Type)
+	require.NotNil(t, parts[0].File)
+	require.Equal(t, "data:application/pdf;base64,JVBER", parts[0].File.FileData)
+	require.Equal(t, "test.pdf", parts[0].File.Filename)
 }
 
 func TestResponsesToOpenAI_InputAudioPassthrough(t *testing.T) {

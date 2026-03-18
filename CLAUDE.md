@@ -16,12 +16,21 @@ go test -race ./internal/proxy/...                    # Run proxy tests only
 go test -race ./internal/proxy -run TestHandler         # Run specific test
 go test -race ./internal/proxy -v                       # Verbose test output
 
-# Generate code (sqlc)
-make generate           # Regenerate Go types from queries/*.sql (deprecated - sqlc removed)
+# Generate code (deprecated - sqlc removed)
+make generate           # DEPRECATED: sqlc was removed; no longer generates Go types
 
 # Run locally
 ./glitchgate serve      # Start server (requires config.yaml with master_key)
 ```
+
+## Config Location
+
+The server looks for `config.yaml` in (order of precedence):
+1. Current working directory
+2. `~/.config/glitchgate/config.yaml`
+3. `/etc/glitchgate/config.yaml`
+
+For development, copy `config.example.yaml` to `config.yaml` and set `master_key`.
 
 ## Architecture Overview
 
@@ -29,6 +38,7 @@ glitchgate is an LLM API reverse proxy with format translation between three API
 - **Anthropic Messages API** (`/v1/messages`)
 - **OpenAI Chat Completions API** (`/v1/chat/completions`)
 - **OpenAI Responses API** (`/v1/responses`)
+- **Google Gemini API** (`/v1beta/models/{model}:generateContent`)
 
 Request flow: Client → Proxy Handler → Format Translation → Upstream Provider → Cost Logging → SQLite
 
@@ -39,7 +49,9 @@ Request flow: Client → Proxy Handler → Format Translation → Upstream Provi
 - Streaming: SSE passthrough via `stream.go` or synthesized via `SynthesizeAnthropicSSE`
 - Pipeline execution in `pipeline.go` orchestrates translation → provider → logging
 
-**translate/** - Pure functions for API format conversion. Each direction has request/response translators:
+**translate/** - Pure functions for API format conversion. Uses a canonical Intermediate Representation (IR) as the pivot format:
+- `canonical.go` - Central IR type that all API formats convert to/from
+- `delegations.go` - Routes translation based on source/target format
 - `anthropic_to_openai.go` / `openai_to_anthropic.go`
 - `responses_to_anthropic.go` / `anthropic_to_responses.go`
 - `stream_translator.go` - SSE parsers for streaming responses
@@ -48,13 +60,15 @@ Request flow: Client → Proxy Handler → Format Translation → Upstream Provi
 **provider/** - Interface for upstream LLM services (`Provider` interface in `provider.go`):
 - `anthropic.Client` - Native Anthropic API
 - `openai.Client` - OpenAI-compatible APIs
+- `gemini.Client` - Google Gemini API
 - `copilot.Client` - GitHub Copilot via OAuth
-Each implements `SendRequest()` and reports native `APIFormat()` ("anthropic", "openai", or "responses")
+- `vertex.Client` - Google Vertex AI Claude client
+Each implements `SendRequest()` and reports native `APIFormat()` ("anthropic", "openai", "responses", or "gemini")
 
-**store/** - SQLite data access with composable interfaces (`store.go`):
+**store/** - SQLite/Postgres data access with composable interfaces (`store.go`):
 - `SQLiteStore` implements `ProxyKeyStore`, `RequestLogStore`, `UserAdminStore`, etc.
-- Uses sqlc for type-safe queries from `queries/*.sql` (run `make generate` after changes)
-- Migrations in `migrations/*.sql` applied via goose
+- Raw `database/sql` with inline SQL in `sqlite_*.go` and `postgres_*.go`
+- Migrations in `store/migrations/*.sql` applied via goose
 - All DB operations return Go structs - no raw SQL in handlers
 
 **config/** - Viper-based configuration with:
@@ -68,7 +82,7 @@ Each implements `SendRequest()` and reports native `APIFormat()` ("anthropic", "
 - Session-based auth with OIDC support
 - Scope enforcement: `global_admin`, `team_admin`, `member` roles
 
-**pricing/** - Model-to-cost mapping with built-in defaults for Anthropic, OpenAI, Copilot. Metadata overrides via config `model_list` entries.
+**pricing/** - Model-to-cost mapping with built-in defaults for Anthropic, OpenAI, Gemini, Copilot. Metadata overrides via config `model_list` entries.
 
 ### OpenAI Streaming API Notes
 
@@ -79,9 +93,9 @@ Tool calls in OpenAI SSE streaming work differently than Anthropic:
 
 See `stream_translator.go:writeToolCallDeltaChunk` for correct implementation.
 
-### Database Workflow (deprecated - sqlc removed)
+### Database
 
-The project previously used sqlc but now uses raw `database/sql` with inline SQL in `sqlite_*.go` and `postgres_*.go` files.
+The project uses raw `database/sql` with inline SQL in `sqlite_*.go` and `postgres_*.go` files. Migrations in `store/migrations/*.sql` are applied via goose.
 
 ### Testing Patterns
 
@@ -104,19 +118,20 @@ If a finding is a false positive, justify the exclusion in a comment and raise i
 ```
 cmd/                    # cobra commands (root, serve, keys, auth)
 internal/
-├── app/                # Runtime bootstrap and provider factory
+├── app/                # Runtime bootstrap, provider factory, logging setup
 ├── auth/               # Proxy key hashing + UI session management
 ├── config/             # Viper config loading with model resolution
 ├── pricing/            # Cost calculation with built-in rate tables
 ├── provider/           # Provider interface
 │   ├── anthropic/      # Anthropic API client
-│   ├── openai/         # OpenAI-compatible client
-│   ├── copilot/       # GitHub Copilot OAuth client
-│   └── vertex/        # Google Vertex AI Claude client
+│   ├── openai/         # OpenAI-compatible client (Azure, Ollama, etc.)
+│   ├── gemini/         # Google Gemini API client
+│   ├── copilot/        # GitHub Copilot OAuth client
+│   └── vertex/         # Google Vertex AI Claude client
 ├── proxy/              # Core proxy handlers + SSE streaming + pipeline
 ├── store/              # SQLite + Postgres data access + migrations
 │   └── migrations/    # goose migration files
-├── translate/          # API format translation (3×3 matrix)
+├── translate/          # API format translation (3×3 matrix via canonical IR)
 └── web/               # UI handlers, templates, embedded assets
 specs/                 # Feature specifications organized by number
 ```

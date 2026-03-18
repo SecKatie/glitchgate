@@ -261,7 +261,7 @@ func logResponsesCacheDebug(body []byte, req *openai.ResponsesRequest) {
 	}
 	var raw responsesCacheDebugFields
 	if err := json.Unmarshal(body, &raw); err != nil {
-		slog.Debug("responses handler: cache fields", "parse_error", err, "body_bytes", len(body))
+		slog.Debug("responses handler: cache fields", "parse_error", err, "body_bytes", len(body)) //nolint:gosec // structured slog prevents log injection
 		return
 	}
 
@@ -272,7 +272,7 @@ func logResponsesCacheDebug(body []byte, req *openai.ResponsesRequest) {
 		instructionsHash = shortHash([]byte(*req.Instructions))
 	}
 
-	slog.Debug("responses handler: cache fields",
+	slog.Debug("responses handler: cache fields", //nolint:gosec // structured slog prevents log injection
 		"body_bytes", len(body),
 		"input_bytes", len(req.Input),
 		"input_prefix_hash", shortHashPrefix(req.Input, 4096),

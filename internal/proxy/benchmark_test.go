@@ -97,7 +97,7 @@ func BenchmarkOpenAIToAnthropic(b *testing.B) {
 				{Role: "user", Content: "What is the weather in NYC?"},
 			},
 			MaxTokens: &maxTokens,
-			Tools: []openai.OpenAITool{
+			Tools: []openai.Tool{
 				{
 					Type: "function",
 					Function: openai.ToolFunction{

@@ -72,7 +72,7 @@ const (
 type OIDCConfig struct {
 	IssuerURL    string   `mapstructure:"issuer_url"    yaml:"issuer_url"`
 	ClientID     string   `mapstructure:"client_id"     yaml:"client_id"`
-	ClientSecret string   `mapstructure:"client_secret" yaml:"client_secret"`
+	ClientSecret string   `mapstructure:"client_secret" yaml:"client_secret"` //nolint:gosec // struct field for runtime config, not a hardcoded secret
 	RedirectURL  string   `mapstructure:"redirect_url"  yaml:"redirect_url"`
 	Scopes       []string `mapstructure:"scopes"        yaml:"scopes"`
 }
@@ -96,7 +96,7 @@ type ProviderConfig struct {
 	Type                    string   `mapstructure:"type"                      yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses", "gemini", "vertex_claude", "vertex_gemini"
 	BaseURL                 string   `mapstructure:"base_url"                  yaml:"base_url"`
 	AuthMode                string   `mapstructure:"auth_mode"                 yaml:"auth_mode"` // "proxy_key" or "forward"
-	APIKey                  string   `mapstructure:"api_key"                   yaml:"api_key"`
+	APIKey                  string   `mapstructure:"api_key"                   yaml:"api_key"`   //nolint:gosec // struct field for runtime config, not a hardcoded secret
 	DefaultVersion          string   `mapstructure:"default_version"           yaml:"default_version"`
 	TokenDir                string   `mapstructure:"token_dir"                 yaml:"token_dir"`                           // github_copilot: OAuth token storage directory
 	CredentialsFile         string   `mapstructure:"credentials_file"          yaml:"credentials_file"`                    // vertex_claude: path to service account JSON; empty = ADC

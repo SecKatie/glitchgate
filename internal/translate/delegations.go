@@ -73,7 +73,7 @@ func AnthropicToResponsesResponse(body []byte, model string) *openai.ResponsesRe
 
 // AnthropicToGeminiRequest converts an Anthropic MessagesRequest to a Gemini
 // generateContent request body.
-func AnthropicToGeminiRequest(req *anthropic.MessagesRequest) (*gemini.GeminiRequest, error) {
+func AnthropicToGeminiRequest(req *anthropic.MessagesRequest) (*gemini.Request, error) {
 	canon, err := AnthropicRequestToCanonical(req)
 	if err != nil {
 		return nil, err
@@ -87,8 +87,8 @@ func AnthropicErrorToOpenAI(body []byte) ([]byte, error) {
 	var anthErr anthropic.ErrorResponse
 	if err := json.Unmarshal(body, &anthErr); err != nil {
 		// If we can't parse the Anthropic error, wrap the raw message.
-		oaiErr := openai.OpenAIErrorResponse{
-			Error: openai.OpenAIError{
+		oaiErr := openai.ErrorResponse{
+			Error: openai.Error{
 				Message: string(body),
 				Type:    "api_error",
 			},
@@ -96,8 +96,8 @@ func AnthropicErrorToOpenAI(body []byte) ([]byte, error) {
 		return json.Marshal(oaiErr)
 	}
 
-	oaiErr := openai.OpenAIErrorResponse{
-		Error: openai.OpenAIError{
+	oaiErr := openai.ErrorResponse{
+		Error: openai.Error{
 			Message: anthErr.Error.Message,
 			Type:    mapAnthropicErrorType(anthErr.Error.Type),
 			Code:    anthErr.Error.Type,
@@ -157,7 +157,7 @@ func OpenAIToResponsesResponse(body []byte, model string) *openai.ResponsesRespo
 
 // OpenAIToGeminiRequest translates an OpenAI openai.ChatCompletionRequest into a
 // Gemini generateContent request.
-func OpenAIToGeminiRequest(req *openai.ChatCompletionRequest) (*gemini.GeminiRequest, error) {
+func OpenAIToGeminiRequest(req *openai.ChatCompletionRequest) (*gemini.Request, error) {
 	canon, err := OpenAIRequestToCanonical(req)
 	if err != nil {
 		return nil, err
@@ -229,7 +229,7 @@ func ResponsesToOpenAIResponse(body []byte, model string) *openai.ChatCompletion
 }
 
 // ResponsesToGeminiRequest translates a Responses API request to a Gemini generateContent request.
-func ResponsesToGeminiRequest(req *openai.ResponsesRequest) (*gemini.GeminiRequest, error) {
+func ResponsesToGeminiRequest(req *openai.ResponsesRequest) (*gemini.Request, error) {
 	canon, err := ResponsesRequestToCanonical(req)
 	if err != nil {
 		return nil, err

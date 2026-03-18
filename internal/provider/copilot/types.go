@@ -5,7 +5,7 @@ package copilot
 
 // GitHubToken holds the long-lived GitHub OAuth access token obtained via device flow.
 type GitHubToken struct {
-	AccessToken string `json:"access_token"`
+	AccessToken string `json:"access_token"` //nolint:gosec // struct field for runtime token, not a hardcoded secret
 	TokenType   string `json:"token_type"`
 	Scope       string `json:"scope"`
 }
@@ -29,7 +29,7 @@ type DeviceFlowResponse struct {
 
 // AccessTokenResponse holds the response from GitHub's OAuth token exchange endpoint.
 type AccessTokenResponse struct {
-	AccessToken string `json:"access_token"`
+	AccessToken string `json:"access_token"` //nolint:gosec // struct field for runtime token, not a hardcoded secret
 	TokenType   string `json:"token_type"`
 	Scope       string `json:"scope"`
 	Error       string `json:"error,omitempty"`

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+package translate
+
 // streaming.go consolidates all SSE stream translation functions:
 //   - Anthropic → OpenAI (SSEStream)
 //   - OpenAI → Anthropic (ReverseSSEStream)
@@ -10,7 +12,6 @@
 //   - Gemini → Anthropic (GeminiSSEToAnthropicSSE)
 //   - Gemini → OpenAI (GeminiSSEToOpenAISSE)
 //   - Gemini → Responses (GeminiSSEToResponsesSSE)
-package translate
 
 import (
 	"bytes"
@@ -243,7 +244,6 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 
 	// Track active tool calls by index for streaming tool call support.
 	toolCalls := make(map[int]openai.ToolCall)
-	toolCallOrder := []int{} // track order of tool calls
 	// Map Anthropic content block indices to sequential tool call indices
 	contentBlockToToolCallIndex := make(map[int]int)
 
@@ -262,7 +262,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
-			slog.Warn("failed to parse Anthropic SSE event type", "error", err, "data", data[:min(len(data), 256)])
+			slog.Warn("failed to parse Anthropic SSE event type", "error", err, "data", data[:min(len(data), 256)]) //nolint:gosec // structured slog prevents log injection
 			continue
 		}
 
@@ -298,7 +298,8 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 				slog.Warn("failed to parse content_block_start event", "error", err)
 			} else {
 				slog.Debug("content_block_start", "index", cbEvent.Index, "type", cbEvent.ContentBlock.Type)
-				if cbEvent.ContentBlock.Type == "thinking" {
+				switch cbEvent.ContentBlock.Type {
+				case "thinking":
 					thinkingBlockIndices[cbEvent.Index] = true
 					delta := &openai.ChatMessage{
 						Role:      "assistant",
@@ -308,9 +309,8 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, nil, nil); err != nil {
 						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 					}
-				} else if cbEvent.ContentBlock.Type == "tool_use" {
+				case "tool_use":
 					toolCallIndex := len(toolCalls)
-					toolCallOrder = append(toolCallOrder, toolCallIndex)
 					contentBlockToToolCallIndex[cbEvent.Index] = toolCallIndex
 					toolCalls[toolCallIndex] = openai.ToolCall{
 						ID:   cbEvent.ContentBlock.ID,
@@ -450,6 +450,8 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 	nextBlockIndex := 0
 	textBlockIndex := -1     // -1 = no text block started yet
 	thinkingBlockIndex := -1 // -1 = no thinking block started yet
+	thinkingBlockClosed := false
+	var reasoningTextLen int // accumulated reasoning text length for token estimation
 
 	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
@@ -462,8 +464,8 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		data := line[6:]
 
 		if data == "[DONE]" {
-			// Close thinking block if open.
-			if thinkingBlockIndex >= 0 {
+			// Close thinking block if open and not already closed.
+			if thinkingBlockIndex >= 0 && !thinkingBlockClosed {
 				if err := sse.WriteEvent(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": thinkingBlockIndex}); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
@@ -528,7 +530,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		// Parse the OpenAI chunk.
 		var chunk openai.ChatCompletionResponse
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			slog.Warn("failed to parse upstream SSE chunk", "error", err, "data", data[:min(len(data), 256)])
+			slog.Warn("failed to parse upstream SSE chunk", "error", err, "data", data[:min(len(data), 256)]) //nolint:gosec // structured slog prevents log injection
 			continue
 		}
 
@@ -591,11 +593,14 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		}
 
 		// Handle reasoning/thinking content deltas.
+		// Drop straggler reasoning that arrives after the thinking block
+		// was closed (e.g. Kimi-K2.5 interleaves reasoning and content).
 		thinkingText := delta.Reasoning
 		if thinkingText == "" {
 			thinkingText = delta.ReasoningContent
 		}
-		if thinkingText != "" {
+		if thinkingText != "" && !thinkingBlockClosed {
+			reasoningTextLen += len(thinkingText)
 			if thinkingBlockIndex < 0 {
 				thinkingBlockIndex = nextBlockIndex
 				nextBlockIndex++
@@ -635,6 +640,17 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		}
 
 		if textContent != "" {
+			// Close the thinking block before starting text content.
+			// Some upstreams (e.g. Kimi-K2.5) interleave reasoning and
+			// content, but Anthropic requires thinking to finish first.
+			if thinkingBlockIndex >= 0 && !thinkingBlockClosed {
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_stop",
+					map[string]interface{}{"type": "content_block_stop", "index": thinkingBlockIndex}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+				thinkingBlockClosed = true
+			}
+
 			if textBlockIndex < 0 {
 				textBlockIndex = nextBlockIndex
 				nextBlockIndex++
@@ -732,6 +748,12 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 
 	if sentMessageStart && !sentDone {
 		slog.Warn("upstream OpenAI stream ended without [DONE] after message_start was sent")
+	}
+
+	// Estimate reasoning tokens from accumulated text when upstream
+	// doesn't report them (e.g. Kimi-K2.5 sends no usage object).
+	if reasoningTokens == 0 && reasoningTextLen > 0 {
+		reasoningTokens = int64(reasoningTextLen+3) / 4
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), scanner.Err()
@@ -1087,6 +1109,14 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	sentOutputItemAdded := false
 	sentContentPartAdded := false
 
+	// Reasoning block state.
+	inReasoningBlock := false
+	reasoningBlockClosed := false
+	var reasoningText strings.Builder
+	reasoningItemID := ""
+	outputIndex := 0
+	var reasoningOutputItems []map[string]interface{}
+
 	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1098,13 +1128,52 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		data := line[6:]
 
 		if data == "[DONE]" {
+			// Close reasoning block if still open.
+			if inReasoningBlock && !reasoningBlockClosed {
+				reasoningBlockClosed = true
+				thinkingSummary := reasoningText.String()
+				if err := sse.WriteEvent(w, rc, &captured, "response.reasoning_summary_part.done", map[string]interface{}{
+					"type":          "response.reasoning_summary_part.done",
+					"item_id":       reasoningItemID,
+					"output_index":  outputIndex,
+					"summary_index": 0,
+					"part": map[string]interface{}{
+						"type": "summary_text",
+						"text": thinkingSummary,
+					},
+				}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+
+				reasoningItem := map[string]interface{}{
+					"type": "reasoning",
+					"id":   reasoningItemID,
+					"summary": []interface{}{
+						map[string]interface{}{
+							"type": "summary_text",
+							"text": thinkingSummary,
+						},
+					},
+					"status": "completed",
+				}
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.done", map[string]interface{}{
+					"type":         "response.output_item.done",
+					"output_index": outputIndex,
+					"item":         reasoningItem,
+				}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+				reasoningOutputItems = append(reasoningOutputItems, reasoningItem)
+				outputIndex++
+			}
+
 			finalText := fullText.String()
 
 			if sentContentPartAdded {
 				if err := sse.WriteEvent(w, rc, &captured, "response.output_text.done", map[string]interface{}{
 					"type":          "response.output_text.done",
 					"item_id":       messageID,
-					"output_index":  0,
+					"output_index":  outputIndex,
 					"content_index": 0,
 					"text":          finalText,
 				}); err != nil {
@@ -1114,7 +1183,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				if err := sse.WriteEvent(w, rc, &captured, "response.content_part.done", map[string]interface{}{
 					"type":          "response.content_part.done",
 					"item_id":       messageID,
-					"output_index":  0,
+					"output_index":  outputIndex,
 					"content_index": 0,
 					"part": map[string]interface{}{
 						"type":        "output_text",
@@ -1129,7 +1198,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			if sentOutputItemAdded {
 				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.done", map[string]interface{}{
 					"type":         "response.output_item.done",
-					"output_index": 0,
+					"output_index": outputIndex,
 					"item": map[string]interface{}{
 						"type": "message",
 						"id":   messageID,
@@ -1147,6 +1216,25 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
 			}
+
+			// Build output array for response.completed.
+			completedOutput := make([]interface{}, 0, len(reasoningOutputItems)+1)
+			for _, ri := range reasoningOutputItems {
+				completedOutput = append(completedOutput, ri)
+			}
+			completedOutput = append(completedOutput, map[string]interface{}{
+				"type": "message",
+				"id":   messageID,
+				"role": "assistant",
+				"content": []interface{}{
+					map[string]interface{}{
+						"type":        "output_text",
+						"text":        finalText,
+						"annotations": []interface{}{},
+					},
+				},
+				"status": "completed",
+			})
 
 			totalTokens := inputTokens + outputTokens
 			completedUsage := map[string]interface{}{
@@ -1167,22 +1255,8 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					"status":     "completed",
 					"model":      model,
 					"created_at": createdAt,
-					"output": []interface{}{
-						map[string]interface{}{
-							"type": "message",
-							"id":   messageID,
-							"role": "assistant",
-							"content": []interface{}{
-								map[string]interface{}{
-									"type":        "output_text",
-									"text":        finalText,
-									"annotations": []interface{}{},
-								},
-							},
-							"status": "completed",
-						},
-					},
-					"usage": completedUsage,
+					"output":     completedOutput,
+					"usage":      completedUsage,
 				},
 			}); err != nil {
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
@@ -1207,6 +1281,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		if chunk.ID != "" && responseID == "" {
 			responseID = "resp_" + strings.TrimPrefix(chunk.ID, "chatcmpl-")
 			messageID = "msg_" + strings.TrimPrefix(chunk.ID, "chatcmpl-")
+			reasoningItemID = "rs_" + strings.TrimPrefix(chunk.ID, "chatcmpl-")
 		}
 
 		if chunk.Usage != nil {
@@ -1248,29 +1323,93 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			continue
 		}
 
-		if !sentOutputItemAdded {
-			if err := sse.WriteEvent(w, rc, &captured, "response.output_item.added", map[string]interface{}{
-				"type":         "response.output_item.added",
-				"output_index": 0,
-				"item": map[string]interface{}{
-					"type":    "message",
-					"id":      messageID,
-					"role":    "assistant",
-					"content": []interface{}{},
-					"status":  "in_progress",
-				},
-			}); err != nil {
-				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+		// Handle reasoning/thinking content deltas.
+		thinkingText := delta.Reasoning
+		if thinkingText == "" {
+			thinkingText = delta.ReasoningContent
+		}
+		if thinkingText != "" && !reasoningBlockClosed {
+			if !inReasoningBlock {
+				inReasoningBlock = true
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.added", map[string]interface{}{
+					"type":         "response.output_item.added",
+					"output_index": outputIndex,
+					"item": map[string]interface{}{
+						"type":    "reasoning",
+						"id":      reasoningItemID,
+						"summary": []interface{}{},
+						"status":  "in_progress",
+					},
+				}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
 			}
-			sentOutputItemAdded = true
+			reasoningText.WriteString(thinkingText)
 		}
 
+		// Handle text content deltas.
 		if text, ok := delta.Content.(string); ok && text != "" {
+			// Close reasoning block before starting text content.
+			if inReasoningBlock && !reasoningBlockClosed {
+				reasoningBlockClosed = true
+				thinkingSummary := reasoningText.String()
+				if err := sse.WriteEvent(w, rc, &captured, "response.reasoning_summary_part.done", map[string]interface{}{
+					"type":          "response.reasoning_summary_part.done",
+					"item_id":       reasoningItemID,
+					"output_index":  outputIndex,
+					"summary_index": 0,
+					"part": map[string]interface{}{
+						"type": "summary_text",
+						"text": thinkingSummary,
+					},
+				}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+
+				reasoningItem := map[string]interface{}{
+					"type": "reasoning",
+					"id":   reasoningItemID,
+					"summary": []interface{}{
+						map[string]interface{}{
+							"type": "summary_text",
+							"text": thinkingSummary,
+						},
+					},
+					"status": "completed",
+				}
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.done", map[string]interface{}{
+					"type":         "response.output_item.done",
+					"output_index": outputIndex,
+					"item":         reasoningItem,
+				}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+				reasoningOutputItems = append(reasoningOutputItems, reasoningItem)
+				outputIndex++
+			}
+
+			if !sentOutputItemAdded {
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.added", map[string]interface{}{
+					"type":         "response.output_item.added",
+					"output_index": outputIndex,
+					"item": map[string]interface{}{
+						"type":    "message",
+						"id":      messageID,
+						"role":    "assistant",
+						"content": []interface{}{},
+						"status":  "in_progress",
+					},
+				}); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
+				}
+				sentOutputItemAdded = true
+			}
+
 			if !sentContentPartAdded {
 				if err := sse.WriteEvent(w, rc, &captured, "response.content_part.added", map[string]interface{}{
 					"type":          "response.content_part.added",
 					"item_id":       messageID,
-					"output_index":  0,
+					"output_index":  outputIndex,
 					"content_index": 0,
 					"part": map[string]interface{}{
 						"type":        "output_text",
@@ -1287,13 +1426,19 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			if err := sse.WriteEvent(w, rc, &captured, "response.output_text.delta", map[string]interface{}{
 				"type":          "response.output_text.delta",
 				"item_id":       messageID,
-				"output_index":  0,
+				"output_index":  outputIndex,
 				"content_index": 0,
 				"delta":         text,
 			}); err != nil {
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 		}
+	}
+
+	// Estimate reasoning tokens from accumulated text when upstream
+	// doesn't report them (e.g. Kimi-K2.5 sends no usage object).
+	if reasoningTokens == 0 && reasoningText.Len() > 0 {
+		reasoningTokens = int64(reasoningText.Len()+3) / 4
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), scanner.Err()
@@ -1337,7 +1482,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
-			slog.Warn("failed to parse Responses API SSE event type", "error", err, "data", data[:min(len(data), 256)])
+			slog.Warn("failed to parse Responses API SSE event type", "error", err, "data", data[:min(len(data), 256)]) //nolint:gosec // structured slog prevents log injection
 			continue
 		}
 
@@ -1614,7 +1759,7 @@ func ResponsesSSEToOpenAISSE(ctx context.Context, w http.ResponseWriter, upstrea
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
-			slog.Warn("failed to parse Responses API SSE event type", "error", err, "data", data[:min(len(data), 256)])
+			slog.Warn("failed to parse Responses API SSE event type", "error", err, "data", data[:min(len(data), 256)]) //nolint:gosec // structured slog prevents log injection
 			continue
 		}
 
@@ -1743,14 +1888,14 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		}
 		data := line[6:]
 
-		var gr gemini.GeminiResponse
+		var gr gemini.Response
 		if err := json.Unmarshal([]byte(data), &gr); err != nil {
-			slog.Warn("failed to parse Gemini SSE event", "error", err, "data", data[:min(len(data), 256)])
+			slog.Warn("failed to parse Gemini SSE event", "error", err, "data", data[:min(len(data), 256)]) //nolint:gosec // structured slog prevents log injection
 			continue
 		}
 
 		if gr.UsageMetadata != nil {
-			inputTokens, outputTokens, cacheReadTokens, reasoningTokens = gemini.GeminiUsageTotals(gr.UsageMetadata)
+			inputTokens, outputTokens, cacheReadTokens, reasoningTokens = gemini.UsageTotals(gr.UsageMetadata)
 		}
 
 		if !sentMessageStart {
@@ -1826,7 +1971,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				fc := part.FunctionCall
 				state, exists := toolCalls[fc.Name]
 				if !exists {
-					toolID := gemini.EncodeGeminiToolCallID(fmt.Sprintf("toolu_%06d", toolUseIdx), part.ThoughtSignature)
+					toolID := gemini.EncodeToolCallID(fmt.Sprintf("toolu_%06d", toolUseIdx), part.ThoughtSignature)
 					toolUseIdx++
 					state = &toolState{id: toolID, index: nextBlockIndex}
 					toolCalls[fc.Name] = state
@@ -1942,14 +2087,14 @@ func GeminiSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, model s
 		}
 		data := line[6:]
 
-		var gr gemini.GeminiResponse
+		var gr gemini.Response
 		if err := json.Unmarshal([]byte(data), &gr); err != nil {
-			slog.Warn("failed to parse Gemini SSE event (OpenAI path)", "error", err, "data", data[:min(len(data), 256)])
+			slog.Warn("failed to parse Gemini SSE event (OpenAI path)", "error", err, "data", data[:min(len(data), 256)]) //nolint:gosec // structured slog prevents log injection
 			continue
 		}
 
 		if gr.UsageMetadata != nil {
-			inputTokens, outputTokens, cacheReadTokens, reasoningTokens = gemini.GeminiUsageTotals(gr.UsageMetadata)
+			inputTokens, outputTokens, cacheReadTokens, reasoningTokens = gemini.UsageTotals(gr.UsageMetadata)
 		}
 
 		if !sentInitial {
@@ -2009,7 +2154,7 @@ func GeminiSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, model s
 					}
 				}
 				tcIdx32 := tcIdx
-				callID := gemini.EncodeGeminiToolCallID(fmt.Sprintf("call_%06d", tcIdx), part.ThoughtSignature)
+				callID := gemini.EncodeToolCallID(fmt.Sprintf("call_%06d", tcIdx), part.ThoughtSignature)
 				toolChunk := &openai.ChatCompletionResponse{
 					ID:      msgID,
 					Object:  "chat.completion.chunk",
@@ -2091,14 +2236,14 @@ func GeminiSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		}
 		data := line[6:]
 
-		var gr gemini.GeminiResponse
+		var gr gemini.Response
 		if err := json.Unmarshal([]byte(data), &gr); err != nil {
-			slog.Warn("failed to parse Gemini SSE event (Responses path)", "error", err, "data", data[:min(len(data), 256)])
+			slog.Warn("failed to parse Gemini SSE event (Responses path)", "error", err, "data", data[:min(len(data), 256)]) //nolint:gosec // structured slog prevents log injection
 			continue
 		}
 
 		if gr.UsageMetadata != nil {
-			inputTokens, outputTokens, cacheReadTokens, reasoningTokens = gemini.GeminiUsageTotals(gr.UsageMetadata)
+			inputTokens, outputTokens, cacheReadTokens, reasoningTokens = gemini.UsageTotals(gr.UsageMetadata)
 		}
 
 		if !sentCreated {
@@ -2175,7 +2320,7 @@ func GeminiSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 
 			case part.FunctionCall != nil:
 				fc := part.FunctionCall
-				callID := gemini.EncodeGeminiToolCallID(fmt.Sprintf("call_%06d", toolUseIdx), part.ThoughtSignature)
+				callID := gemini.EncodeToolCallID(fmt.Sprintf("call_%06d", toolUseIdx), part.ThoughtSignature)
 				toolUseIdx++
 				argsStr := ""
 				if fc.Args != nil {

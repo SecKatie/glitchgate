@@ -208,10 +208,10 @@ func TestResponsesToAnthropic_ToolChoice(t *testing.T) {
 	}
 }
 
-func TestResponsesToAnthropic_InputFileError(t *testing.T) {
+func TestResponsesToAnthropic_InputFile(t *testing.T) {
 	t.Parallel()
 	items := []openai.InputItem{
-		{Type: "input_file", FileData: "base64data"},
+		{Type: "input_file", FileData: "data:application/pdf;base64,JVBER", Filename: "test.pdf"},
 	}
 	input, _ := json.Marshal(items)
 	req := &openai.ResponsesRequest{
@@ -219,9 +219,19 @@ func TestResponsesToAnthropic_InputFileError(t *testing.T) {
 		Input: input,
 	}
 
-	_, err := ResponsesToAnthropic(req, "claude-sonnet-4-20250514")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "input_file")
+	result, err := ResponsesToAnthropic(req, "claude-sonnet-4-20250514")
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
+	msg := result.Messages[0]
+	require.Equal(t, "user", msg.Role)
+	blocks, err := parseContentBlocks(msg.Content)
+	require.NoError(t, err)
+	require.Len(t, blocks, 1)
+	require.Equal(t, "document", blocks[0].Type)
+	require.NotNil(t, blocks[0].Source)
+	require.Equal(t, "base64", blocks[0].Source.Type)
+	require.Equal(t, "application/pdf", blocks[0].Source.MediaType)
+	require.Equal(t, "JVBER", blocks[0].Source.Data)
 }
 
 func TestResponsesToAnthropic_InputAudioError(t *testing.T) {
