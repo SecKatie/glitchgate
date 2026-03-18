@@ -32,14 +32,14 @@ IMAGE ?= ghcr.io/seckatie/glitchgate
 TAG   ?= latest
 
 image:
-	-podman manifest rm $(IMAGE):$(TAG) 2>/dev/null
+	podman manifest rm $(IMAGE):$(TAG) 2>/dev/null
 	podman build --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_DATE=$(DATE) --manifest $(IMAGE):$(TAG) .
 
 image-push:
+	$(MAKE) image TAG=$(TAG)
 	podman manifest push $(IMAGE):$(TAG) docker://$(IMAGE):$(TAG)
 
 image-push-version:
-	@test -n "$(VERSION)" || (echo "VERSION is required: make image-push-version VERSION=v1.0.0" && exit 1)
-	$(MAKE) image-push TAG=$(VERSION)
-	podman manifest push $(IMAGE):$(VERSION) docker://$(IMAGE):$(VERSION)
+	$(MAKE) image-push TAG=latest
+	podman manifest push $(IMAGE):latest docker://$(IMAGE):$(VERSION)
 	@echo "Pushed $(IMAGE):$(VERSION)"

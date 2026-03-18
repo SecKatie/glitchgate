@@ -111,8 +111,6 @@ func buildChunkWithToolCalls(id, model string, created int64, delta *openai.Chat
 // index, ID, type, and name - not arguments.
 func writeToolCallStartChunk(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, id, model string, created int64, toolCallIndex int, tcID, tcName string) error {
 	delta := &openai.ChatMessage{
-		Role:    "assistant",
-		Content: "",
 		ToolCalls: []openai.ToolCall{
 			{
 				ID:   tcID,
@@ -157,8 +155,6 @@ func writeToolCallStartChunk(w http.ResponseWriter, rc *http.ResponseController,
 // writeToolCallDeltaChunk emits a chunk with only the incremental tool call arguments delta.
 func writeToolCallDeltaChunk(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, id, model string, created int64, toolCallIndex int, newArgs string) error {
 	delta := &openai.ChatMessage{
-		Role:    "assistant",
-		Content: "",
 		ToolCalls: []openai.ToolCall{
 			{
 				ID:   "",
@@ -241,6 +237,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 	sentInitial := false
 	sentStop := false
 	thinkingBlockIndices := make(map[int]bool)
+	textBlockSeen := false // once text starts, suppress late-arriving thinking deltas
 
 	// Track active tool calls by index for streaming tool call support.
 	toolCalls := make(map[int]openai.ToolCall)
@@ -301,14 +298,15 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 				switch cbEvent.ContentBlock.Type {
 				case "thinking":
 					thinkingBlockIndices[cbEvent.Index] = true
-					delta := &openai.ChatMessage{
-						Role:      "assistant",
-						Content:   "",
-						Reasoning: "",
+					// Suppress late-arriving thinking blocks after text has
+					// started (e.g. Kimi-K2.5 interleaves thinking/text blocks).
+					if textBlockSeen {
+						continue
 					}
-					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, nil, nil); err != nil {
-						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
-					}
+					// Suppress: the initial role chunk was already sent;
+					// reasoning content will arrive via thinking_delta events.
+				case "text":
+					textBlockSeen = true
 				case "tool_use":
 					toolCallIndex := len(toolCalls)
 					contentBlockToToolCallIndex[cbEvent.Index] = toolCallIndex
@@ -334,14 +332,12 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			}
 
 			// Handle thinking block deltas — emit as reasoning field.
+			// Suppress if text content has already started (interleave guard).
 			if thinkingBlockIndices[event.Index] {
-				if event.Delta.Type == "thinking_delta" {
-					delta := &openai.ChatMessage{
-						Role:      "assistant",
-						Content:   "",
+				if event.Delta.Type == "thinking_delta" && !textBlockSeen {
+					if err := writeChunk(w, rc, &captured, messageID, model, created, &openai.ChatMessage{
 						Reasoning: event.Delta.Thinking,
-					}
-					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, nil, nil); err != nil {
+					}, nil, nil, nil); err != nil {
 						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 					}
 				}
@@ -781,6 +777,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 	sentOutputItemAdded := false
 	sentContentPartAdded := false
 	inThinkingBlock := false
+	textBlockSeen := false // once text starts, suppress late-arriving thinking blocks
 	var thinkingText strings.Builder
 	reasoningItemID := ""
 	outputIndex := 0 // tracks the next output index for Responses API events
@@ -842,6 +839,12 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 			}
 
 			if cbEvent.ContentBlock.Type == "thinking" {
+				// Suppress late-arriving thinking blocks after text has
+				// started (e.g. Kimi-K2.5 interleaves thinking/text blocks).
+				if textBlockSeen {
+					inThinkingBlock = false
+					continue
+				}
 				inThinkingBlock = true
 				thinkingText.Reset()
 				reasoningItemID = fmt.Sprintf("rs_%s_%d", strings.TrimPrefix(responseID, "resp_"), outputIndex)
@@ -862,6 +865,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 			}
 
 			inThinkingBlock = false
+			textBlockSeen = true
 
 			if !sentOutputItemAdded {
 				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.added", map[string]interface{}{
