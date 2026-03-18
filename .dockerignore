@@ -13,6 +13,8 @@ coverage.out
 
 # Go module cache (if vendored)
 /vendor/
+.gomodcache/
+.gopath/
 
 # IDE
 .idea/
@@ -36,6 +38,19 @@ Thumbs.db
 config.yaml
 config.yml
 !config.example.yaml
+
+# Environment
+.env
+.env.*
+
+# Kubernetes secrets
+kustomize/overlays/*/secrets.env
+
+# Distribution (goreleaser output)
+dist/
+
+# Rodney browser automation
+.rodney/
 
 # Logs
 *.log
