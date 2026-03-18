@@ -32,8 +32,8 @@ type ChatCompletionRequest struct {
 
 // ChatMessage represents a single message in the OpenAI conversation format.
 type ChatMessage struct {
-	Role             string      `json:"role"`
-	Content          interface{} `json:"content"` // string or []ContentPart
+	Role             string      `json:"role,omitempty"`
+	Content          interface{} `json:"content,omitempty"` // string or []ContentPart
 	Refusal          string      `json:"refusal,omitempty"`
 	Name             string      `json:"name,omitempty"`
 	ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`

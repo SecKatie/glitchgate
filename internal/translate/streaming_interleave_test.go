@@ -363,3 +363,160 @@ func parseSSEEvents(t *testing.T, body string) []sseEvent {
 	}
 	return events
 }
+
+// buildAnthropicSSEEvent builds a single Anthropic SSE event line.
+func buildAnthropicSSEEvent(eventType string, payload interface{}) string {
+	data, _ := json.Marshal(payload)
+	return fmt.Sprintf("event: %s\ndata: %s\n", eventType, data)
+}
+
+// buildAnthropicInterleavedSSE creates an Anthropic SSE stream that mimics the
+// upstream pattern observed from Kimi-K2.5 via Synthetic:
+// thinking(0) → text(1) → thinking(2) → text(3)
+func buildAnthropicInterleavedSSE() string {
+	lines := []string{
+		buildAnthropicSSEEvent("message_start", map[string]interface{}{
+			"type": "message_start",
+			"message": map[string]interface{}{
+				"id":      "msg_test123",
+				"type":    "message",
+				"role":    "assistant",
+				"content": []interface{}{},
+				"model":   "test-model",
+				"usage":   map[string]interface{}{"input_tokens": 100, "output_tokens": 0},
+			},
+		}),
+		// Block 0: thinking
+		buildAnthropicSSEEvent("content_block_start", map[string]interface{}{
+			"type":          "content_block_start",
+			"index":         0,
+			"content_block": map[string]interface{}{"type": "thinking", "thinking": ""},
+		}),
+		buildAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": 0,
+			"delta": map[string]interface{}{"type": "thinking_delta", "thinking": "I need to think"},
+		}),
+		buildAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+			"type": "content_block_stop", "index": 0,
+		}),
+		// Block 1: text (first word)
+		buildAnthropicSSEEvent("content_block_start", map[string]interface{}{
+			"type":          "content_block_start",
+			"index":         1,
+			"content_block": map[string]interface{}{"type": "text", "text": ""},
+		}),
+		buildAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": 1,
+			"delta": map[string]interface{}{"type": "text_delta", "text": "Hello"},
+		}),
+		buildAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+			"type": "content_block_stop", "index": 1,
+		}),
+		// Block 2: late thinking (should be suppressed)
+		buildAnthropicSSEEvent("content_block_start", map[string]interface{}{
+			"type":          "content_block_start",
+			"index":         2,
+			"content_block": map[string]interface{}{"type": "thinking", "thinking": ""},
+		}),
+		buildAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": 2,
+			"delta": map[string]interface{}{"type": "thinking_delta", "thinking": " straggler"},
+		}),
+		buildAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+			"type": "content_block_stop", "index": 2,
+		}),
+		// Block 3: text (rest of response)
+		buildAnthropicSSEEvent("content_block_start", map[string]interface{}{
+			"type":          "content_block_start",
+			"index":         3,
+			"content_block": map[string]interface{}{"type": "text", "text": ""},
+		}),
+		buildAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": 3,
+			"delta": map[string]interface{}{"type": "text_delta", "text": " world!"},
+		}),
+		buildAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+			"type": "content_block_stop", "index": 3,
+		}),
+		buildAnthropicSSEEvent("message_delta", map[string]interface{}{
+			"type":  "message_delta",
+			"delta": map[string]interface{}{"stop_reason": "end_turn"},
+			"usage": map[string]interface{}{"output_tokens": 50},
+		}),
+		buildAnthropicSSEEvent("message_stop", map[string]interface{}{"type": "message_stop"}),
+		"",
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// SSEStream (Anthropic → OpenAI) interleave tests
+// ---------------------------------------------------------------------------
+
+func TestSSEStream_InterleavedThinkingBlocks(t *testing.T) {
+	rec := httptest.NewRecorder()
+	upstream := io.NopCloser(strings.NewReader(buildAnthropicInterleavedSSE()))
+
+	_, err := SSEStream(rec, upstream, "test-model")
+	require.NoError(t, err)
+
+	body := rec.Body.String()
+
+	// Parse all OpenAI chunks from the output.
+	var chunks []map[string]interface{}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "data: ") && line[6:] != "[DONE]" {
+			var obj map[string]interface{}
+			if json.Unmarshal([]byte(line[6:]), &obj) == nil {
+				chunks = append(chunks, obj)
+			}
+		}
+	}
+
+	// Collect all reasoning and content deltas in order.
+	var reasoning, content []string
+	var reasoningAfterContent []string
+	contentStarted := false
+	for _, chunk := range chunks {
+		choices, ok := chunk["choices"].([]interface{})
+		if !ok || len(choices) == 0 {
+			continue
+		}
+		choice, ok := choices[0].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		delta, ok := choice["delta"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if r, ok := delta["reasoning"].(string); ok && r != "" {
+			reasoning = append(reasoning, r)
+			if contentStarted {
+				reasoningAfterContent = append(reasoningAfterContent, r)
+			}
+		}
+		if c, ok := delta["content"].(string); ok && c != "" {
+			content = append(content, c)
+			contentStarted = true
+		}
+	}
+
+	// First thinking block should be present.
+	require.NotEmpty(t, reasoning, "should have reasoning deltas from first thinking block")
+	require.Contains(t, strings.Join(reasoning, ""), "I need to think")
+
+	// Both text blocks should be present.
+	require.NotEmpty(t, content, "should have content deltas")
+	fullContent := strings.Join(content, "")
+	require.Contains(t, fullContent, "Hello")
+	require.Contains(t, fullContent, "world!")
+
+	// Late-arriving thinking (" straggler") must NOT appear after content.
+	require.Empty(t, reasoningAfterContent,
+		"no reasoning deltas should appear after content started; got: %v", reasoningAfterContent)
+}
