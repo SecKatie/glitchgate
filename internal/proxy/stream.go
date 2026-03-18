@@ -1,58 +1,53 @@
 package proxy
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/seckatie/glitchgate/internal/provider"
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/sse"
 	"github.com/seckatie/glitchgate/internal/translate"
 )
 
-// maxSSELineSize is the maximum size of a single SSE line we support.
-// Anthropic's extended thinking produces signature_delta events that encode
-// the full thinking content as a base64 signature, which can easily exceed
-// bufio.Scanner's default 64 KB limit. 1 MB handles realistic thinking sizes.
-const maxSSELineSize = 1 << 20 // 1 MB
+// StreamResult is a type alias for sse.StreamResult, preserving backward
+// compatibility for callers within the proxy package.
+type StreamResult = sse.StreamResult
 
-// newSSEScanner creates a bufio.Scanner with a buffer large enough for
-// extended thinking signature_delta events.
-func newSSEScanner(r io.Reader) *bufio.Scanner {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, maxSSELineSize), maxSSELineSize)
-	return s
-}
-
-// StreamResult holds the captured data from a streamed response.
-type StreamResult struct {
-	Body                     []byte
-	InputTokens              int64
-	OutputTokens             int64
-	CacheCreationInputTokens int64
-	CacheReadInputTokens     int64
-	ReasoningTokens          int64
-}
-
-// closeOnCancel starts a goroutine that closes r when ctx is cancelled,
-// unblocking any in-progress reads (e.g. a bufio.Scanner). Returns a cleanup
-// function that must be deferred to prevent a goroutine leak when the stream
-// finishes normally before the context is cancelled.
-func closeOnCancel(ctx context.Context, r io.Closer) (stop func()) {
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = r.Close()
-		case <-done:
+// streamingResult converts a StreamResult and error from a stream relay or
+// translation function into a handlerResult. This consolidates the identical
+// pattern repeated across all streaming handler methods.
+func streamingResult(resp *provider.Response, result *sse.StreamResult, err error) handlerResult {
+	var errDetails *string
+	if err != nil {
+		errDetails = streamRelayErrorDetails(err)
+		if errDetails != nil {
+			slog.Warn("stream relay error", "error", err)
 		}
-	}()
-	return func() { close(done) }
+	}
+
+	status := resp.StatusCode
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return handlerResult{
+		InputTokens:              result.InputTokens,
+		OutputTokens:             result.OutputTokens,
+		CacheCreationInputTokens: result.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.CacheReadInputTokens,
+		ReasoningTokens:          result.ReasoningTokens,
+		Status:                   status,
+		Body:                     result.Body,
+		ErrDetails:               errDetails,
+		IsStreaming:              true,
+	}
 }
 
 // RelaySSEStream reads SSE events from upstream and forwards them to the client,
@@ -61,21 +56,17 @@ func closeOnCancel(ctx context.Context, r io.Closer) (stop func()) {
 // to unblock the scanner and stop consuming provider resources.
 func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
-	stop := closeOnCancel(ctx, upstream)
+	stop := sse.CloseOnCancel(ctx, upstream)
 	defer stop()
 
 	rc := http.NewResponseController(w)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 		captured.WriteString(line)
@@ -126,21 +117,17 @@ func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Read
 // extracts token usage from the final chunk's usage field.
 func RelayOpenAISSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
-	stop := closeOnCancel(ctx, upstream)
+	stop := sse.CloseOnCancel(ctx, upstream)
 	defer stop()
 
 	rc := http.NewResponseController(w)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 		captured.WriteString(line)
@@ -193,21 +180,17 @@ func RelayOpenAISSEStream(ctx context.Context, w http.ResponseWriter, upstream i
 // extracts token usage from the response.completed event.
 func RelayResponsesSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
-	stop := closeOnCancel(ctx, upstream)
+	stop := sse.CloseOnCancel(ctx, upstream)
 	defer stop()
 
 	rc := http.NewResponseController(w)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 		captured.WriteString(line)
@@ -261,11 +244,7 @@ func RelayResponsesSSEStream(ctx context.Context, w http.ResponseWriter, upstrea
 func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesResponse) (*StreamResult, error) {
 	rc := http.NewResponseController(w)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 
@@ -412,11 +391,7 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionResponse) (*StreamResult, error) {
 	rc := http.NewResponseController(w)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 
@@ -559,11 +534,7 @@ func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionRe
 func SynthesizeResponsesSSE(w http.ResponseWriter, resp *translate.ResponsesResponse) (*StreamResult, error) {
 	rc := http.NewResponseController(w)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 

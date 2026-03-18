@@ -162,30 +162,7 @@ func (h *Handler) handleStreaming(ctx context.Context, w http.ResponseWriter, re
 		}
 	}
 	result, err := RelaySSEStream(ctx, w, resp.Stream)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 func (h *Handler) routeBuilders(w http.ResponseWriter, r *http.Request,
@@ -346,30 +323,7 @@ func (h *Handler) handleOpenAIProviderNonStreaming(w http.ResponseWriter, resp *
 
 func (h *Handler) handleOpenAIProviderStreaming(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
 	result, err := translate.ReverseSSEStream(r.Context(), w, resp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 // handleOpenAIProviderForcedStream handles the case where the client requested
@@ -517,30 +471,7 @@ func (h *Handler) handleResponsesProviderStreaming(w http.ResponseWriter, r *htt
 	// Claude Code knows to process and render them.
 	w.Header().Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
 	result, err := translate.ResponsesSSEToAnthropicSSE(r.Context(), w, resp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 // buildGeminiProviderRoute handles Anthropic-format requests that need to be
@@ -642,30 +573,7 @@ func (h *Handler) handleGeminiProviderStreaming(w http.ResponseWriter, resp *pro
 	}
 
 	result, err := translate.GeminiSSEToAnthropicSSE(w, resp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("gemini stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 // handleGeminiProviderForcedStream handles client streaming requests when the

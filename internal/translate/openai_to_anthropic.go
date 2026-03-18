@@ -3,6 +3,7 @@ package translate
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
@@ -95,6 +96,7 @@ func OpenAIToAnthropic(req *ChatCompletionRequest) (*anthropic.MessagesRequest, 
 		if err != nil {
 			return nil, fmt.Errorf("invalid tools: %w", err)
 		}
+		slog.Debug("translated tools", "tools", tools)
 		result.Tools = tools
 	}
 
@@ -327,10 +329,18 @@ func translateTools(tools []OpenAITool) ([]anthropic.Tool, error) {
 		if t.Type != "function" {
 			continue
 		}
+		// Ensure InputSchema is not null - use empty object with type if not provided.
+		inputSchema := t.Function.Parameters
+		if inputSchema == nil {
+			inputSchema = map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			}
+		}
 		result = append(result, anthropic.Tool{
 			Name:        t.Function.Name,
 			Description: t.Function.Description,
-			InputSchema: t.Function.Parameters,
+			InputSchema: inputSchema,
 		})
 	}
 	return result, nil

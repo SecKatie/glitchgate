@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/seckatie/glitchgate/internal/sse"
 )
 
 // GeminiSSEToAnthropicSSE reads Gemini streamGenerateContent SSE events from
@@ -22,12 +24,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	defer func() { _ = upstream.Close() }()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
@@ -43,7 +40,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	toolCalls := make(map[string]*toolState) // fc.Name → state
 	toolUseIdx := 0
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -62,7 +59,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		}
 
 		if !sentMessageStart {
-			if err := writeAnthropicSSE(w, rc, &captured, "message_start", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "message_start", map[string]interface{}{
 				"type": "message_start",
 				"message": map[string]interface{}{
 					"id":      "msg_gemini",
@@ -114,7 +111,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				if textBlockIndex < 0 {
 					textBlockIndex = nextBlockIndex
 					nextBlockIndex++
-					if err := writeAnthropicSSE(w, rc, &captured, "content_block_start", map[string]interface{}{
+					if err := sse.WriteEvent(w, rc, &captured, "content_block_start", map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         textBlockIndex,
 						"content_block": map[string]interface{}{"type": "text", "text": ""},
@@ -122,7 +119,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 						return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 					}
 				}
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_delta", map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": textBlockIndex,
 					"delta": map[string]interface{}{"type": "text_delta", "text": part.Text},
@@ -139,7 +136,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					state = &toolState{id: toolID, index: nextBlockIndex}
 					toolCalls[fc.Name] = state
 					nextBlockIndex++
-					if err := writeAnthropicSSE(w, rc, &captured, "content_block_start", map[string]interface{}{
+					if err := sse.WriteEvent(w, rc, &captured, "content_block_start", map[string]interface{}{
 						"type":  "content_block_start",
 						"index": state.index,
 						"content_block": map[string]interface{}{
@@ -155,7 +152,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 				if fc.Args != nil {
 					argsJSON, err := json.Marshal(fc.Args)
 					if err == nil && len(argsJSON) > 0 && string(argsJSON) != "null" {
-						if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta", map[string]interface{}{
+						if err := sse.WriteEvent(w, rc, &captured, "content_block_delta", map[string]interface{}{
 							"type":  "content_block_delta",
 							"index": state.index,
 							"delta": map[string]interface{}{
@@ -174,7 +171,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	if sentMessageStart {
 		// Close text block.
 		if textBlockIndex >= 0 {
-			if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
 				"index": textBlockIndex,
 			}); err != nil {
@@ -193,7 +190,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].index < entries[j].index })
 		for _, e := range entries {
-			if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
 				"index": e.index,
 			}); err != nil {
@@ -206,7 +203,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			finishReason = "tool_use"
 		}
 
-		if err := writeAnthropicSSE(w, rc, &captured, "message_delta", map[string]interface{}{
+		if err := sse.WriteEvent(w, rc, &captured, "message_delta", map[string]interface{}{
 			"type":  "message_delta",
 			"delta": map[string]interface{}{"stop_reason": finishReason},
 			"usage": map[string]interface{}{"output_tokens": outputTokens},
@@ -214,7 +211,7 @@ func GeminiSSEToAnthropicSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 		}
 
-		if err := writeAnthropicSSE(w, rc, &captured, "message_stop", map[string]interface{}{
+		if err := sse.WriteEvent(w, rc, &captured, "message_stop", map[string]interface{}{
 			"type": "message_stop",
 		}); err != nil {
 			return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
@@ -230,12 +227,7 @@ func GeminiSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, model s
 	defer func() { _ = upstream.Close() }()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
@@ -247,7 +239,7 @@ func GeminiSSEToOpenAISSE(w http.ResponseWriter, upstream io.ReadCloser, model s
 	// name → tool call index (0-based among tool calls)
 	toolIndexByName := make(map[string]int)
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -377,12 +369,7 @@ func GeminiSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	defer func() { _ = upstream.Close() }()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
@@ -395,19 +382,10 @@ func GeminiSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	toolUseIdx := 0
 
 	writeEvent := func(eventType string, payload interface{}) error {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("marshalling SSE payload: %w", err)
-		}
-		line := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)
-		captured.WriteString(line)
-		if _, err := w.Write([]byte(line)); err != nil {
-			return err
-		}
-		return rc.Flush()
+		return sse.WriteEvent(w, rc, &captured, eventType, payload)
 	}
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {

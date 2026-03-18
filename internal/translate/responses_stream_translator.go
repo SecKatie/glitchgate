@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/sse"
 )
 
 // AnthropicSSEToResponsesSSE reads Anthropic SSE events from upstream, translates
@@ -20,12 +21,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 	defer func() { _ = upstream.Close() }()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
@@ -42,7 +38,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 	outputIndex := 0 // tracks the next output index for Responses API events
 	var reasoningOutputItems []map[string]interface{}
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -75,7 +71,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 
 			// Send response.created
 			if !sentResponseCreated {
-				if err := writeResponsesSSE(w, rc, &captured, "response.created", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.created", map[string]interface{}{
 					"type": "response.created",
 					"response": map[string]interface{}{
 						"id":         responseID,
@@ -104,7 +100,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				reasoningItemID = fmt.Sprintf("rs_%s_%d", strings.TrimPrefix(responseID, "resp_"), outputIndex)
 
 				// Emit response.output_item.added for reasoning item.
-				if err := writeResponsesSSE(w, rc, &captured, "response.output_item.added", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.added", map[string]interface{}{
 					"type":         "response.output_item.added",
 					"output_index": outputIndex,
 					"item": map[string]interface{}{
@@ -123,7 +119,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 
 			// Emit output_item.added for the message item (deferred until first text block).
 			if !sentOutputItemAdded {
-				if err := writeResponsesSSE(w, rc, &captured, "response.output_item.added", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.added", map[string]interface{}{
 					"type":         "response.output_item.added",
 					"output_index": outputIndex,
 					"item": map[string]interface{}{
@@ -141,7 +137,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 
 			// Send response.content_part.added for text blocks.
 			if !sentContentPartAdded {
-				if err := writeResponsesSSE(w, rc, &captured, "response.content_part.added", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.content_part.added", map[string]interface{}{
 					"type":          "response.content_part.added",
 					"item_id":       messageID,
 					"output_index":  outputIndex,
@@ -171,7 +167,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 
 			if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 				fullText.WriteString(event.Delta.Text)
-				if err := writeResponsesSSE(w, rc, &captured, "response.output_text.delta", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_text.delta", map[string]interface{}{
 					"type":          "response.output_text.delta",
 					"item_id":       messageID,
 					"output_index":  outputIndex,
@@ -186,7 +182,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 			if inThinkingBlock {
 				// Emit reasoning summary done + output_item.done for the thinking block.
 				thinkingSummary := thinkingText.String()
-				if err := writeResponsesSSE(w, rc, &captured, "response.reasoning_summary_part.done", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.reasoning_summary_part.done", map[string]interface{}{
 					"type":          "response.reasoning_summary_part.done",
 					"item_id":       reasoningItemID,
 					"output_index":  outputIndex,
@@ -211,7 +207,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 					"status": "completed",
 				}
 
-				if err := writeResponsesSSE(w, rc, &captured, "response.output_item.done", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.done", map[string]interface{}{
 					"type":         "response.output_item.done",
 					"output_index": outputIndex,
 					"item":         reasoningItem,
@@ -230,7 +226,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 			// Send response.output_text.done and response.content_part.done for text blocks.
 			finalText := fullText.String()
 			if sentContentPartAdded {
-				if err := writeResponsesSSE(w, rc, &captured, "response.output_text.done", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_text.done", map[string]interface{}{
 					"type":          "response.output_text.done",
 					"item_id":       messageID,
 					"output_index":  outputIndex,
@@ -240,7 +236,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 				}
 
-				if err := writeResponsesSSE(w, rc, &captured, "response.content_part.done", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.content_part.done", map[string]interface{}{
 					"type":          "response.content_part.done",
 					"item_id":       messageID,
 					"output_index":  outputIndex,
@@ -266,7 +262,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 
 			// Send response.output_item.done for the message item.
 			finalText := fullText.String()
-			if err := writeResponsesSSE(w, rc, &captured, "response.output_item.done", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "response.output_item.done", map[string]interface{}{
 				"type":         "response.output_item.done",
 				"output_index": outputIndex,
 				"item": map[string]interface{}{
@@ -322,7 +318,7 @@ func AnthropicSSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, m
 				}
 			}
 
-			if err := writeResponsesSSE(w, rc, &captured, "response.completed", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "response.completed", map[string]interface{}{
 				"type": "response.completed",
 				"response": map[string]interface{}{
 					"id":         responseID,
@@ -361,12 +357,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	defer func() { _ = upstream.Close() }()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
@@ -378,7 +369,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	sentOutputItemAdded := false
 	sentContentPartAdded := false
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -394,7 +385,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 
 			// response.output_text.done
 			if sentContentPartAdded {
-				if err := writeResponsesSSE(w, rc, &captured, "response.output_text.done", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_text.done", map[string]interface{}{
 					"type":          "response.output_text.done",
 					"item_id":       messageID,
 					"output_index":  0,
@@ -404,7 +395,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
 
-				if err := writeResponsesSSE(w, rc, &captured, "response.content_part.done", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.content_part.done", map[string]interface{}{
 					"type":          "response.content_part.done",
 					"item_id":       messageID,
 					"output_index":  0,
@@ -421,7 +412,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 
 			// response.output_item.done
 			if sentOutputItemAdded {
-				if err := writeResponsesSSE(w, rc, &captured, "response.output_item.done", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.output_item.done", map[string]interface{}{
 					"type":         "response.output_item.done",
 					"output_index": 0,
 					"item": map[string]interface{}{
@@ -454,7 +445,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 					"cached_tokens": cacheReadTokens,
 				}
 			}
-			if err := writeResponsesSSE(w, rc, &captured, "response.completed", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "response.completed", map[string]interface{}{
 				"type": "response.completed",
 				"response": map[string]interface{}{
 					"id":         responseID,
@@ -522,7 +513,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		// Send response.created on first chunk.
 		if !sentResponseCreated {
 			createdAt = float64(chunk.Created)
-			if err := writeResponsesSSE(w, rc, &captured, "response.created", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "response.created", map[string]interface{}{
 				"type": "response.created",
 				"response": map[string]interface{}{
 					"id":         responseID,
@@ -550,7 +541,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 
 		// Send output_item.added and content_part.added on first content.
 		if !sentOutputItemAdded {
-			if err := writeResponsesSSE(w, rc, &captured, "response.output_item.added", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "response.output_item.added", map[string]interface{}{
 				"type":         "response.output_item.added",
 				"output_index": 0,
 				"item": map[string]interface{}{
@@ -569,7 +560,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 		// Handle text content deltas.
 		if text, ok := delta.Content.(string); ok && text != "" {
 			if !sentContentPartAdded {
-				if err := writeResponsesSSE(w, rc, &captured, "response.content_part.added", map[string]interface{}{
+				if err := sse.WriteEvent(w, rc, &captured, "response.content_part.added", map[string]interface{}{
 					"type":          "response.content_part.added",
 					"item_id":       messageID,
 					"output_index":  0,
@@ -586,7 +577,7 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 			}
 
 			fullText.WriteString(text)
-			if err := writeResponsesSSE(w, rc, &captured, "response.output_text.delta", map[string]interface{}{
+			if err := sse.WriteEvent(w, rc, &captured, "response.output_text.delta", map[string]interface{}{
 				"type":          "response.output_text.delta",
 				"item_id":       messageID,
 				"output_index":  0,
@@ -599,20 +590,4 @@ func OpenAISSEToResponsesSSE(w http.ResponseWriter, upstream io.ReadCloser, mode
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), scanner.Err()
-}
-
-// writeResponsesSSE writes a single Responses API SSE event to the client.
-func writeResponsesSSE(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, event string, data interface{}) error {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("marshalling SSE data: %w", err)
-	}
-
-	line := fmt.Sprintf("event: %s\ndata: %s\n\n", event, jsonData)
-	captured.WriteString(line)
-
-	if _, err := w.Write([]byte(line)); err != nil {
-		return err
-	}
-	return rc.Flush()
 }

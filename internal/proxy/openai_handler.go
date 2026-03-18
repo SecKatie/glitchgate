@@ -170,30 +170,7 @@ func (h *OpenAIHandler) handleOpenAINonStreaming(w http.ResponseWriter, resp *pr
 
 func (h *OpenAIHandler) handleOpenAIStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
 	result, err := translate.SSEStream(w, resp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oaiReq *translate.ChatCompletionRequest, rawBody []byte) map[string]routeBuilder {
@@ -320,30 +297,7 @@ func (h *OpenAIHandler) handleOpenAINativeNonStreaming(w http.ResponseWriter, re
 
 func (h *OpenAIHandler) handleOpenAINativeStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
 	result, err := RelayOpenAISSEStream(ctx, w, resp.Stream)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 // buildResponsesRoute handles CC requests that need to be sent to a Responses
@@ -423,30 +377,7 @@ func (h *OpenAIHandler) handleResponsesProviderNonStreamingToCC(w http.ResponseW
 
 func (h *OpenAIHandler) handleResponsesProviderStreamingToCC(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
 	result, err := translate.ResponsesSSEToOpenAISSE(r.Context(), w, resp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 // buildGeminiRoute handles CC requests that need to be sent to a native Gemini
@@ -539,30 +470,7 @@ func (h *OpenAIHandler) handleGeminiStreamingToCC(w http.ResponseWriter, resp *p
 	}
 
 	result, err := translate.GeminiSSEToOpenAISSE(w, resp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("gemini stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 func (h *OpenAIHandler) handleGeminiForcedStreamToCC(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {

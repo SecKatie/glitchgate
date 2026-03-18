@@ -1,9 +1,7 @@
 package translate
 
 import (
-	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,51 +11,26 @@ import (
 	"time"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/sse"
 )
 
-// maxSSELineSize is the maximum size of a single SSE line we support.
-// Anthropic's extended thinking produces signature_delta events that encode
-// the full thinking content as a base64 signature, which can easily exceed
-// bufio.Scanner's default 64 KB limit. 1 MB handles realistic thinking sizes.
-const maxSSELineSize = 1 << 20 // 1 MB
+// StreamResult is a type alias for sse.StreamResult, preserving backward
+// compatibility for callers that reference translate.StreamResult.
+type StreamResult = sse.StreamResult
 
-// newSSEScanner creates a bufio.Scanner with a buffer large enough for
-// extended thinking signature_delta events.
-func newSSEScanner(r io.Reader) *bufio.Scanner {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, maxSSELineSize), maxSSELineSize)
-	return s
+// writeChunk is a helper that builds a chunk, writes it to the client,
+// and returns an error (with partial result) if writing fails.
+// This consolidates the repeated pattern of buildChunk → writeSSEChunk → return buildResult on error.
+func writeChunk(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, id, model string, created int64, delta *ChatMessage, finishReason *string, toolCalls map[int]ToolCall, toolCallOrder []int) error {
+	var chunk *ChatCompletionResponse
+	if len(toolCalls) > 0 {
+		chunk = buildChunkWithToolCalls(id, model, created, delta, finishReason, toolCalls, toolCallOrder)
+	} else {
+		chunk = buildChunk(id, model, created, delta, finishReason)
+	}
+	return writeSSEChunk(w, rc, captured, chunk)
 }
 
-// StreamResult holds the captured data from a translated streaming response.
-type StreamResult struct {
-	Body                     []byte
-	InputTokens              int64
-	OutputTokens             int64
-	CacheCreationInputTokens int64
-	CacheReadInputTokens     int64
-	ReasoningTokens          int64
-}
-
-// closeOnCancel starts a goroutine that closes r when ctx is cancelled,
-// unblocking any in-progress reads (e.g. a bufio.Scanner). Returns a cleanup
-// function that must be deferred to prevent a goroutine leak when the stream
-// finishes normally before the context is cancelled.
-func closeOnCancel(ctx context.Context, r io.Closer) (stop func()) {
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = r.Close()
-		case <-done:
-		}
-	}()
-	return func() { close(done) }
-}
-
-// SSEStream reads Anthropic SSE events from upstream, translates
-// each to OpenAI-compatible SSE chunks, and writes them to the client.
-// It returns a StreamResult with the captured output and token usage.
 // SSEStream reads Anthropic SSE events from upstream, translates
 // each to OpenAI-compatible SSE chunks, and writes them to the client.
 // It returns a StreamResult with the captured output and token usage.
@@ -65,12 +38,7 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 	defer func() { _ = upstream.Close() }()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
@@ -80,7 +48,11 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 	sentStop := false
 	thinkingBlockIndices := make(map[int]bool)
 
-	scanner := newSSEScanner(upstream)
+	// Track active tool calls by index for streaming tool call support.
+	toolCalls := make(map[int]ToolCall)
+	toolCallOrder := []int{} // track order of tool calls
+
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -115,18 +87,19 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 
 			// Send initial chunk with role.
 			if !sentInitial {
-				chunk := buildChunk(messageID, model, created, &ChatMessage{
+				delta := &ChatMessage{
 					Role:    "assistant",
 					Content: "",
-				}, nil)
-				if err := writeSSEChunk(w, rc, &captured, chunk); err != nil {
+				}
+				if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, nil, nil); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 				}
 				sentInitial = true
 			}
 
 		case "content_block_start":
-			// Track thinking blocks by index so we can skip their deltas.
+			// Track thinking blocks by index so we can emit reasoning.
+			// Also track tool_use blocks for streaming tool call support.
 			var cbEvent anthropic.ContentBlockStartEvent
 			if err := json.Unmarshal([]byte(data), &cbEvent); err != nil {
 				slog.Warn("failed to parse content_block_start event", "error", err)
@@ -134,6 +107,35 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 				slog.Debug("content_block_start", "index", cbEvent.Index, "type", cbEvent.ContentBlock.Type)
 				if cbEvent.ContentBlock.Type == "thinking" {
 					thinkingBlockIndices[cbEvent.Index] = true
+					// Emit initial chunk with reasoning field.
+					delta := &ChatMessage{
+						Role:      "assistant",
+						Content:   "",
+						Reasoning: "",
+					}
+					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, nil, nil); err != nil {
+						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
+					}
+				} else if cbEvent.ContentBlock.Type == "tool_use" {
+					// Track order of tool calls.
+					toolCallOrder = append(toolCallOrder, cbEvent.Index)
+					// Initialize a new tool call.
+					toolCalls[cbEvent.Index] = ToolCall{
+						ID:   cbEvent.ContentBlock.ID,
+						Type: "function",
+						Function: FunctionCall{
+							Name:      cbEvent.ContentBlock.Name,
+							Arguments: "",
+						},
+					}
+					// Emit initial chunk with tool call ID and name.
+					delta := &ChatMessage{
+						Role:    "assistant",
+						Content: "",
+					}
+					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, toolCalls, toolCallOrder); err != nil {
+						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
+					}
 				}
 			}
 
@@ -144,26 +146,45 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 				continue
 			}
 
-			// Skip thinking block deltas — OpenAI CC doesn't stream reasoning.
+			// Handle thinking block deltas — emit as reasoning field.
 			if thinkingBlockIndices[event.Index] {
-				slog.Debug("skipping thinking delta", "index", event.Index, "delta_type", event.Delta.Type)
+				if event.Delta.Type == "thinking_delta" {
+					delta := &ChatMessage{
+						Role:      "assistant",
+						Content:   "",
+						Reasoning: event.Delta.Thinking,
+					}
+					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, nil, nil); err != nil {
+						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
+					}
+				}
 				continue
 			}
 			slog.Debug("content_block_delta", "index", event.Index, "delta_type", event.Delta.Type, "text_len", len(event.Delta.Text))
 
 			switch event.Delta.Type {
 			case "text_delta":
-				chunk := buildChunk(messageID, model, created, &ChatMessage{
+				delta := &ChatMessage{
 					Content: event.Delta.Text,
-				}, nil)
-				if err := writeSSEChunk(w, rc, &captured, chunk); err != nil {
+				}
+				if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, nil, nil); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 				}
 
 			case "input_json_delta":
-				// Tool call argument streaming - pass through as tool call delta.
-				// This is a simplified handling; full tool streaming would need
-				// more state tracking.
+				// Accumulate tool call arguments.
+				if tc, ok := toolCalls[event.Index]; ok {
+					tc.Function.Arguments += event.Delta.PartialJSON
+					toolCalls[event.Index] = tc
+					// Emit chunk with updated arguments.
+					delta := &ChatMessage{
+						Role:    "assistant",
+						Content: "",
+					}
+					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, toolCalls, toolCallOrder); err != nil {
+						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
+					}
+				}
 			}
 
 		case "content_block_stop":
@@ -189,8 +210,8 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 			}
 
 			finishReason := mapStopReason(event.Delta.StopReason)
-			chunk := buildChunk(messageID, model, created, &ChatMessage{}, finishReason)
-			if err := writeSSEChunk(w, rc, &captured, chunk); err != nil {
+			delta := &ChatMessage{}
+			if err := writeChunk(w, rc, &captured, messageID, model, created, delta, finishReason, nil, nil); err != nil {
 				return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 			}
 
@@ -235,6 +256,45 @@ func buildChunk(id, model string, created int64, delta *ChatMessage, finishReaso
 	}
 }
 
+// buildChunkWithToolCalls creates a ChatCompletionResponse with tool calls.
+func buildChunkWithToolCalls(id, model string, created int64, delta *ChatMessage, finishReason *string, toolCalls map[int]ToolCall, order []int) *ChatCompletionResponse {
+	// Build tool calls in order.
+	tcSlice := make([]ToolCall, 0, len(toolCalls))
+	for _, idx := range order {
+		if tc, ok := toolCalls[idx]; ok {
+			tcSlice = append(tcSlice, tc)
+		}
+	}
+	// Also include any tool calls not in order (shouldn't happen but be safe).
+	for idx, tc := range toolCalls {
+		found := false
+		for _, o := range order {
+			if o == idx {
+				found = true
+				break
+			}
+		}
+		if !found {
+			tcSlice = append(tcSlice, tc)
+		}
+	}
+
+	delta.ToolCalls = tcSlice
+	return &ChatCompletionResponse{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []Choice{
+			{
+				Index:        0,
+				Delta:        delta,
+				FinishReason: finishReason,
+			},
+		},
+	}
+}
+
 // writeSSEChunk serializes a chunk as an SSE data line and flushes it to the client.
 func writeSSEChunk(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, chunk *ChatCompletionResponse) error {
 	data, err := json.Marshal(chunk)
@@ -252,13 +312,6 @@ func writeSSEChunk(w http.ResponseWriter, rc *http.ResponseController, captured 
 }
 
 // buildResult creates a StreamResult from the accumulated state.
-func buildResult(captured *bytes.Buffer, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens int64) *StreamResult {
-	return &StreamResult{
-		Body:                     captured.Bytes(),
-		InputTokens:              inputTokens,
-		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: cacheCreationTokens,
-		CacheReadInputTokens:     cacheReadTokens,
-		ReasoningTokens:          reasoningTokens,
-	}
+func buildResult(captured *bytes.Buffer, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens int64) *sse.StreamResult {
+	return sse.BuildResult(captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens)
 }
