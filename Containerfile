@@ -15,8 +15,12 @@ RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
-# Copy source and build
-COPY . .
+# Copy source (only what's needed for build)
+COPY go.mod go.sum ./
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+# Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -trimpath \
     -ldflags="-s -w -extldflags '-static' -X github.com/seckatie/glitchgate/cmd.version=${VERSION}" \
