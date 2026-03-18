@@ -80,7 +80,7 @@
 </div>
 {{end}}
 
-<form class="key-create-form" method="post" action="/ui/api/keys">
+<form class="key-create-form" hx-post="/ui/api/keys" hx-target="body" hx-swap="outerHTML">
     <div style="flex:1">
         <label for="label">New Key Label</label>
         <input type="text" id="label" name="label" placeholder="e.g. Production API Key" required maxlength="64"{{if .LabelError}} aria-invalid="true"{{end}} value="{{.LabelValue}}">

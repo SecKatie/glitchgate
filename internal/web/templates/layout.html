@@ -630,7 +630,7 @@
                     </details>
                 </li>
                 <li>
-                    <form method="post" action="/ui/api/logout" class="mb-0">
+                    <form hx-post="/ui/api/logout" class="mb-0">
                         <button type="submit" class="outline btn-sm">Logout</button>
                     </form>
                 </li>
@@ -656,7 +656,7 @@
                         <li><a href="/ui/teams"{{if eq .ActiveTab "teams"}} aria-current="page"{{end}}>Teams</a></li>
                         <li><a href="/ui/audit"{{if eq .ActiveTab "audit"}} aria-current="page"{{end}}>Audit</a></li>
                         <li>
-                            <form method="post" action="/ui/api/logout" class="mb-0">
+                            <form hx-post="/ui/api/logout" class="mb-0">
                                 <button type="submit" class="outline btn-sm">Logout</button>
                             </form>
                         </li>
