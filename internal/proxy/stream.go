@@ -50,6 +50,29 @@ func streamingResult(resp *provider.Response, result *sse.StreamResult, err erro
 	}
 }
 
+// synthesizedStreamResult wraps the output of a Synthesize*SSE call into a
+// handlerResult, using token counts from the provider response (which may
+// differ from the synthesized SSE's counts for formats like Gemini).
+func synthesizedStreamResult(resp *provider.Response, result *sse.StreamResult, err error) handlerResult {
+	var errDetails *string
+	if err != nil {
+		s := fmt.Sprintf("stream synthesis error: %v", err)
+		errDetails = &s
+		slog.Warn("stream synthesis error", "error", err)
+	}
+	return handlerResult{
+		InputTokens:              resp.InputTokens,
+		OutputTokens:             resp.OutputTokens,
+		CacheCreationInputTokens: resp.CacheCreationInputTokens,
+		CacheReadInputTokens:     resp.CacheReadInputTokens,
+		ReasoningTokens:          resp.ReasoningTokens,
+		Status:                   http.StatusOK,
+		Body:                     result.Body,
+		ErrDetails:               errDetails,
+		IsStreaming:              true,
+	}
+}
+
 // relaySSE is the shared scan-write-flush loop for all SSE relay functions.
 // It reads lines from upstream, calls extract on each data payload to accumulate
 // token usage, writes each line to the client, and flushes on blank lines.

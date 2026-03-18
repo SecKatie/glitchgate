@@ -410,10 +410,7 @@ func (h *OpenAIHandler) buildGeminiRoute(w http.ResponseWriter, r *http.Request,
 		return nil, true
 	}
 
-	forceNonStream := false
-	if provCfg, cfgErr := h.cfg.FindProvider(mapping.Provider); cfgErr == nil && provCfg.Stream != nil && !*provCfg.Stream {
-		forceNonStream = true
-	}
+	forceNonStream := providerForcesNonStream(h.cfg, mapping.Provider)
 
 	return &routePlan{
 		ProviderRequest: &provider.Request{
@@ -504,24 +501,7 @@ func (h *OpenAIHandler) handleGeminiForcedStreamToCC(w http.ResponseWriter, resp
 
 	ccResp := translate.GeminiToOpenAIResponse(resp.Body, modelRequested)
 	result, err := SynthesizeOpenAISSE(w, ccResp)
-
-	var errDetails *string
-	if err != nil {
-		s := fmt.Sprintf("stream synthesis error: %v", err)
-		errDetails = &s
-		slog.Warn("stream synthesis error", "error", err)
-	}
-
-	return handlerResult{
-		InputTokens:          resp.InputTokens,
-		OutputTokens:         resp.OutputTokens,
-		CacheReadInputTokens: resp.CacheReadInputTokens,
-		ReasoningTokens:      resp.ReasoningTokens,
-		Status:               http.StatusOK,
-		Body:                 result.Body,
-		ErrDetails:           errDetails,
-		IsStreaming:          true,
-	}
+	return synthesizedStreamResult(resp, result, err)
 }
 
 // writeOpenAIError writes an error response in OpenAI format.

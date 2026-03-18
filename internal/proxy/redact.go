@@ -43,16 +43,18 @@ func RedactHeaders(headers map[string][]string) map[string][]string {
 	return result
 }
 
+var sensitiveKeys = map[string]bool{
+	"api_key":         true,
+	"x-api-key":       true,
+	"authorization":   true,
+	"x-proxy-api-key": true,
+}
+
 func redactMap(m map[string]interface{}) {
-	sensitiveKeys := []string{"api_key", "x-api-key", "authorization", "x-proxy-api-key"}
 	for k, v := range m {
-		lower := strings.ToLower(k)
-		for _, sk := range sensitiveKeys {
-			if lower == sk {
-				m[k] = "[REDACTED]"
-			}
+		if sensitiveKeys[strings.ToLower(k)] {
+			m[k] = "[REDACTED]"
 		}
-		// Recurse into nested maps
 		if nested, ok := v.(map[string]interface{}); ok {
 			redactMap(nested)
 		}

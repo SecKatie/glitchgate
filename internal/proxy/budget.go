@@ -45,8 +45,8 @@ func (bc *BudgetChecker) Check(ctx context.Context, proxyKeyID string) (*store.B
 
 		spend, err := bc.store.GetSpendSince(ctx, b.Scope, b.ScopeID, start)
 		if err != nil {
-			slog.Warn("budget check: failed to get spend", "scope", b.Scope, "error", err)
-			continue // fail open for individual scope errors
+			slog.Warn("budget check: failed to get spend", "scope", b.Scope, "error", err) //nolint:gosec // G706: structured slog prevents log injection; b.Scope is a DB-stored budget scope label
+			continue                                                                       // fail open for individual scope errors
 		}
 
 		if spend >= b.LimitUSD {

@@ -14,6 +14,14 @@ import (
 
 type responseAdapter func(http.ResponseWriter, *provider.Response) handlerResult
 
+// providerForcesNonStream returns true when the provider config explicitly
+// disables streaming (stream: false). All handler types use this to decide
+// whether to synthesize SSE from a non-streaming upstream response.
+func providerForcesNonStream(cfg *config.Config, providerName string) bool {
+	provCfg, err := cfg.FindProvider(providerName)
+	return err == nil && provCfg.Stream != nil && !*provCfg.Stream
+}
+
 type routePlan struct {
 	ProviderRequest *provider.Request
 	RequestBody     []byte
@@ -125,7 +133,7 @@ func executeProviderAttempt(
 		}
 		latency := time.Since(attempt.Start).Milliseconds()
 		errMsg := err.Error()
-		logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, providerNameFor(prov), attempt.ModelRequested, attempt.ModelUpstream, "",
+		logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, prov.Name(), attempt.ModelRequested, attempt.ModelUpstream, "",
 			latency, attempt.RequestBody, attempt.AttemptCount, handlerResult{
 				Status: http.StatusBadGateway, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: attempt.IsStreaming,
@@ -143,7 +151,7 @@ func executeProviderAttempt(
 		}
 		latency := time.Since(attempt.Start).Milliseconds()
 		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attempt.AttemptCount, provResp.StatusCode)
-		logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, providerNameFor(prov), attempt.ModelRequested, attempt.ModelUpstream, "",
+		logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, prov.Name(), attempt.ModelRequested, attempt.ModelUpstream, "",
 			latency, attempt.RequestBody, attempt.AttemptCount, handlerResult{
 				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: attempt.IsStreaming,
@@ -154,7 +162,7 @@ func executeProviderAttempt(
 
 	result := handleResponse(provResp)
 	latency := time.Since(attempt.Start).Milliseconds()
-	logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, providerNameFor(prov), attempt.ModelRequested, attempt.ModelUpstream, "",
+	logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, prov.Name(), attempt.ModelRequested, attempt.ModelUpstream, "",
 		latency, attempt.RequestBody, attempt.AttemptCount, result, calc)
 	return true
 }
