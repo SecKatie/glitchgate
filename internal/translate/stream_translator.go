@@ -172,18 +172,9 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 				}
 
 			case "input_json_delta":
-				// Accumulate tool call arguments.
-				if tc, ok := toolCalls[event.Index]; ok {
-					tc.Function.Arguments += event.Delta.PartialJSON
-					toolCalls[event.Index] = tc
-					// Emit chunk with updated arguments.
-					delta := &ChatMessage{
-						Role:    "assistant",
-						Content: "",
-					}
-					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, toolCalls, toolCallOrder); err != nil {
-						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
-					}
+				// Emit chunk with ONLY the new arguments delta, not accumulated string.
+				if err := writeToolCallDeltaChunk(w, rc, &captured, messageID, model, created, event.Index, event.Delta.PartialJSON); err != nil {
+					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 				}
 			}
 
@@ -293,6 +284,54 @@ func buildChunkWithToolCalls(id, model string, created int64, delta *ChatMessage
 			},
 		},
 	}
+}
+
+// writeToolCallDeltaChunk emits a chunk with only the incremental tool call arguments delta,
+// not the accumulated full string. This follows OpenAI's streaming spec where tool call deltas
+// only include the new arguments, not the full accumulated arguments.
+func writeToolCallDeltaChunk(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, id, model string, created int64, toolCallIndex int, newArgs string) error {
+	delta := &ChatMessage{
+		Role:    "assistant",
+		Content: "",
+		ToolCalls: []ToolCall{
+			{
+				ID:   "",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "",
+					Arguments: newArgs, // Only the delta, not accumulated
+				},
+				Index: &toolCallIndex,
+			},
+		},
+	}
+
+	chunk := &ChatCompletionResponse{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []Choice{
+			{
+				Index:        0,
+				Delta:        delta,
+				FinishReason: nil,
+			},
+		},
+	}
+
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		return fmt.Errorf("marshalling tool call delta chunk: %w", err)
+	}
+
+	line := fmt.Sprintf("data: %s\n\n", data)
+	captured.WriteString(line)
+
+	if _, err := w.Write([]byte(line)); err != nil {
+		return err
+	}
+	return rc.Flush()
 }
 
 // writeSSEChunk serializes a chunk as an SSE data line and flushes it to the client.

@@ -17,6 +17,7 @@ RUN go mod download && go mod verify
 
 # Copy source (only what's needed for build)
 COPY go.mod go.sum ./
+COPY main.go ./
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 
