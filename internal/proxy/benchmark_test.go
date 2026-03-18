@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/proxy"
 	"github.com/seckatie/glitchgate/internal/translate"
 )
@@ -61,17 +62,17 @@ func BenchmarkOpenAIToAnthropic(b *testing.B) {
 	maxTokens := 4096
 	temp := 0.7
 
-	cases := map[string]*translate.ChatCompletionRequest{
+	cases := map[string]*openai.ChatCompletionRequest{
 		"simple_message": {
 			Model: "claude-sonnet-4-20250514",
-			Messages: []translate.ChatMessage{
+			Messages: []openai.ChatMessage{
 				{Role: "user", Content: "Hello, Claude!"},
 			},
 			MaxTokens: &maxTokens,
 		},
 		"with_system": {
 			Model: "claude-sonnet-4-20250514",
-			Messages: []translate.ChatMessage{
+			Messages: []openai.ChatMessage{
 				{Role: "system", Content: "You are a helpful assistant."},
 				{Role: "user", Content: "Hello"},
 			},
@@ -80,7 +81,7 @@ func BenchmarkOpenAIToAnthropic(b *testing.B) {
 		},
 		"multi_turn": {
 			Model: "claude-sonnet-4-20250514",
-			Messages: []translate.ChatMessage{
+			Messages: []openai.ChatMessage{
 				{Role: "system", Content: "You are a coding assistant."},
 				{Role: "user", Content: "Write a function to sort a list."},
 				{Role: "assistant", Content: "Here is a sorting function in Python:\n\ndef sort_list(lst):\n    return sorted(lst)"},
@@ -92,14 +93,14 @@ func BenchmarkOpenAIToAnthropic(b *testing.B) {
 		},
 		"with_tools": {
 			Model: "claude-sonnet-4-20250514",
-			Messages: []translate.ChatMessage{
+			Messages: []openai.ChatMessage{
 				{Role: "user", Content: "What is the weather in NYC?"},
 			},
 			MaxTokens: &maxTokens,
-			Tools: []translate.OpenAITool{
+			Tools: []openai.OpenAITool{
 				{
 					Type: "function",
-					Function: translate.ToolFunction{
+					Function: openai.ToolFunction{
 						Name:        "get_weather",
 						Description: "Get the current weather for a location",
 						Parameters: map[string]interface{}{

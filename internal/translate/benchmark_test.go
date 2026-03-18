@@ -7,23 +7,24 @@ import (
 	"testing"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 )
 
 // ---------------------------------------------------------------------------
 // Helper builders
 // ---------------------------------------------------------------------------
 
-func benchResponsesRequest() *ResponsesRequest {
+func benchResponsesRequest() *openai.ResponsesRequest {
 	temp := 0.7
 	maxTokens := 4096
 	instructions := "You are a helpful coding assistant."
-	return &ResponsesRequest{
+	return &openai.ResponsesRequest{
 		Model:           "gpt-4o",
 		Input:           json.RawMessage(`[{"type":"message","role":"user","content":"Explain the difference between concurrency and parallelism in Go, with code examples."},{"type":"message","role":"assistant","content":"Concurrency is about dealing with lots of things at once..."},{"type":"message","role":"user","content":"Can you show a practical example using worker pools?"}]`),
 		Instructions:    &instructions,
 		Temperature:     &temp,
 		MaxOutputTokens: &maxTokens,
-		Tools: []ResponsesTool{
+		Tools: []openai.ResponsesTool{
 			{
 				Type:        "function",
 				Name:        "run_code",
@@ -63,12 +64,12 @@ func benchAnthropicRequest() *anthropic.MessagesRequest {
 	}
 }
 
-func benchChatCompletionRequest() *ChatCompletionRequest {
+func benchChatCompletionRequest() *openai.ChatCompletionRequest {
 	temp := 0.7
 	maxTokens := 4096
-	return &ChatCompletionRequest{
+	return &openai.ChatCompletionRequest{
 		Model: "gpt-4o",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{Role: "system", Content: "You are a helpful coding assistant."},
 			{Role: "user", Content: "Explain the difference between concurrency and parallelism in Go, with code examples."},
 			{Role: "assistant", Content: "Concurrency is about dealing with lots of things at once..."},
@@ -76,10 +77,10 @@ func benchChatCompletionRequest() *ChatCompletionRequest {
 		},
 		MaxTokens:   &maxTokens,
 		Temperature: &temp,
-		Tools: []OpenAITool{
+		Tools: []openai.OpenAITool{
 			{
 				Type: "function",
-				Function: ToolFunction{
+				Function: openai.ToolFunction{
 					Name:        "run_code",
 					Description: "Execute a Go code snippet and return stdout/stderr.",
 					Parameters: map[string]interface{}{
@@ -121,22 +122,22 @@ func benchAnthropicResponseBody() []byte {
 
 func benchOpenAIResponseBody() []byte {
 	finishReason := "stop"
-	resp := ChatCompletionResponse{
+	resp := openai.ChatCompletionResponse{
 		ID:      "chatcmpl-abc123def456",
 		Object:  "chat.completion",
 		Created: 1710288000,
 		Model:   "gpt-4o-2024-05-13",
-		Choices: []Choice{
+		Choices: []openai.Choice{
 			{
 				Index: 0,
-				Message: &ChatMessage{
+				Message: &openai.ChatMessage{
 					Role:    "assistant",
 					Content: "Here's a practical worker pool example in Go:\n\n```go\npackage main\n\nimport (\n\t\"fmt\"\n\t\"sync\"\n)\n\nfunc worker(id int, jobs <-chan int, results chan<- int, wg *sync.WaitGroup) {\n\tdefer wg.Done()\n\tfor j := range jobs {\n\t\tfmt.Printf(\"Worker %d processing job %d\\n\", id, j)\n\t\tresults <- j * 2\n\t}\n}\n\nfunc main() {\n\tconst numJobs = 10\n\tconst numWorkers = 3\n\tjobs := make(chan int, numJobs)\n\tresults := make(chan int, numJobs)\n\tvar wg sync.WaitGroup\n\tfor w := 1; w <= numWorkers; w++ {\n\t\twg.Add(1)\n\t\tgo worker(w, jobs, results, &wg)\n\t}\n\tfor j := 1; j <= numJobs; j++ {\n\t\tjobs <- j\n\t}\n\tclose(jobs)\n\twg.Wait()\n\tclose(results)\n\tfor r := range results {\n\t\tfmt.Println(r)\n\t}\n}\n```",
 				},
 				FinishReason: &finishReason,
 			},
 		},
-		Usage: &OpenAIUsage{
+		Usage: &openai.OpenAIUsage{
 			PromptTokens:     245,
 			CompletionTokens: 312,
 			TotalTokens:      557,
@@ -147,19 +148,19 @@ func benchOpenAIResponseBody() []byte {
 }
 
 func benchResponsesResponseBody() []byte {
-	resp := ResponsesResponse{
+	resp := openai.ResponsesResponse{
 		ID:        "resp_01XFDUDYJgAACzvnptvVoYEL",
 		Object:    "response",
 		CreatedAt: 1710288000,
 		Model:     "gpt-4o-2024-05-13",
 		Status:    "completed",
-		Output: []OutputItem{
+		Output: []openai.OutputItem{
 			{
 				Type:   "message",
 				ID:     "msg_01XFDUDYJgAACzvnptvVoYEL",
 				Role:   "assistant",
 				Status: "completed",
-				Content: []OutputContent{
+				Content: []openai.OutputContent{
 					{
 						Type:        "output_text",
 						Text:        "Here's a practical worker pool example in Go:\n\n```go\npackage main\n\nimport (\n\t\"fmt\"\n\t\"sync\"\n)\n\nfunc worker(id int, jobs <-chan int, results chan<- int, wg *sync.WaitGroup) {\n\tdefer wg.Done()\n\tfor j := range jobs {\n\t\tfmt.Printf(\"Worker %d processing job %d\\n\", id, j)\n\t\tresults <- j * 2\n\t}\n}\n\nfunc main() {\n\tconst numJobs = 10\n\tconst numWorkers = 3\n\tjobs := make(chan int, numJobs)\n\tresults := make(chan int, numJobs)\n\tvar wg sync.WaitGroup\n\tfor w := 1; w <= numWorkers; w++ {\n\t\twg.Add(1)\n\t\tgo worker(w, jobs, results, &wg)\n\t}\n\tfor j := 1; j <= numJobs; j++ {\n\t\tjobs <- j\n\t}\n\tclose(jobs)\n\twg.Wait()\n\tclose(results)\n\tfor r := range results {\n\t\tfmt.Println(r)\n\t}\n}\n```",
@@ -168,7 +169,7 @@ func benchResponsesResponseBody() []byte {
 				},
 			},
 		},
-		Usage: &ResponsesUsage{
+		Usage: &openai.ResponsesUsage{
 			InputTokens:  245,
 			OutputTokens: 312,
 			TotalTokens:  557,

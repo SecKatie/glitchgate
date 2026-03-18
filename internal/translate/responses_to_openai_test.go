@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestResponsesToOpenAI_NilRequest(t *testing.T) {
 
 func TestResponsesToOpenAI_StringInput(t *testing.T) {
 	input, _ := json.Marshal("Hello!")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -33,7 +34,7 @@ func TestResponsesToOpenAI_StringInput(t *testing.T) {
 func TestResponsesToOpenAI_Instructions(t *testing.T) {
 	input, _ := json.Marshal("Hi")
 	instructions := "You are a helpful assistant."
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model:        "test-model",
 		Input:        input,
 		Instructions: &instructions,
@@ -51,7 +52,7 @@ func TestResponsesToOpenAI_Instructions(t *testing.T) {
 func TestResponsesToOpenAI_MaxTokens(t *testing.T) {
 	input, _ := json.Marshal("Hi")
 	maxTokens := 500
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model:           "test-model",
 		Input:           input,
 		MaxOutputTokens: &maxTokens,
@@ -64,7 +65,7 @@ func TestResponsesToOpenAI_MaxTokens(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_MessageInput(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{
 			Type:    "message",
 			Role:    "user",
@@ -72,7 +73,7 @@ func TestResponsesToOpenAI_MessageInput(t *testing.T) {
 		},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -84,13 +85,13 @@ func TestResponsesToOpenAI_MessageInput(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_FunctionCallInput(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{Type: "message", Role: "user", Content: json.RawMessage(`"What's the weather?"`)},
 		{Type: "function_call", CallID: "call_123", Name: "get_weather", Arguments: `{"location":"SF"}`},
 		{Type: "function_call_output", CallID: "call_123", Output: `{"temp":70}`},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -116,10 +117,10 @@ func TestResponsesToOpenAI_FunctionCallInput(t *testing.T) {
 func TestResponsesToOpenAI_Tools(t *testing.T) {
 	params := json.RawMessage(`{"type":"object","properties":{"location":{"type":"string"}}}`)
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
-		Tools: []ResponsesTool{
+		Tools: []openai.ResponsesTool{
 			{Type: "function", Name: "get_weather", Description: "Get weather", Parameters: params},
 		},
 	}
@@ -134,10 +135,10 @@ func TestResponsesToOpenAI_Tools(t *testing.T) {
 
 func TestResponsesToOpenAI_UnsupportedToolType(t *testing.T) {
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
-		Tools: []ResponsesTool{
+		Tools: []openai.ResponsesTool{
 			{Type: "code_interpreter", Name: "code_interpreter"},
 		},
 	}
@@ -173,11 +174,11 @@ func TestResponsesToOpenAI_ToolChoice(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			input, _ := json.Marshal("Hi")
-			req := &ResponsesRequest{
+			req := &openai.ResponsesRequest{
 				Model:      "test-model",
 				Input:      input,
 				ToolChoice: tc.toolChoice,
-				Tools:      []ResponsesTool{{Type: "function", Name: "f"}},
+				Tools:      []openai.ResponsesTool{{Type: "function", Name: "f"}},
 			}
 
 			result, err := ResponsesToOpenAI(req, "gpt-4o")
@@ -190,7 +191,7 @@ func TestResponsesToOpenAI_ToolChoice(t *testing.T) {
 func TestResponsesToOpenAI_Streaming(t *testing.T) {
 	streaming := true
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model:  "test-model",
 		Input:  input,
 		Stream: &streaming,
@@ -204,11 +205,11 @@ func TestResponsesToOpenAI_Streaming(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_InputFileError(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{Type: "input_file", FileData: "base64data"},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -219,11 +220,11 @@ func TestResponsesToOpenAI_InputFileError(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_InputAudioPassthrough(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{Type: "input_audio", Data: "base64audio", Format: "wav"},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -239,7 +240,7 @@ func TestResponsesToOpenAI_Temperature(t *testing.T) {
 	temp := 0.7
 	topP := 0.9
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model:       "test-model",
 		Input:       input,
 		Temperature: &temp,
@@ -351,10 +352,10 @@ func TestOpenAIToResponsesResponse_NoChoices(t *testing.T) {
 func TestResponsesToOpenAI_ReasoningEffort(t *testing.T) {
 	input, _ := json.Marshal("Think hard about this.")
 	effort := "high"
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
-		Reasoning: &Reasoning{
+		Reasoning: &openai.Reasoning{
 			Effort: &effort,
 		},
 	}
@@ -367,7 +368,7 @@ func TestResponsesToOpenAI_ReasoningEffort(t *testing.T) {
 
 func TestResponsesToOpenAI_NoReasoning(t *testing.T) {
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}

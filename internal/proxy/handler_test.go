@@ -20,7 +20,7 @@ import (
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
-	openaiprov "github.com/seckatie/glitchgate/internal/provider/openai"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/proxy"
 	"github.com/seckatie/glitchgate/internal/store"
 )
@@ -811,9 +811,9 @@ model_list:
 	var apiType string
 	switch secondaryType {
 	case "openai_responses":
-		apiType = openaiprov.APITypeResponses
+		apiType = openai.APITypeResponses
 	default:
-		apiType = openaiprov.APITypeChatCompletions
+		apiType = openai.APITypeChatCompletions
 	}
 
 	providers := map[string]provider.Provider{}
@@ -822,7 +822,7 @@ model_list:
 	require.NoError(t, err2)
 	providers["primary"] = primaryClient
 
-	secondaryClient, err2 := openaiprov.NewClient("secondary", secondaryURL, "proxy_key", "key2", apiType)
+	secondaryClient, err2 := openai.NewClient("secondary", secondaryURL, "proxy_key", "key2", apiType)
 	require.NoError(t, err2)
 	providers["secondary"] = secondaryClient
 
@@ -984,9 +984,9 @@ model_list:
 	var apiType string
 	switch secondaryType {
 	case "openai_responses":
-		apiType = openaiprov.APITypeResponses
+		apiType = openai.APITypeResponses
 	default:
-		apiType = openaiprov.APITypeChatCompletions
+		apiType = openai.APITypeChatCompletions
 	}
 
 	providers := map[string]provider.Provider{}
@@ -995,7 +995,7 @@ model_list:
 	require.NoError(t, err2)
 	providers["primary"] = primaryClient
 
-	secondaryClient, err2 := openaiprov.NewClient("secondary", secondaryURL, "proxy_key", "key2", apiType)
+	secondaryClient, err2 := openai.NewClient("secondary", secondaryURL, "proxy_key", "key2", apiType)
 	require.NoError(t, err2)
 	providers["secondary"] = secondaryClient
 
@@ -1326,7 +1326,7 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	chatgptClient, err := openaiprov.NewClient("chatgpt", upstream.URL, "proxy_key", "key1", openaiprov.APITypeResponses)
+	chatgptClient, err := openai.NewClient("chatgpt", upstream.URL, "proxy_key", "key1", openai.APITypeResponses)
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -1400,7 +1400,7 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	chatgptClient, err := openaiprov.NewClient("chatgpt", upstream.URL, "proxy_key", "key1", openaiprov.APITypeResponses)
+	chatgptClient, err := openai.NewClient("chatgpt", upstream.URL, "proxy_key", "key1", openai.APITypeResponses)
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestResponsesToAnthropic_NilRequest(t *testing.T) {
 
 func TestResponsesToAnthropic_StringInput(t *testing.T) {
 	input, _ := json.Marshal("Hello, Claude!")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -33,7 +34,7 @@ func TestResponsesToAnthropic_StringInput(t *testing.T) {
 func TestResponsesToAnthropic_Instructions(t *testing.T) {
 	input, _ := json.Marshal("Hi")
 	instructions := "You are a helpful assistant."
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model:        "test-model",
 		Input:        input,
 		Instructions: &instructions,
@@ -65,7 +66,7 @@ func TestResponsesToAnthropic_MaxTokens(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			input, _ := json.Marshal("Hi")
-			req := &ResponsesRequest{
+			req := &openai.ResponsesRequest{
 				Model:           "test-model",
 				Input:           input,
 				MaxOutputTokens: tc.maxOutputTokens,
@@ -79,7 +80,7 @@ func TestResponsesToAnthropic_MaxTokens(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_MessageInput(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{
 			Type:    "message",
 			Role:    "user",
@@ -87,7 +88,7 @@ func TestResponsesToAnthropic_MessageInput(t *testing.T) {
 		},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -100,13 +101,13 @@ func TestResponsesToAnthropic_MessageInput(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_FunctionCallInput(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{Type: "message", Role: "user", Content: json.RawMessage(`"What's the weather?"`)},
 		{Type: "function_call", CallID: "call_123", Name: "get_weather", Arguments: `{"location":"SF"}`},
 		{Type: "function_call_output", CallID: "call_123", Output: `{"temp":70}`},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -128,10 +129,10 @@ func TestResponsesToAnthropic_FunctionCallInput(t *testing.T) {
 func TestResponsesToAnthropic_Tools(t *testing.T) {
 	params := json.RawMessage(`{"type":"object","properties":{"location":{"type":"string"}}}`)
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
-		Tools: []ResponsesTool{
+		Tools: []openai.ResponsesTool{
 			{Type: "function", Name: "get_weather", Description: "Get weather", Parameters: params},
 		},
 	}
@@ -145,10 +146,10 @@ func TestResponsesToAnthropic_Tools(t *testing.T) {
 
 func TestResponsesToAnthropic_UnsupportedToolTypeIsSkipped(t *testing.T) {
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
-		Tools: []ResponsesTool{
+		Tools: []openai.ResponsesTool{
 			{Type: "web_search", Name: "web_search"},
 		},
 	}
@@ -184,11 +185,11 @@ func TestResponsesToAnthropic_ToolChoice(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			input, _ := json.Marshal("Hi")
-			req := &ResponsesRequest{
+			req := &openai.ResponsesRequest{
 				Model:      "test-model",
 				Input:      input,
 				ToolChoice: tc.toolChoice,
-				Tools:      []ResponsesTool{{Type: "function", Name: "f"}},
+				Tools:      []openai.ResponsesTool{{Type: "function", Name: "f"}},
 			}
 
 			result, err := ResponsesToAnthropic(req, "claude-sonnet-4-20250514")
@@ -199,11 +200,11 @@ func TestResponsesToAnthropic_ToolChoice(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_InputFileError(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{Type: "input_file", FileData: "base64data"},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -214,11 +215,11 @@ func TestResponsesToAnthropic_InputFileError(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_InputAudioError(t *testing.T) {
-	items := []InputItem{
+	items := []openai.InputItem{
 		{Type: "input_audio", Data: "base64audio", Format: "wav"},
 	}
 	input, _ := json.Marshal(items)
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "test-model",
 		Input: input,
 	}
@@ -281,11 +282,11 @@ func TestResponsesToAnthropic_ReasoningEffort(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			input, _ := json.Marshal("Think about this.")
-			var reasoning *Reasoning
+			var reasoning *openai.Reasoning
 			if tc.effort != nil {
-				reasoning = &Reasoning{Effort: tc.effort}
+				reasoning = &openai.Reasoning{Effort: tc.effort}
 			}
-			req := &ResponsesRequest{
+			req := &openai.ResponsesRequest{
 				Model:           "test-model",
 				Input:           input,
 				MaxOutputTokens: tc.maxTokens,
@@ -309,7 +310,7 @@ func TestResponsesToAnthropic_ReasoningEffort(t *testing.T) {
 func TestResponsesToAnthropic_Streaming(t *testing.T) {
 	streaming := true
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model:  "test-model",
 		Input:  input,
 		Stream: &streaming,
@@ -324,7 +325,7 @@ func TestResponsesToAnthropic_Temperature(t *testing.T) {
 	temp := 0.7
 	topP := 0.9
 	input, _ := json.Marshal("Hi")
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model:       "test-model",
 		Input:       input,
 		Temperature: &temp,
@@ -450,7 +451,7 @@ func TestAnthropicToResponsesResponse_ThinkingBlocks(t *testing.T) {
 	require.Len(t, resp.Output[1].Content, 1)
 	require.Equal(t, "The answer is 42.", resp.Output[1].Content[0].Text)
 
-	// Usage should not synthesize OutputTokensDetails from Anthropic thinking blocks.
+	// Usage should not synthesize openai.OutputTokensDetails from Anthropic thinking blocks.
 	require.NotNil(t, resp.Usage)
 	require.Nil(t, resp.Usage.OutputTokensDetails)
 }

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package translate
+package gemini
+
+import (
+	"encoding/base64"
+	"strings"
+)
 
 // GeminiRequest is the request body for Vertex AI Gemini generateContent.
 type GeminiRequest struct {
@@ -108,9 +113,74 @@ type GeminiUsageMetadata struct {
 	ThoughtsTokenCount      int64 `json:"thoughtsTokenCount,omitempty"`
 }
 
-// geminiUnsupportedSchemaKeys lists JSON Schema keywords rejected by Gemini's
+// ---------------------------------------------------------------------------
+// Gemini helper functions
+// ---------------------------------------------------------------------------
+
+const GeminiThoughtSignatureMarker = "__ggts__"
+
+// EncodeGeminiToolCallID stashes Gemini's opaque thoughtSignature inside a tool
+// call identifier that clients already round-trip unchanged.
+func EncodeGeminiToolCallID(id, thoughtSignature string) string {
+	if thoughtSignature == "" || strings.Contains(id, GeminiThoughtSignatureMarker) {
+		return id
+	}
+	if id == "" {
+		id = "call_gemini"
+	}
+	return id + GeminiThoughtSignatureMarker +
+		base64.RawURLEncoding.EncodeToString([]byte(thoughtSignature))
+}
+
+// DecodeGeminiToolCallID restores a previously embedded thoughtSignature.
+func DecodeGeminiToolCallID(id string) (baseID, thoughtSignature string) {
+	baseID = id
+	idx := strings.Index(id, GeminiThoughtSignatureMarker)
+	if idx < 0 {
+		return baseID, ""
+	}
+
+	encoded := id[idx+len(GeminiThoughtSignatureMarker):]
+	if encoded == "" {
+		return baseID, ""
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return baseID, ""
+	}
+	return id[:idx], string(decoded)
+}
+
+// GeminiUsageTotals normalizes Gemini usageMetadata into the proxy's internal
+// accounting model:
+//   - input tokens exclude cache hits
+//   - cacheRead tokens track cachedContentTokenCount
+//   - output tokens include all output, including reasoning
+//   - reasoning tokens are the reasoning subset of output
+func GeminiUsageTotals(md *GeminiUsageMetadata) (input, output, cacheRead, reasoning int64) {
+	if md == nil {
+		return 0, 0, 0, 0
+	}
+
+	input = md.PromptTokenCount
+	output = md.CandidatesTokenCount + md.ThoughtsTokenCount
+	cacheRead = md.CachedContentTokenCount
+	reasoning = md.ThoughtsTokenCount
+
+	if cacheRead < 0 {
+		cacheRead = 0
+	}
+	if cacheRead > input {
+		cacheRead = input
+	}
+	input -= cacheRead
+
+	return input, output, cacheRead, reasoning
+}
+
+// GeminiUnsupportedSchemaKeys lists JSON Schema keywords rejected by Gemini's
 // OpenAPI-3.0-based Schema type. Any key starting with "$" is also dropped.
-var geminiUnsupportedSchemaKeys = map[string]bool{
+var GeminiUnsupportedSchemaKeys = map[string]bool{
 	"additionalProperties":  true,
 	"definitions":           true,
 	"propertyNames":         true,
@@ -130,12 +200,12 @@ var geminiUnsupportedSchemaKeys = map[string]bool{
 	"patternProperties":     true,
 }
 
-// sanitizeSchemaForGemini removes JSON Schema keywords not supported by the
+// SanitizeSchemaForGemini removes JSON Schema keywords not supported by the
 // Gemini API's OpenAPI-3.0-based Schema type. It drops any field whose name
 // starts with "$" (e.g. "$schema", "$defs") and all keys in
-// geminiUnsupportedSchemaKeys. Operates recursively; non-map values are
+// GeminiUnsupportedSchemaKeys. Operates recursively; non-map values are
 // returned unchanged.
-func sanitizeSchemaForGemini(schema any) any {
+func SanitizeSchemaForGemini(schema any) any {
 	switch v := schema.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(v))
@@ -143,16 +213,16 @@ func sanitizeSchemaForGemini(schema any) any {
 			if len(key) > 0 && key[0] == '$' {
 				continue
 			}
-			if geminiUnsupportedSchemaKeys[key] {
+			if GeminiUnsupportedSchemaKeys[key] {
 				continue
 			}
-			out[key] = sanitizeSchemaForGemini(val)
+			out[key] = SanitizeSchemaForGemini(val)
 		}
 		return out
 	case []any:
 		out := make([]any, len(v))
 		for i, item := range v {
-			out[i] = sanitizeSchemaForGemini(item)
+			out[i] = SanitizeSchemaForGemini(item)
 		}
 		return out
 	default:

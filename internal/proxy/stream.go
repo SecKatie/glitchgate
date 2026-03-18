@@ -13,8 +13,8 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/provider"
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/sse"
-	"github.com/seckatie/glitchgate/internal/translate"
 )
 
 // StreamResult is a type alias for sse.StreamResult, preserving backward
@@ -388,14 +388,14 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 // SynthesizeOpenAISSE writes a complete Chat Completions response as
 // Server-Sent Events to w. It is used when the upstream was called without
 // streaming but the client expects OpenAI-format SSE.
-func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionResponse) (*StreamResult, error) {
+func SynthesizeOpenAISSE(w http.ResponseWriter, resp *openai.ChatCompletionResponse) (*StreamResult, error) {
 	rc := http.NewResponseController(w)
 
 	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 
-	writeChunk := func(chunk *translate.ChatCompletionResponse) error {
+	writeChunk := func(chunk *openai.ChatCompletionResponse) error {
 		data, err := json.Marshal(chunk)
 		if err != nil {
 			return err
@@ -409,7 +409,7 @@ func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionRe
 	}
 
 	if resp == nil {
-		resp = &translate.ChatCompletionResponse{
+		resp = &openai.ChatCompletionResponse{
 			ID:      "chatcmpl-gemini",
 			Object:  "chat.completion",
 			Created: time.Now().Unix(),
@@ -429,24 +429,24 @@ func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionRe
 		id = "chatcmpl-gemini"
 	}
 
-	var message *translate.ChatMessage
+	var message *openai.ChatMessage
 	var finishReason *string
 	if len(resp.Choices) > 0 {
 		message = resp.Choices[0].Message
 		finishReason = resp.Choices[0].FinishReason
 	}
 	if message == nil {
-		message = &translate.ChatMessage{Role: "assistant"}
+		message = &openai.ChatMessage{Role: "assistant"}
 	}
 
-	initial := &translate.ChatCompletionResponse{
+	initial := &openai.ChatCompletionResponse{
 		ID:      id,
 		Object:  "chat.completion.chunk",
 		Created: created,
 		Model:   model,
-		Choices: []translate.Choice{{
+		Choices: []openai.Choice{{
 			Index: 0,
-			Delta: &translate.ChatMessage{Role: "assistant"},
+			Delta: &openai.ChatMessage{Role: "assistant"},
 		}},
 	}
 	if err := writeChunk(initial); err != nil {
@@ -454,14 +454,14 @@ func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionRe
 	}
 
 	if text, ok := message.Content.(string); ok && text != "" {
-		if err := writeChunk(&translate.ChatCompletionResponse{
+		if err := writeChunk(&openai.ChatCompletionResponse{
 			ID:      id,
 			Object:  "chat.completion.chunk",
 			Created: created,
 			Model:   model,
-			Choices: []translate.Choice{{
+			Choices: []openai.Choice{{
 				Index: 0,
-				Delta: &translate.ChatMessage{Content: text},
+				Delta: &openai.ChatMessage{Content: text},
 			}},
 		}); err != nil {
 			return &StreamResult{Body: captured.Bytes()}, err
@@ -469,15 +469,15 @@ func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionRe
 	}
 
 	for _, tc := range message.ToolCalls {
-		if err := writeChunk(&translate.ChatCompletionResponse{
+		if err := writeChunk(&openai.ChatCompletionResponse{
 			ID:      id,
 			Object:  "chat.completion.chunk",
 			Created: created,
 			Model:   model,
-			Choices: []translate.Choice{{
+			Choices: []openai.Choice{{
 				Index: 0,
-				Delta: &translate.ChatMessage{
-					ToolCalls: []translate.ToolCall{tc},
+				Delta: &openai.ChatMessage{
+					ToolCalls: []openai.ToolCall{tc},
 				},
 			}},
 		}); err != nil {
@@ -485,14 +485,14 @@ func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionRe
 		}
 	}
 
-	if err := writeChunk(&translate.ChatCompletionResponse{
+	if err := writeChunk(&openai.ChatCompletionResponse{
 		ID:      id,
 		Object:  "chat.completion.chunk",
 		Created: created,
 		Model:   model,
-		Choices: []translate.Choice{{
+		Choices: []openai.Choice{{
 			Index:        0,
-			Delta:        &translate.ChatMessage{},
+			Delta:        &openai.ChatMessage{},
 			FinishReason: finishReason,
 		}},
 	}); err != nil {
@@ -531,7 +531,7 @@ func SynthesizeOpenAISSE(w http.ResponseWriter, resp *translate.ChatCompletionRe
 // SynthesizeResponsesSSE writes a complete Responses API response as
 // Server-Sent Events to w. It is used when the upstream was called without
 // streaming but the client expects Responses-format SSE.
-func SynthesizeResponsesSSE(w http.ResponseWriter, resp *translate.ResponsesResponse) (*StreamResult, error) {
+func SynthesizeResponsesSSE(w http.ResponseWriter, resp *openai.ResponsesResponse) (*StreamResult, error) {
 	rc := http.NewResponseController(w)
 
 	sse.WriteHeaders(w)
@@ -552,7 +552,7 @@ func SynthesizeResponsesSSE(w http.ResponseWriter, resp *translate.ResponsesResp
 	}
 
 	if resp == nil {
-		resp = &translate.ResponsesResponse{
+		resp = &openai.ResponsesResponse{
 			ID:     "resp_gemini",
 			Object: "response",
 			Status: "completed",

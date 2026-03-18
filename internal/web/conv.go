@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/store"
-	"github.com/seckatie/glitchgate/internal/translate"
 )
 
 // ConversationData holds the parsed view of a logged request/response pair.
@@ -148,7 +148,7 @@ func parseConversation(requestBody, responseBody string, sourceFormat ...string)
 
 	// When source format is explicitly known, route directly.
 	if format == "openai" {
-		var openaiReq translate.ChatCompletionRequest
+		var openaiReq openai.ChatCompletionRequest
 		if err := json.Unmarshal([]byte(reqBody), &openaiReq); err == nil && len(openaiReq.Messages) > 0 {
 			return parseOpenAIConversation(cd, &openaiReq, responseBody)
 		}
@@ -156,7 +156,7 @@ func parseConversation(requestBody, responseBody string, sourceFormat ...string)
 		return cd
 	}
 	if format == "responses" {
-		var responsesReq translate.ResponsesRequest
+		var responsesReq openai.ResponsesRequest
 		if err := json.Unmarshal([]byte(reqBody), &responsesReq); err == nil && isResponsesRequest(&responsesReq) {
 			return parseResponsesConversation(cd, &responsesReq, responseBody)
 		}
@@ -188,12 +188,12 @@ func parseConversation(requestBody, responseBody string, sourceFormat ...string)
 		}
 	}
 
-	var responsesReq translate.ResponsesRequest
+	var responsesReq openai.ResponsesRequest
 	if err := json.Unmarshal([]byte(reqBody), &responsesReq); err == nil && isResponsesRequest(&responsesReq) {
 		return parseResponsesConversation(cd, &responsesReq, responseBody)
 	}
 
-	var openaiReq translate.ChatCompletionRequest
+	var openaiReq openai.ChatCompletionRequest
 	if err := json.Unmarshal([]byte(reqBody), &openaiReq); err == nil && len(openaiReq.Messages) > 0 {
 		return parseOpenAIConversation(cd, &openaiReq, responseBody)
 	}
@@ -355,7 +355,7 @@ func parseAnthropicConversation(cd *ConversationData, req *anthropic.MessagesReq
 	return cd
 }
 
-func parseResponsesConversation(cd *ConversationData, req *translate.ResponsesRequest, responseBody string) *ConversationData {
+func parseResponsesConversation(cd *ConversationData, req *openai.ResponsesRequest, responseBody string) *ConversationData {
 	if req.Instructions != nil {
 		cd.SystemPrompt = *req.Instructions
 	}
@@ -390,7 +390,7 @@ func parseResponsesConversation(cd *ConversationData, req *translate.ResponsesRe
 
 // parseOpenAIConversation parses OpenAI Chat Completions format into
 // ConversationData.
-func parseOpenAIConversation(cd *ConversationData, req *translate.ChatCompletionRequest, responseBody string) *ConversationData {
+func parseOpenAIConversation(cd *ConversationData, req *openai.ChatCompletionRequest, responseBody string) *ConversationData {
 	// Extract system message if present as first message.
 	if len(req.Messages) > 0 && (req.Messages[0].Role == "system" || req.Messages[0].Role == "developer") {
 		cd.SystemPrompt = normalizeOpenAIContent(req.Messages[0].Content)
@@ -480,14 +480,14 @@ func normalizeOpenAIContent(content interface{}) string {
 }
 
 // openAIMessageToTurn converts an OpenAI ChatMessage to a ConvTurn.
-func openAIMessageToTurn(msg translate.ChatMessage, toolNameMap map[string]string) ConvTurn {
+func openAIMessageToTurn(msg openai.ChatMessage, toolNameMap map[string]string) ConvTurn {
 	turn := ConvTurn{Role: msg.Role}
 
 	// Handle reasoning content first (appears before main content in reasoning models)
 	if msg.ReasoningContent != "" {
 		short, full, trunc := truncateLines(msg.ReasoningContent, truncateAtLines)
 		turn.Blocks = append(turn.Blocks, ConvBlock{
-			Type:            "reasoning",
+			Type:             "reasoning",
 			ReasoningContent: short,
 			ReasoningTrunc:   trunc,
 			FullText:         full,
@@ -598,7 +598,7 @@ func parseOpenAIResponseBody(body string, toolNameMap map[string]string) *ConvTu
 	}
 
 	// Try non-streaming response first.
-	var resp translate.ChatCompletionResponse
+	var resp openai.ChatCompletionResponse
 	if err := json.Unmarshal([]byte(body), &resp); err == nil && len(resp.Choices) > 0 {
 		return openAIChoiceToTurn(&resp.Choices[0], toolNameMap)
 	}
@@ -608,7 +608,7 @@ func parseOpenAIResponseBody(body string, toolNameMap map[string]string) *ConvTu
 }
 
 // openAIChoiceToTurn converts an OpenAI choice to a ConvTurn.
-func openAIChoiceToTurn(choice *translate.Choice, toolNameMap map[string]string) *ConvTurn {
+func openAIChoiceToTurn(choice *openai.Choice, toolNameMap map[string]string) *ConvTurn {
 	if choice == nil {
 		return nil
 	}
@@ -632,7 +632,7 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 	// Accumulate text, reasoning, and tool calls across deltas.
 	textBuf := strings.Builder{}
 	reasoningBuf := strings.Builder{}
-	toolCalls := make(map[int]*translate.ToolCall)
+	toolCalls := make(map[int]*openai.ToolCall)
 	var toolCallOrder []int
 
 	for _, line := range strings.Split(body, "\n") {
@@ -646,7 +646,7 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 			continue
 		}
 
-		var chunk translate.ChatCompletionResponse
+		var chunk openai.ChatCompletionResponse
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
@@ -715,7 +715,7 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 	if reasoning := reasoningBuf.String(); reasoning != "" {
 		short, full, trunc := truncateLines(reasoning, truncateAtLines)
 		turn.Blocks = append(turn.Blocks, ConvBlock{
-			Type:            "reasoning",
+			Type:             "reasoning",
 			ReasoningContent: short,
 			ReasoningTrunc:   trunc,
 			FullText:         full,
@@ -754,7 +754,7 @@ func parseJSONToInterface(s string) (interface{}, error) {
 	return v, nil
 }
 
-func isResponsesRequest(req *translate.ResponsesRequest) bool {
+func isResponsesRequest(req *openai.ResponsesRequest) bool {
 	if req == nil {
 		return false
 	}
@@ -954,7 +954,7 @@ func contentBlockToConvBlock(b anthropic.ContentBlock, toolNameMap map[string]st
 	}
 }
 
-func responsesRequestToTurns(req *translate.ResponsesRequest, toolNameMap map[string]string) []ConvTurn {
+func responsesRequestToTurns(req *openai.ResponsesRequest, toolNameMap map[string]string) []ConvTurn {
 	if req == nil || len(req.Input) == 0 {
 		return nil
 	}
@@ -967,7 +967,7 @@ func responsesRequestToTurns(req *translate.ResponsesRequest, toolNameMap map[st
 		}}
 	}
 
-	var items []translate.InputItem
+	var items []openai.InputItem
 	if err := json.Unmarshal(req.Input, &items); err != nil {
 		return nil
 	}
@@ -981,7 +981,7 @@ func responsesRequestToTurns(req *translate.ResponsesRequest, toolNameMap map[st
 	return turns
 }
 
-func responsesInputItemToTurn(item translate.InputItem, toolNameMap map[string]string) *ConvTurn {
+func responsesInputItemToTurn(item openai.InputItem, toolNameMap map[string]string) *ConvTurn {
 	switch item.Type {
 	case "message":
 		return responsesMessageItemToTurn(item)
@@ -1010,7 +1010,7 @@ func responsesInputItemToTurn(item translate.InputItem, toolNameMap map[string]s
 	}
 }
 
-func responsesMessageItemToTurn(item translate.InputItem) *ConvTurn {
+func responsesMessageItemToTurn(item openai.InputItem) *ConvTurn {
 	role := normaliseResponsesRole(item.Role, "user")
 	turn := &ConvTurn{Role: role}
 
@@ -1024,7 +1024,7 @@ func responsesMessageItemToTurn(item translate.InputItem) *ConvTurn {
 		return turn
 	}
 
-	var parts []translate.InputItem
+	var parts []openai.InputItem
 	if err := json.Unmarshal(item.Content, &parts); err != nil {
 		appendConvBlock(turn, responsesUnknownBlock("unparsed message content"))
 		return turn
@@ -1037,7 +1037,7 @@ func responsesMessageItemToTurn(item translate.InputItem) *ConvTurn {
 	return turn
 }
 
-func responsesMessageContentBlock(item translate.InputItem) ConvBlock {
+func responsesMessageContentBlock(item openai.InputItem) ConvBlock {
 	switch item.Type {
 	case "input_text":
 		return responsesInputTextBlock(item.Text)
@@ -1065,11 +1065,11 @@ func responsesInputTextBlock(text string) ConvBlock {
 	}
 }
 
-func responsesInputImageBlock(_ translate.InputItem) ConvBlock {
+func responsesInputImageBlock(_ openai.InputItem) ConvBlock {
 	return ConvBlock{Type: "image", MediaLabel: "[image]"}
 }
 
-func responsesInputFileBlock(item translate.InputItem) ConvBlock {
+func responsesInputFileBlock(item openai.InputItem) ConvBlock {
 	label := "[file]"
 	switch {
 	case item.Filename != "":
@@ -1138,7 +1138,7 @@ func parseResponsesResponse(responseBody string, toolNameMap map[string]string) 
 		return nil
 	}
 
-	var resp translate.ResponsesResponse
+	var resp openai.ResponsesResponse
 	if err := json.Unmarshal([]byte(responseBody), &resp); err == nil && isResponsesResponse(&resp) {
 		return responsesResponseToTurn(&resp, toolNameMap)
 	}
@@ -1146,14 +1146,14 @@ func parseResponsesResponse(responseBody string, toolNameMap map[string]string) 
 	return parseResponsesSSEResponse(responseBody, toolNameMap)
 }
 
-func isResponsesResponse(resp *translate.ResponsesResponse) bool {
+func isResponsesResponse(resp *openai.ResponsesResponse) bool {
 	if resp == nil {
 		return false
 	}
 	return resp.Object == "response" || resp.Status != "" || len(resp.Output) > 0
 }
 
-func responsesResponseToTurn(resp *translate.ResponsesResponse, toolNameMap map[string]string) *ConvTurn {
+func responsesResponseToTurn(resp *openai.ResponsesResponse, toolNameMap map[string]string) *ConvTurn {
 	if resp == nil {
 		return nil
 	}
@@ -1176,7 +1176,7 @@ func responsesResponseToTurn(resp *translate.ResponsesResponse, toolNameMap map[
 	return turn
 }
 
-func responsesOutputItemBlocks(item translate.OutputItem, toolNameMap map[string]string) []ConvBlock {
+func responsesOutputItemBlocks(item openai.OutputItem, toolNameMap map[string]string) []ConvBlock {
 	switch item.Type {
 	case "message":
 		var blocks []ConvBlock
@@ -1218,8 +1218,8 @@ func parseResponsesSSEResponse(body string, toolNameMap map[string]string) *Conv
 		return nil
 	}
 
-	outputItems := make(map[int]*translate.OutputItem)
-	var completed *translate.ResponsesResponse
+	outputItems := make(map[int]*openai.OutputItem)
+	var completed *openai.ResponsesResponse
 
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -1242,15 +1242,15 @@ func parseResponsesSSEResponse(body string, toolNameMap map[string]string) *Conv
 		switch envelope.Type {
 		case "response.completed":
 			var event struct {
-				Response translate.ResponsesResponse `json:"response"`
+				Response openai.ResponsesResponse `json:"response"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err == nil && len(event.Response.Output) > 0 {
 				completed = &event.Response
 			}
 		case "response.output_item.added", "response.output_item.done":
 			var event struct {
-				OutputIndex int                  `json:"output_index"`
-				Item        translate.OutputItem `json:"item"`
+				OutputIndex int               `json:"output_index"`
+				Item        openai.OutputItem `json:"item"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err == nil {
 				item := event.Item
@@ -1261,9 +1261,9 @@ func parseResponsesSSEResponse(body string, toolNameMap map[string]string) *Conv
 			}
 		case "response.content_part.added", "response.content_part.done":
 			var event struct {
-				OutputIndex  int                     `json:"output_index"`
-				ContentIndex int                     `json:"content_index"`
-				Part         translate.OutputContent `json:"part"`
+				OutputIndex  int                  `json:"output_index"`
+				ContentIndex int                  `json:"content_index"`
+				Part         openai.OutputContent `json:"part"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err == nil {
 				item := ensureResponsesOutputItem(outputItems, event.OutputIndex)
@@ -1313,7 +1313,7 @@ func parseResponsesSSEResponse(body string, toolNameMap map[string]string) *Conv
 	}
 	sort.Ints(keys)
 
-	resp := &translate.ResponsesResponse{}
+	resp := &openai.ResponsesResponse{}
 	for _, idx := range keys {
 		if outputItems[idx] != nil {
 			resp.Output = append(resp.Output, *outputItems[idx])
@@ -1322,7 +1322,7 @@ func parseResponsesSSEResponse(body string, toolNameMap map[string]string) *Conv
 	return responsesResponseToTurn(resp, toolNameMap)
 }
 
-func ensureResponsesOutputItem(items map[int]*translate.OutputItem, idx int) *translate.OutputItem {
+func ensureResponsesOutputItem(items map[int]*openai.OutputItem, idx int) *openai.OutputItem {
 	if item := items[idx]; item != nil {
 		if item.Type == "" {
 			item.Type = "message"
@@ -1333,7 +1333,7 @@ func ensureResponsesOutputItem(items map[int]*translate.OutputItem, idx int) *tr
 		return item
 	}
 
-	item := &translate.OutputItem{
+	item := &openai.OutputItem{
 		Type: "message",
 		Role: "assistant",
 	}
@@ -1341,9 +1341,9 @@ func ensureResponsesOutputItem(items map[int]*translate.OutputItem, idx int) *tr
 	return item
 }
 
-func ensureResponsesOutputContent(item *translate.OutputItem, idx int) *translate.OutputContent {
+func ensureResponsesOutputContent(item *openai.OutputItem, idx int) *openai.OutputContent {
 	for len(item.Content) <= idx {
-		item.Content = append(item.Content, translate.OutputContent{})
+		item.Content = append(item.Content, openai.OutputContent{})
 	}
 	return &item.Content[idx]
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 	anthropic "github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/translate"
 )
 
@@ -286,7 +287,7 @@ func (h *Handler) handleOpenAIProviderNonStreaming(w http.ResponseWriter, resp *
 	}
 
 	// Parse the OpenAI response.
-	var oaiResp translate.ChatCompletionResponse
+	var oaiResp openai.ChatCompletionResponse
 	if err := json.Unmarshal(resp.Body, &oaiResp); err != nil {
 		s := fmt.Sprintf("failed to parse upstream response: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
@@ -345,7 +346,7 @@ func (h *Handler) handleOpenAIProviderForcedStream(w http.ResponseWriter, resp *
 	}
 
 	// Parse the non-streaming OpenAI response.
-	var oaiResp translate.ChatCompletionResponse
+	var oaiResp openai.ChatCompletionResponse
 	if err := json.Unmarshal(resp.Body, &oaiResp); err != nil {
 		s := fmt.Sprintf("failed to parse upstream response: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
