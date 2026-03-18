@@ -77,7 +77,7 @@ func benchChatCompletionRequest() *openai.ChatCompletionRequest {
 		},
 		MaxTokens:   &maxTokens,
 		Temperature: &temp,
-		Tools: []openai.OpenAITool{
+		Tools: []openai.Tool{
 			{
 				Type: "function",
 				Function: openai.ToolFunction{
@@ -137,7 +137,7 @@ func benchOpenAIResponseBody() []byte {
 				FinishReason: &finishReason,
 			},
 		},
-		Usage: &openai.OpenAIUsage{
+		Usage: &openai.Usage{
 			PromptTokens:     245,
 			CompletionTokens: 312,
 			TotalTokens:      557,

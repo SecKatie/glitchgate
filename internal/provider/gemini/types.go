@@ -7,105 +7,105 @@ import (
 	"strings"
 )
 
-// GeminiRequest is the request body for Vertex AI Gemini generateContent.
-type GeminiRequest struct {
-	Contents          []GeminiContent         `json:"contents"`
-	SystemInstruction *GeminiContent          `json:"systemInstruction,omitempty"`
-	GenerationConfig  *GeminiGenerationConfig `json:"generationConfig,omitempty"`
-	Tools             []GeminiTool            `json:"tools,omitempty"`
-	SafetySettings    []GeminiSafetySetting   `json:"safetySettings,omitempty"`
+// Request is the request body for Vertex AI Gemini generateContent.
+type Request struct {
+	Contents          []Content         `json:"contents"`
+	SystemInstruction *Content          `json:"systemInstruction,omitempty"`
+	GenerationConfig  *GenerationConfig `json:"generationConfig,omitempty"`
+	Tools             []Tool            `json:"tools,omitempty"`
+	SafetySettings    []SafetySetting   `json:"safetySettings,omitempty"`
 }
 
-// GeminiContent represents a message in a conversation.
-type GeminiContent struct {
-	Role  string       `json:"role,omitempty"`
-	Parts []GeminiPart `json:"parts"`
+// Content represents a message in a conversation.
+type Content struct {
+	Role  string `json:"role,omitempty"`
+	Parts []Part `json:"parts"`
 }
 
-// GeminiPart is a single segment of content within a message.
-type GeminiPart struct {
-	Text             string              `json:"text,omitempty"`
-	InlineData       *GeminiBlob         `json:"inlineData,omitempty"`
-	FunctionCall     *GeminiFunctionCall `json:"functionCall,omitempty"`
-	FunctionResponse *GeminiFuncResponse `json:"functionResponse,omitempty"`
-	Thought          *bool               `json:"thought,omitempty"`
-	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
+// Part is a single segment of content within a message.
+type Part struct {
+	Text             string        `json:"text,omitempty"`
+	InlineData       *Blob         `json:"inlineData,omitempty"`
+	FunctionCall     *FunctionCall `json:"functionCall,omitempty"`
+	FunctionResponse *FuncResponse `json:"functionResponse,omitempty"`
+	Thought          *bool         `json:"thought,omitempty"`
+	ThoughtSignature string        `json:"thoughtSignature,omitempty"`
 }
 
-// GeminiBlob holds inline binary data (images, etc.).
-type GeminiBlob struct {
+// Blob holds inline binary data (images, etc.).
+type Blob struct {
 	MIMEType string `json:"mimeType"`
 	Data     string `json:"data"`
 }
 
-// GeminiFunctionCall represents a function call predicted by the model.
-type GeminiFunctionCall struct {
+// FunctionCall represents a function call predicted by the model.
+type FunctionCall struct {
 	Name string `json:"name"`
 	Args any    `json:"args,omitempty"`
 }
 
-// GeminiFuncResponse is the result of a function call.
-type GeminiFuncResponse struct {
+// FuncResponse is the result of a function call.
+type FuncResponse struct {
 	Name     string `json:"name"`
 	Response any    `json:"response"`
 }
 
-// GeminiGenerationConfig holds generation parameters.
-type GeminiGenerationConfig struct {
-	MaxOutputTokens *int                  `json:"maxOutputTokens,omitempty"`
-	Temperature     *float64              `json:"temperature,omitempty"`
-	TopP            *float64              `json:"topP,omitempty"`
-	TopK            *int                  `json:"topK,omitempty"`
-	StopSequences   []string              `json:"stopSequences,omitempty"`
-	ThinkingConfig  *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
+// GenerationConfig holds generation parameters.
+type GenerationConfig struct {
+	MaxOutputTokens *int            `json:"maxOutputTokens,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	TopP            *float64        `json:"topP,omitempty"`
+	TopK            *int            `json:"topK,omitempty"`
+	StopSequences   []string        `json:"stopSequences,omitempty"`
+	ThinkingConfig  *ThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
-// GeminiThinkingConfig controls the model's thinking/reasoning.
-type GeminiThinkingConfig struct {
+// ThinkingConfig controls the model's thinking/reasoning.
+type ThinkingConfig struct {
 	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
 }
 
-// GeminiTool describes a tool available to the model.
-type GeminiTool struct {
-	FunctionDeclarations []GeminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
+// Tool describes a tool available to the model.
+type Tool struct {
+	FunctionDeclarations []FunctionDeclaration `json:"functionDeclarations,omitempty"`
 }
 
-// GeminiFunctionDeclaration describes a single function the model can call.
-type GeminiFunctionDeclaration struct {
+// FunctionDeclaration describes a single function the model can call.
+type FunctionDeclaration struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Parameters  any    `json:"parameters,omitempty"`
 }
 
-// GeminiSafetySetting configures content safety thresholds.
-type GeminiSafetySetting struct {
+// SafetySetting configures content safety thresholds.
+type SafetySetting struct {
 	Category  string `json:"category"`
 	Threshold string `json:"threshold"`
 }
 
-// GeminiResponse is the response from generateContent.
-type GeminiResponse struct {
-	Candidates    []GeminiCandidate    `json:"candidates"`
-	UsageMetadata *GeminiUsageMetadata `json:"usageMetadata,omitempty"`
-	ModelVersion  string               `json:"modelVersion,omitempty"`
+// Response is the response from generateContent.
+type Response struct {
+	Candidates    []Candidate    `json:"candidates"`
+	UsageMetadata *UsageMetadata `json:"usageMetadata,omitempty"`
+	ModelVersion  string         `json:"modelVersion,omitempty"`
 }
 
-// GeminiCandidate is a single generated response candidate.
-type GeminiCandidate struct {
-	Content       *GeminiContent       `json:"content,omitempty"`
-	FinishReason  string               `json:"finishReason,omitempty"`
-	SafetyRatings []GeminiSafetyRating `json:"safetyRatings,omitempty"`
+// Candidate is a single generated response candidate.
+type Candidate struct {
+	Content       *Content       `json:"content,omitempty"`
+	FinishReason  string         `json:"finishReason,omitempty"`
+	SafetyRatings []SafetyRating `json:"safetyRatings,omitempty"`
 }
 
-// GeminiSafetyRating is a safety assessment for generated content.
-type GeminiSafetyRating struct {
+// SafetyRating is a safety assessment for generated content.
+type SafetyRating struct {
 	Category    string `json:"category"`
 	Probability string `json:"probability"`
 	Blocked     bool   `json:"blocked,omitempty"`
 }
 
-// GeminiUsageMetadata reports token consumption.
-type GeminiUsageMetadata struct {
+// UsageMetadata reports token consumption.
+type UsageMetadata struct {
 	PromptTokenCount        int64 `json:"promptTokenCount"`
 	CachedContentTokenCount int64 `json:"cachedContentTokenCount,omitempty"`
 	CandidatesTokenCount    int64 `json:"candidatesTokenCount"`
@@ -117,30 +117,31 @@ type GeminiUsageMetadata struct {
 // Gemini helper functions
 // ---------------------------------------------------------------------------
 
-const GeminiThoughtSignatureMarker = "__ggts__"
+// ThoughtSignatureMarker is the delimiter used to embed thought signatures in tool call IDs.
+const ThoughtSignatureMarker = "__ggts__"
 
-// EncodeGeminiToolCallID stashes Gemini's opaque thoughtSignature inside a tool
+// EncodeToolCallID stashes Gemini's opaque thoughtSignature inside a tool
 // call identifier that clients already round-trip unchanged.
-func EncodeGeminiToolCallID(id, thoughtSignature string) string {
-	if thoughtSignature == "" || strings.Contains(id, GeminiThoughtSignatureMarker) {
+func EncodeToolCallID(id, thoughtSignature string) string {
+	if thoughtSignature == "" || strings.Contains(id, ThoughtSignatureMarker) {
 		return id
 	}
 	if id == "" {
 		id = "call_gemini"
 	}
-	return id + GeminiThoughtSignatureMarker +
+	return id + ThoughtSignatureMarker +
 		base64.RawURLEncoding.EncodeToString([]byte(thoughtSignature))
 }
 
-// DecodeGeminiToolCallID restores a previously embedded thoughtSignature.
-func DecodeGeminiToolCallID(id string) (baseID, thoughtSignature string) {
+// DecodeToolCallID restores a previously embedded thoughtSignature.
+func DecodeToolCallID(id string) (baseID, thoughtSignature string) {
 	baseID = id
-	idx := strings.Index(id, GeminiThoughtSignatureMarker)
+	idx := strings.Index(id, ThoughtSignatureMarker)
 	if idx < 0 {
 		return baseID, ""
 	}
 
-	encoded := id[idx+len(GeminiThoughtSignatureMarker):]
+	encoded := id[idx+len(ThoughtSignatureMarker):]
 	if encoded == "" {
 		return baseID, ""
 	}
@@ -151,13 +152,13 @@ func DecodeGeminiToolCallID(id string) (baseID, thoughtSignature string) {
 	return id[:idx], string(decoded)
 }
 
-// GeminiUsageTotals normalizes Gemini usageMetadata into the proxy's internal
+// UsageTotals normalizes Gemini usageMetadata into the proxy's internal
 // accounting model:
 //   - input tokens exclude cache hits
 //   - cacheRead tokens track cachedContentTokenCount
 //   - output tokens include all output, including reasoning
 //   - reasoning tokens are the reasoning subset of output
-func GeminiUsageTotals(md *GeminiUsageMetadata) (input, output, cacheRead, reasoning int64) {
+func UsageTotals(md *UsageMetadata) (input, output, cacheRead, reasoning int64) {
 	if md == nil {
 		return 0, 0, 0, 0
 	}

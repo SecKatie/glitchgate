@@ -50,11 +50,10 @@ func streamingResult(resp *provider.Response, result *sse.StreamResult, err erro
 	}
 }
 
-// RelaySSEStream reads SSE events from upstream and forwards them to the client,
-// flushing after each event. It captures the full stream and extracts token usage.
-// When ctx is cancelled (e.g. client disconnect), the upstream reader is closed
-// to unblock the scanner and stop consuming provider resources.
-func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
+// relaySSE is the shared scan-write-flush loop for all SSE relay functions.
+// It reads lines from upstream, calls extract on each data payload to accumulate
+// token usage, writes each line to the client, and flushes on blank lines.
+func relaySSE(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser, extract func(data string, result *StreamResult)) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
 	stop := sse.CloseOnCancel(ctx, upstream)
 	defer stop()
@@ -64,7 +63,7 @@ func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Read
 	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
-	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
+	var result StreamResult
 
 	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
@@ -72,170 +71,66 @@ func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Read
 		captured.WriteString(line)
 		captured.WriteByte('\n')
 
-		// Extract token counts from specific SSE events.
 		if strings.HasPrefix(line, "data: ") {
 			data := line[6:]
-			extractTokens(data, &inputTokens, &outputTokens, &cacheCreationTokens, &cacheReadTokens)
+			extract(data, &result)
 		}
 
 		// Write the line to the client.
-		if _, err := w.Write([]byte(line + "\n")); err != nil {
-			return &StreamResult{
-				Body:                     captured.Bytes(),
-				InputTokens:              inputTokens,
-				OutputTokens:             outputTokens,
-				CacheCreationInputTokens: cacheCreationTokens,
-				CacheReadInputTokens:     cacheReadTokens,
-			}, err
+		if _, err := w.Write([]byte(line + "\n")); err != nil { //nolint:gosec // SSE relay of upstream provider data, not HTML content
+			result.Body = captured.Bytes()
+			return &result, err
 		}
 
 		// Flush after blank lines (SSE event boundary).
 		if line == "" {
 			if err := rc.Flush(); err != nil {
-				return &StreamResult{
-					Body:                     captured.Bytes(),
-					InputTokens:              inputTokens,
-					OutputTokens:             outputTokens,
-					CacheCreationInputTokens: cacheCreationTokens,
-					CacheReadInputTokens:     cacheReadTokens,
-				}, err
+				result.Body = captured.Bytes()
+				return &result, err
 			}
 		}
 	}
 
-	return &StreamResult{
-		Body:                     captured.Bytes(),
-		InputTokens:              inputTokens,
-		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: cacheCreationTokens,
-		CacheReadInputTokens:     cacheReadTokens,
-	}, scanner.Err()
+	result.Body = captured.Bytes()
+	return &result, scanner.Err()
+}
+
+// RelaySSEStream reads Anthropic SSE events from upstream and forwards them to
+// the client, flushing after each event. It captures the full stream and extracts
+// token usage. When ctx is cancelled (e.g. client disconnect), the upstream reader
+// is closed to unblock the scanner and stop consuming provider resources.
+func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
+	return relaySSE(ctx, w, upstream, func(data string, result *StreamResult) {
+		extractTokens(data, &result.InputTokens, &result.OutputTokens, &result.CacheCreationInputTokens, &result.CacheReadInputTokens)
+	})
 }
 
 // RelayOpenAISSEStream reads OpenAI-format SSE events from upstream and forwards
 // them to the client, flushing after each event. It captures the full stream and
 // extracts token usage from the final chunk's usage field.
+//
+// Limitation: reasoning_tokens will be 0 for upstreams that don't include a
+// usage object in streaming chunks (e.g. Kimi-K2.5). The relay path does not
+// parse individual deltas, so it cannot estimate tokens from reasoning content.
+// The translation paths (ReverseSSEStream, OpenAISSEToResponsesSSE) handle this
+// by estimating from accumulated reasoning text length.
 func RelayOpenAISSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
-	defer func() { _ = upstream.Close() }()
-	stop := sse.CloseOnCancel(ctx, upstream)
-	defer stop()
-
-	rc := http.NewResponseController(w)
-
-	sse.WriteHeaders(w)
-
-	var captured bytes.Buffer
-	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
-
-	scanner := sse.NewScanner(upstream)
-	for scanner.Scan() {
-		line := scanner.Text()
-		captured.WriteString(line)
-		captured.WriteByte('\n')
-
-		// Extract token counts from SSE data events.
-		if strings.HasPrefix(line, "data: ") {
-			data := line[6:]
-			if data != "[DONE]" {
-				extractOpenAITokens(data, &inputTokens, &outputTokens, &cacheReadTokens, &reasoningTokens)
-			}
+	return relaySSE(ctx, w, upstream, func(data string, result *StreamResult) {
+		if data != "[DONE]" {
+			extractOpenAITokens(data, &result.InputTokens, &result.OutputTokens, &result.CacheReadInputTokens, &result.ReasoningTokens)
 		}
-
-		// Write the line to the client.
-		if _, err := w.Write([]byte(line + "\n")); err != nil {
-			return &StreamResult{
-				Body:                 captured.Bytes(),
-				InputTokens:          inputTokens,
-				OutputTokens:         outputTokens,
-				CacheReadInputTokens: cacheReadTokens,
-				ReasoningTokens:      reasoningTokens,
-			}, err
-		}
-
-		// Flush after blank lines (SSE event boundary).
-		if line == "" {
-			if err := rc.Flush(); err != nil {
-				return &StreamResult{
-					Body:                 captured.Bytes(),
-					InputTokens:          inputTokens,
-					OutputTokens:         outputTokens,
-					CacheReadInputTokens: cacheReadTokens,
-					ReasoningTokens:      reasoningTokens,
-				}, err
-			}
-		}
-	}
-
-	return &StreamResult{
-		Body:                 captured.Bytes(),
-		InputTokens:          inputTokens,
-		OutputTokens:         outputTokens,
-		CacheReadInputTokens: cacheReadTokens,
-		ReasoningTokens:      reasoningTokens,
-	}, scanner.Err()
+	})
 }
 
 // RelayResponsesSSEStream reads Responses API SSE events from upstream and forwards
 // them to the client, flushing after each event. It captures the full stream and
 // extracts token usage from the response.completed event.
 func RelayResponsesSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser) (*StreamResult, error) {
-	defer func() { _ = upstream.Close() }()
-	stop := sse.CloseOnCancel(ctx, upstream)
-	defer stop()
-
-	rc := http.NewResponseController(w)
-
-	sse.WriteHeaders(w)
-
-	var captured bytes.Buffer
-	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
-
-	scanner := sse.NewScanner(upstream)
-	for scanner.Scan() {
-		line := scanner.Text()
-		captured.WriteString(line)
-		captured.WriteByte('\n')
-
-		// Extract token counts from response.completed events.
-		if strings.HasPrefix(line, "data: ") {
-			data := line[6:]
-			if data != "[DONE]" {
-				extractResponsesTokens(data, &inputTokens, &outputTokens, &cacheReadTokens, &reasoningTokens)
-			}
+	return relaySSE(ctx, w, upstream, func(data string, result *StreamResult) {
+		if data != "[DONE]" {
+			extractResponsesTokens(data, &result.InputTokens, &result.OutputTokens, &result.CacheReadInputTokens, &result.ReasoningTokens)
 		}
-
-		// Write the line to the client.
-		if _, err := w.Write([]byte(line + "\n")); err != nil {
-			return &StreamResult{
-				Body:                 captured.Bytes(),
-				InputTokens:          inputTokens,
-				OutputTokens:         outputTokens,
-				CacheReadInputTokens: cacheReadTokens,
-				ReasoningTokens:      reasoningTokens,
-			}, err
-		}
-
-		// Flush after blank lines (SSE event boundary).
-		if line == "" {
-			if err := rc.Flush(); err != nil {
-				return &StreamResult{
-					Body:                 captured.Bytes(),
-					InputTokens:          inputTokens,
-					OutputTokens:         outputTokens,
-					CacheReadInputTokens: cacheReadTokens,
-					ReasoningTokens:      reasoningTokens,
-				}, err
-			}
-		}
-	}
-
-	return &StreamResult{
-		Body:                 captured.Bytes(),
-		InputTokens:          inputTokens,
-		OutputTokens:         outputTokens,
-		CacheReadInputTokens: cacheReadTokens,
-		ReasoningTokens:      reasoningTokens,
-	}, scanner.Err()
+	})
 }
 
 // SynthesizeAnthropicSSE writes a complete Anthropic MessagesResponse as
@@ -258,14 +153,14 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 	}
 
 	// message_start — content is empty; usage shows input tokens only.
-	msgStart := map[string]interface{}{
+	msgStart := map[string]any{
 		"type": "message_start",
-		"message": map[string]interface{}{
+		"message": map[string]any{
 			"id":            resp.ID,
 			"type":          "message",
 			"role":          "assistant",
 			"model":         resp.Model,
-			"content":       []interface{}{},
+			"content":       []any{},
 			"stop_reason":   nil,
 			"stop_sequence": nil,
 			"usage": map[string]int64{
@@ -291,24 +186,24 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 	// One SSE block per content block.
 	for i, block := range resp.Content {
 		// content_block_start
-		var startBlock interface{}
+		var startBlock any
 		switch block.Type {
 		case "tool_use":
-			startBlock = map[string]interface{}{
+			startBlock = map[string]any{
 				"type":  "content_block_start",
 				"index": i,
-				"content_block": map[string]interface{}{
+				"content_block": map[string]any{
 					"type":  "tool_use",
 					"id":    block.ID,
 					"name":  block.Name,
-					"input": map[string]interface{}{},
+					"input": map[string]any{},
 				},
 			}
 		default: // "text" and anything else
-			startBlock = map[string]interface{}{
+			startBlock = map[string]any{
 				"type":  "content_block_start",
 				"index": i,
-				"content_block": map[string]interface{}{
+				"content_block": map[string]any{
 					"type": block.Type,
 					"text": "",
 				},
@@ -348,7 +243,7 @@ func SynthesizeAnthropicSSE(w http.ResponseWriter, resp *anthropic.MessagesRespo
 		}
 
 		// content_block_stop
-		stopEvt := map[string]interface{}{"type": "content_block_stop", "index": i}
+		stopEvt := map[string]any{"type": "content_block_stop", "index": i}
 		data, err = json.Marshal(stopEvt)
 		if err != nil {
 			return &StreamResult{Body: captured.Bytes()}, fmt.Errorf("marshalling content_block_stop: %w", err)

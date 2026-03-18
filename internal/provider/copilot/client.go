@@ -97,7 +97,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 	httpReq.Header.Set("Copilot-Integration-Id", copilotIntegrationID)
 	httpReq.Header.Set("User-Agent", copilotUserAgent)
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq) //nolint:gosec // URL from validated provider config, not user input
 	if err != nil {
 		return nil, fmt.Errorf("sending request to %s: %w", c.name, err)
 	}

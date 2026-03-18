@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package metrics provides Prometheus instrumentation for glitchgate.
-package metrics
+package metrics //nolint:revive // does not conflict with runtime/metrics in usage
 
 import (
 	"fmt"

@@ -16,8 +16,8 @@ import (
 func TestEncodeGeminiToolCallIDRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	encoded := gemini.EncodeGeminiToolCallID("call_123", "sig+/=")
-	baseID, thoughtSignature := gemini.DecodeGeminiToolCallID(encoded)
+	encoded := gemini.EncodeToolCallID("call_123", "sig+/=")
+	baseID, thoughtSignature := gemini.DecodeToolCallID(encoded)
 
 	require.Equal(t, "call_123", baseID)
 	require.Equal(t, "sig+/=", thoughtSignature)

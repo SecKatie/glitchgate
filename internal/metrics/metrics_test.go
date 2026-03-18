@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package metrics
+package metrics //nolint:revive // does not conflict with runtime/metrics in usage
 
 import (
 	"testing"

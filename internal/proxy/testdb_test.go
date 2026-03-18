@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "create template dir: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	dbPath := filepath.Join(dir, "template.db")
 	st, err := store.NewSQLiteStore(dbPath)
@@ -81,7 +81,7 @@ func TestMain(m *testing.M) {
 func cloneTestDB(t *testing.T) *store.SQLiteStore {
 	t.Helper()
 
-	src, err := os.ReadFile(templateDBPath)
+	src, err := os.ReadFile(templateDBPath) //nolint:gosec // controlled test fixture path set in TestMain
 	if err != nil {
 		t.Fatalf("read template DB: %v", err)
 	}

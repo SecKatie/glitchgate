@@ -528,8 +528,8 @@ func (h *OpenAIHandler) handleGeminiForcedStreamToCC(w http.ResponseWriter, resp
 func writeOpenAIError(w http.ResponseWriter, status int, errType, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(openai.OpenAIErrorResponse{
-		Error: openai.OpenAIError{
+	if err := json.NewEncoder(w).Encode(openai.ErrorResponse{
+		Error: openai.Error{
 			Message: message,
 			Type:    errType,
 		},

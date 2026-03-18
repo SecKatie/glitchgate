@@ -24,7 +24,7 @@ type ChatCompletionRequest struct {
 	TopP            *float64       `json:"top_p,omitempty"`
 	Stream          bool           `json:"stream,omitempty"`
 	Stop            interface{}    `json:"stop,omitempty"` // string or []string
-	Tools           []OpenAITool   `json:"tools,omitempty"`
+	Tools           []Tool         `json:"tools,omitempty"`
 	ToolChoice      interface{}    `json:"tool_choice,omitempty"`
 	StreamOptions   *StreamOptions `json:"stream_options,omitempty"`
 	ReasoningEffort *string        `json:"reasoning_effort,omitempty"`
@@ -54,6 +54,13 @@ type ContentPart struct {
 	Text       string             `json:"text,omitempty"`
 	ImageURL   *ImageURLContent   `json:"image_url,omitempty"`
 	InputAudio *InputAudioContent `json:"input_audio,omitempty"`
+	File       *FileContent       `json:"file,omitempty"`
+}
+
+// FileContent holds file data for a file content part.
+type FileContent struct {
+	FileData string `json:"file_data,omitempty"` // data URI: "data:application/pdf;base64,..."
+	Filename string `json:"filename,omitempty"`
 }
 
 // InputAudioContent holds audio data in base64 format.
@@ -62,8 +69,8 @@ type InputAudioContent struct {
 	Format string `json:"format"`
 }
 
-// OpenAITool describes a tool available to the model in OpenAI format.
-type OpenAITool struct {
+// Tool describes a tool available to the model in OpenAI format.
+type Tool struct {
 	Type     string       `json:"type"`
 	Function ToolFunction `json:"function"`
 }
@@ -96,12 +103,12 @@ type StreamOptions struct {
 
 // ChatCompletionResponse is the OpenAI Chat Completions API response.
 type ChatCompletionResponse struct {
-	ID      string       `json:"id"`
-	Object  string       `json:"object"`
-	Created int64        `json:"created"`
-	Model   string       `json:"model"`
-	Choices []Choice     `json:"choices"`
-	Usage   *OpenAIUsage `json:"usage,omitempty"`
+	ID      string   `json:"id"`
+	Object  string   `json:"object"`
+	Created int64    `json:"created"`
+	Model   string   `json:"model"`
+	Choices []Choice `json:"choices"`
+	Usage   *Usage   `json:"usage,omitempty"`
 }
 
 // Choice represents a single completion choice in the response.
@@ -112,8 +119,8 @@ type Choice struct {
 	FinishReason *string      `json:"finish_reason"`
 }
 
-// OpenAIUsage reports token consumption in OpenAI format.
-type OpenAIUsage struct {
+// Usage reports token consumption in OpenAI format.
+type Usage struct {
 	PromptTokens            int64                    `json:"prompt_tokens"`
 	CompletionTokens        int64                    `json:"completion_tokens"`
 	TotalTokens             int64                    `json:"total_tokens"`
@@ -132,13 +139,13 @@ type CompletionTokensDetails struct {
 	ReasoningTokens int64 `json:"reasoning_tokens"`
 }
 
-// OpenAIErrorResponse wraps an error in OpenAI's error envelope.
-type OpenAIErrorResponse struct {
-	Error OpenAIError `json:"error"`
+// ErrorResponse wraps an error in OpenAI's error envelope.
+type ErrorResponse struct {
+	Error Error `json:"error"`
 }
 
-// OpenAIError contains the error details in OpenAI format.
-type OpenAIError struct {
+// Error contains the error details in OpenAI format.
+type Error struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 	Code    string `json:"code,omitempty"`

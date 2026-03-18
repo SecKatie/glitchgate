@@ -482,7 +482,7 @@ func TestAnthropicErrorToOpenAI(t *testing.T) {
 			result, err := AnthropicErrorToOpenAI(tc.body)
 			require.NoError(t, err)
 
-			var oaiErr openai.OpenAIErrorResponse
+			var oaiErr openai.ErrorResponse
 			err = json.Unmarshal(result, &oaiErr)
 			require.NoError(t, err)
 			require.Equal(t, tc.expectedType, oaiErr.Error.Type)
@@ -1164,7 +1164,7 @@ func TestPrefixStability_WithToolCalls(t *testing.T) {
 	base := &openai.ChatCompletionRequest{
 		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: intPtr(4096),
-		Tools: []openai.OpenAITool{
+		Tools: []openai.Tool{
 			{
 				Type: "function",
 				Function: openai.ToolFunction{

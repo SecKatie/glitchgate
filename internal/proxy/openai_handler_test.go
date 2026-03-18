@@ -353,7 +353,7 @@ func TestOpenAIProxy_UnknownModel(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	var errResp openai.OpenAIErrorResponse
+	var errResp openai.ErrorResponse
 	err := json.Unmarshal(rec.Body.Bytes(), &errResp)
 	require.NoError(t, err)
 	require.Contains(t, errResp.Error.Message, "Unknown model")

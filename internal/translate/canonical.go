@@ -22,6 +22,7 @@ import (
 // StopReason enumerates the reasons a model stopped generating.
 type StopReason int
 
+// StopReason values enumerate why the model stopped generating.
 const (
 	StopReasonEndTurn StopReason = iota
 	StopReasonMaxTokens
@@ -35,6 +36,7 @@ const (
 // ToolChoiceMode enumerates how the model should select tools.
 type ToolChoiceMode int
 
+// ToolChoiceMode values enumerate how the model should select tools.
 const (
 	ToolChoiceAuto ToolChoiceMode = iota
 	ToolChoiceRequired
@@ -58,6 +60,7 @@ type CanonicalTool struct {
 // BlockType tags the kind of content within a CanonicalBlock.
 type BlockType int
 
+// BlockType values tag the kind of content within a CanonicalBlock.
 const (
 	BlockText BlockType = iota
 	BlockImage
@@ -66,6 +69,7 @@ const (
 	BlockThinking
 	BlockRefusal
 	BlockAudio
+	BlockDocument
 )
 
 // CanonicalBlock is a tagged union representing one segment of message content.
@@ -98,6 +102,12 @@ type CanonicalBlock struct {
 	// BlockAudio
 	AudioData   string // base64-encoded audio data
 	AudioFormat string // e.g. "wav", "mp3"
+
+	// BlockDocument
+	DocMediaType string // e.g. "application/pdf"
+	DocData      string // base64-encoded document data
+	DocURL       string // URL (mutually exclusive with DocData)
+	DocFilename  string // optional original filename
 }
 
 // CanonicalMessage represents a single conversational turn.
@@ -367,6 +377,17 @@ func anthropicMessageToCanonical(msg anthropic.Message) (CanonicalMessage, error
 				}
 			}
 			canonMsg.Blocks = append(canonMsg.Blocks, cb)
+		case "document":
+			cb := CanonicalBlock{Type: BlockDocument}
+			if b.Source != nil {
+				if b.Source.Type == "base64" {
+					cb.DocMediaType = b.Source.MediaType
+					cb.DocData = b.Source.Data
+				} else {
+					cb.DocURL = b.Source.URL
+				}
+			}
+			canonMsg.Blocks = append(canonMsg.Blocks, cb)
 		case "tool_use":
 			canonMsg.Blocks = append(canonMsg.Blocks, CanonicalBlock{
 				Type:      BlockToolUse,
@@ -515,6 +536,21 @@ func canonicalMessageToAnthropic(msg CanonicalMessage) anthropic.Message {
 				cb.Source = &anthropic.ImageSource{
 					Type: "url",
 					URL:  b.ImageURL,
+				}
+			}
+			blocks = append(blocks, cb)
+		case BlockDocument:
+			cb := anthropic.ContentBlock{Type: "document"}
+			if b.DocData != "" {
+				cb.Source = &anthropic.ImageSource{
+					Type:      "base64",
+					MediaType: b.DocMediaType,
+					Data:      b.DocData,
+				}
+			} else if b.DocURL != "" {
+				cb.Source = &anthropic.ImageSource{
+					Type: "url",
+					URL:  b.DocURL,
 				}
 			}
 			blocks = append(blocks, cb)
@@ -788,6 +824,30 @@ func openAIUserMessageToCanonical(msg openai.ChatMessage) (CanonicalMessage, err
 					cb.ImageURL = url
 				}
 				canonMsg.Blocks = append(canonMsg.Blocks, cb)
+			case "file":
+				fileObj, ok := m["file"].(map[string]any)
+				if !ok {
+					continue
+				}
+				fileData, _ := fileObj["file_data"].(string)
+				if fileData == "" {
+					continue
+				}
+				cb := CanonicalBlock{Type: BlockDocument}
+				if fn, ok := fileObj["filename"].(string); ok {
+					cb.DocFilename = fn
+				}
+				// Parse data URI: "data:application/pdf;base64,<data>"
+				if strings.HasPrefix(fileData, "data:") {
+					parts := strings.SplitN(fileData, ",", 2)
+					if len(parts) == 2 {
+						mediaInfo := strings.TrimPrefix(parts[0], "data:")
+						mediaInfo = strings.TrimSuffix(mediaInfo, ";base64")
+						cb.DocMediaType = mediaInfo
+						cb.DocData = parts[1]
+					}
+				}
+				canonMsg.Blocks = append(canonMsg.Blocks, cb)
 			}
 		}
 	case nil:
@@ -911,7 +971,7 @@ func CanonicalToOpenAIRequest(canon *CanonicalRequest) (*openai.ChatCompletionRe
 
 	// Convert tools.
 	for _, t := range canon.Tools {
-		result.Tools = append(result.Tools, openai.OpenAITool{
+		result.Tools = append(result.Tools, openai.Tool{
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        t.Name,
@@ -1031,6 +1091,21 @@ func canonicalUserToOpenAI(msg CanonicalMessage) []openai.ChatMessage {
 				},
 			})
 			hasImages = true // force multipart content
+		case BlockDocument:
+			fileData := b.DocURL
+			if b.DocData != "" {
+				fileData = "data:" + b.DocMediaType + ";base64," + b.DocData
+			}
+			if fileData != "" {
+				parts = append(parts, openai.ContentPart{
+					Type: "file",
+					File: &openai.FileContent{
+						FileData: fileData,
+						Filename: b.DocFilename,
+					},
+				})
+				hasImages = true // force multipart content
+			}
 		case BlockToolResult:
 			flushParts()
 			messages = append(messages, openai.ChatMessage{
@@ -1199,7 +1274,7 @@ func CanonicalToOpenAIResponse(canon *CanonicalResponse, model string) *openai.C
 	// In canonical form, InputTokens may have CacheReadInputTokens subtracted out
 	// (Anthropic convention). OpenAI PromptTokens includes cached tokens.
 	promptTokens := canon.Usage.InputTokens + canon.Usage.CacheReadInputTokens
-	result.Usage = &openai.OpenAIUsage{
+	result.Usage = &openai.Usage{
 		PromptTokens:     promptTokens,
 		CompletionTokens: canon.Usage.OutputTokens,
 		TotalTokens:      promptTokens + canon.Usage.OutputTokens,
@@ -1330,7 +1405,25 @@ func responsesInputToCanonicalMessages(input json.RawMessage) ([]CanonicalMessag
 			}
 
 		case "input_file":
-			return nil, fmt.Errorf("input_file content type is not supported")
+			cb := CanonicalBlock{Type: BlockDocument}
+			cb.DocFilename = item.Filename
+			if item.FileData != "" {
+				if strings.HasPrefix(item.FileData, "data:") {
+					parts := strings.SplitN(item.FileData, ",", 2)
+					if len(parts) == 2 {
+						mediaInfo := strings.TrimPrefix(parts[0], "data:")
+						mediaInfo = strings.TrimSuffix(mediaInfo, ";base64")
+						cb.DocMediaType = mediaInfo
+						cb.DocData = parts[1]
+					}
+				}
+			} else if item.FileURL != "" {
+				cb.DocURL = item.FileURL
+			}
+			messages = append(messages, CanonicalMessage{
+				Role:   "user",
+				Blocks: []CanonicalBlock{cb},
+			})
 
 		case "input_audio":
 			messages = append(messages, CanonicalMessage{
@@ -1591,6 +1684,18 @@ func canonicalMessageToResponsesInput(msg CanonicalMessage) []openai.InputItem {
 					ImageURL: url,
 				})
 			}
+		case BlockDocument:
+			fileData := b.DocURL
+			if b.DocData != "" {
+				fileData = "data:" + b.DocMediaType + ";base64," + b.DocData
+			}
+			if fileData != "" {
+				items = append(items, openai.InputItem{
+					Type:     "input_file",
+					FileData: fileData,
+					Filename: b.DocFilename,
+				})
+			}
 		}
 	}
 
@@ -1758,17 +1863,17 @@ func CanonicalToResponsesResponse(canon *CanonicalResponse, model string) *opena
 // ---------------------------------------------------------------------------
 
 // CanonicalToGeminiRequest converts a canonical request to a Gemini generateContent request.
-func CanonicalToGeminiRequest(canon *CanonicalRequest) (*gemini.GeminiRequest, error) {
+func CanonicalToGeminiRequest(canon *CanonicalRequest) (*gemini.Request, error) {
 	if canon == nil {
 		return nil, fmt.Errorf("canonical request must not be nil")
 	}
 
-	gReq := &gemini.GeminiRequest{}
+	gReq := &gemini.Request{}
 
 	// System instruction.
 	if canon.System != "" {
-		gReq.SystemInstruction = &gemini.GeminiContent{
-			Parts: []gemini.GeminiPart{{Text: canon.System}},
+		gReq.SystemInstruction = &gemini.Content{
+			Parts: []gemini.Part{{Text: canon.System}},
 		}
 	}
 
@@ -1797,17 +1902,17 @@ func CanonicalToGeminiRequest(canon *CanonicalRequest) (*gemini.GeminiRequest, e
 		}
 
 		if len(parts) == 0 {
-			parts = []gemini.GeminiPart{{Text: ""}}
+			parts = []gemini.Part{{Text: ""}}
 		}
 
-		gReq.Contents = append(gReq.Contents, gemini.GeminiContent{
+		gReq.Contents = append(gReq.Contents, gemini.Content{
 			Role:  role,
 			Parts: parts,
 		})
 	}
 
 	// Generation config.
-	var genCfg gemini.GeminiGenerationConfig
+	var genCfg gemini.GenerationConfig
 	hasGenCfg := false
 
 	if canon.MaxTokens != nil {
@@ -1833,7 +1938,7 @@ func CanonicalToGeminiRequest(canon *CanonicalRequest) (*gemini.GeminiRequest, e
 	if canon.Thinking != nil && canon.Thinking.Enabled {
 		budget := canon.Thinking.BudgetTokens
 		if budget > 0 {
-			genCfg.ThinkingConfig = &gemini.GeminiThinkingConfig{ThinkingBudget: &budget}
+			genCfg.ThinkingConfig = &gemini.ThinkingConfig{ThinkingBudget: &budget}
 			hasGenCfg = true
 		}
 	}
@@ -1844,44 +1949,54 @@ func CanonicalToGeminiRequest(canon *CanonicalRequest) (*gemini.GeminiRequest, e
 
 	// Tools.
 	if len(canon.Tools) > 0 {
-		var decls []gemini.GeminiFunctionDeclaration
+		var decls []gemini.FunctionDeclaration
 		for _, t := range canon.Tools {
-			decls = append(decls, gemini.GeminiFunctionDeclaration{
+			decls = append(decls, gemini.FunctionDeclaration{
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  gemini.SanitizeSchemaForGemini(t.Parameters),
 			})
 		}
-		gReq.Tools = []gemini.GeminiTool{{FunctionDeclarations: decls}}
+		gReq.Tools = []gemini.Tool{{FunctionDeclarations: decls}}
 	}
 
 	return gReq, nil
 }
 
 // canonicalBlocksToGeminiParts converts canonical blocks to Gemini parts.
-func canonicalBlocksToGeminiParts(blocks []CanonicalBlock, toolNameByID map[string]string) ([]gemini.GeminiPart, error) {
-	var parts []gemini.GeminiPart
+func canonicalBlocksToGeminiParts(blocks []CanonicalBlock, toolNameByID map[string]string) ([]gemini.Part, error) {
+	var parts []gemini.Part
 
 	for _, b := range blocks {
 		switch b.Type {
 		case BlockText:
 			if b.Text != "" {
-				parts = append(parts, gemini.GeminiPart{Text: b.Text})
+				parts = append(parts, gemini.Part{Text: b.Text})
 			}
 		case BlockImage:
 			if b.ImageData != "" {
-				parts = append(parts, gemini.GeminiPart{
-					InlineData: &gemini.GeminiBlob{
+				parts = append(parts, gemini.Part{
+					InlineData: &gemini.Blob{
 						MIMEType: b.ImageMediaType,
 						Data:     b.ImageData,
 					},
 				})
 			}
 			// Plain URL images are not supported by Gemini generateContent.
+		case BlockDocument:
+			if b.DocData != "" {
+				parts = append(parts, gemini.Part{
+					InlineData: &gemini.Blob{
+						MIMEType: b.DocMediaType,
+						Data:     b.DocData,
+					},
+				})
+			}
+			// Plain URL documents are not supported by Gemini generateContent.
 		case BlockToolUse:
-			_, thoughtSignature := gemini.DecodeGeminiToolCallID(b.ToolID)
-			part := gemini.GeminiPart{
-				FunctionCall: &gemini.GeminiFunctionCall{
+			_, thoughtSignature := gemini.DecodeToolCallID(b.ToolID)
+			part := gemini.Part{
+				FunctionCall: &gemini.FunctionCall{
 					Name: b.ToolName,
 					Args: b.ToolInput,
 				},
@@ -1900,8 +2015,8 @@ func canonicalBlocksToGeminiParts(blocks []CanonicalBlock, toolNameByID map[stri
 			} else {
 				responseValue = map[string]any{}
 			}
-			parts = append(parts, gemini.GeminiPart{
-				FunctionResponse: &gemini.GeminiFuncResponse{
+			parts = append(parts, gemini.Part{
+				FunctionResponse: &gemini.FuncResponse{
 					Name:     fnName,
 					Response: responseValue,
 				},
@@ -1917,7 +2032,7 @@ func canonicalBlocksToGeminiParts(blocks []CanonicalBlock, toolNameByID map[stri
 // GeminiResponseToCanonical converts a raw Gemini generateContent response body
 // to canonical form.
 func GeminiResponseToCanonical(body []byte) (*CanonicalResponse, error) {
-	var gr gemini.GeminiResponse
+	var gr gemini.Response
 	if err := json.Unmarshal(body, &gr); err != nil {
 		return nil, fmt.Errorf("parsing Gemini response: %w", err)
 	}
@@ -1930,7 +2045,7 @@ func GeminiResponseToCanonical(body []byte) (*CanonicalResponse, error) {
 
 	// Usage.
 	if gr.UsageMetadata != nil {
-		input, output, cacheRead, reasoning := gemini.GeminiUsageTotals(gr.UsageMetadata)
+		input, output, cacheRead, reasoning := gemini.UsageTotals(gr.UsageMetadata)
 		canon.Usage = CanonicalUsage{
 			InputTokens:          input,
 			OutputTokens:         output,
@@ -1964,7 +2079,7 @@ func GeminiResponseToCanonical(body []byte) (*CanonicalResponse, error) {
 				}
 				canon.Content = append(canon.Content, CanonicalBlock{
 					Type:      BlockToolUse,
-					ToolID:    gemini.EncodeGeminiToolCallID(fmt.Sprintf("toolu_%06d", idx), part.ThoughtSignature),
+					ToolID:    gemini.EncodeToolCallID(fmt.Sprintf("toolu_%06d", idx), part.ThoughtSignature),
 					ToolName:  part.FunctionCall.Name,
 					ToolInput: inputVal,
 				})

@@ -110,7 +110,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		httpReq.Header.Set("Authorization", c.apiKey)
 	}
 
-	slog.Debug("sending request", "url", url, "auth_mode", c.authMode, "x_api_key", redactKey(httpReq.Header.Get("X-Api-Key")), "auth", redactKey(httpReq.Header.Get("Authorization")))
+	slog.Debug("sending request", "url", url, "auth_mode", c.authMode, "x_api_key", redactKey(httpReq.Header.Get("X-Api-Key")), "auth", redactKey(httpReq.Header.Get("Authorization"))) //nolint:gosec // structured slog prevents log injection
 
 	for hdr, values := range req.Headers {
 		if !shouldForwardHeader(hdr) {
@@ -127,7 +127,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		}
 	}
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq) //nolint:gosec // URL from validated provider config, not user input
 	if err != nil {
 		return nil, fmt.Errorf("sending request to %s: %w", c.name, err)
 	}

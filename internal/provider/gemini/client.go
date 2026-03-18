@@ -123,7 +123,7 @@ func (c *Client) send(ctx context.Context, req *provider.Request, streaming bool
 		}
 	}
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq) //nolint:gosec // URL from validated provider config, not user input
 	if err != nil {
 		return nil, fmt.Errorf("sending request to %s: %w", c.name, err)
 	}
@@ -203,8 +203,8 @@ func shouldForwardHeader(hdr string) bool {
 }
 
 func extractGeminiTokens(body []byte, resp *provider.Response) {
-	var gr GeminiResponse
+	var gr Response
 	if err := json.Unmarshal(body, &gr); err == nil && gr.UsageMetadata != nil {
-		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = GeminiUsageTotals(gr.UsageMetadata)
+		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = UsageTotals(gr.UsageMetadata)
 	}
 }

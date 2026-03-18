@@ -153,8 +153,8 @@ func (c *GeminiClient) SendRequest(ctx context.Context, req *provider.Request) (
 
 // extractGeminiTokens parses Gemini usageMetadata from a response body.
 func extractGeminiTokens(body []byte, resp *provider.Response) {
-	var gr gemini.GeminiResponse
+	var gr gemini.Response
 	if err := json.Unmarshal(body, &gr); err == nil && gr.UsageMetadata != nil {
-		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = gemini.GeminiUsageTotals(gr.UsageMetadata)
+		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = gemini.UsageTotals(gr.UsageMetadata)
 	}
 }
