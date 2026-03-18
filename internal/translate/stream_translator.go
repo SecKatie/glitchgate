@@ -51,6 +51,8 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 	// Track active tool calls by index for streaming tool call support.
 	toolCalls := make(map[int]ToolCall)
 	toolCallOrder := []int{} // track order of tool calls
+	// Map Anthropic content block indices to sequential tool call indices
+	contentBlockToToolCallIndex := make(map[int]int)
 
 	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
@@ -117,10 +119,13 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 					}
 				} else if cbEvent.ContentBlock.Type == "tool_use" {
-					// Track order of tool calls.
-					toolCallOrder = append(toolCallOrder, cbEvent.Index)
+					// Track order of tool calls using sequential indices.
+					toolCallIndex := len(toolCalls)
+					toolCallOrder = append(toolCallOrder, toolCallIndex)
+					// Map Anthropic content block index to sequential tool call index
+					contentBlockToToolCallIndex[cbEvent.Index] = toolCallIndex
 					// Initialize a new tool call.
-					toolCalls[cbEvent.Index] = ToolCall{
+					toolCalls[toolCallIndex] = ToolCall{
 						ID:   cbEvent.ContentBlock.ID,
 						Type: "function",
 						Function: FunctionCall{
@@ -128,12 +133,8 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 							Arguments: "",
 						},
 					}
-					// Emit initial chunk with tool call ID and name.
-					delta := &ChatMessage{
-						Role:    "assistant",
-						Content: "",
-					}
-					if err := writeChunk(w, rc, &captured, messageID, model, created, delta, nil, toolCalls, toolCallOrder); err != nil {
+					// Emit initial chunk with tool call index, ID, type, and name.
+					if err := writeToolCallStartChunk(w, rc, &captured, messageID, model, created, toolCallIndex, cbEvent.ContentBlock.ID, cbEvent.ContentBlock.Name); err != nil {
 						return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 					}
 				}
@@ -172,8 +173,13 @@ func SSEStream(w http.ResponseWriter, upstream io.ReadCloser, model string) (*St
 				}
 
 			case "input_json_delta":
-				// Emit chunk with ONLY the new arguments delta, not accumulated string.
-				if err := writeToolCallDeltaChunk(w, rc, &captured, messageID, model, created, event.Index, event.Delta.PartialJSON); err != nil {
+				// Map Anthropic content block index to sequential tool call index.
+				toolCallIndex, ok := contentBlockToToolCallIndex[event.Index]
+				if !ok {
+					slog.Warn("input_json_delta for unmapped content block index", "index", event.Index)
+					continue
+				}
+				if err := writeToolCallDeltaChunk(w, rc, &captured, messageID, model, created, toolCallIndex, event.Delta.PartialJSON); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, 0), err
 				}
 			}
@@ -284,6 +290,55 @@ func buildChunkWithToolCalls(id, model string, created int64, delta *ChatMessage
 			},
 		},
 	}
+}
+
+// writeToolCallStartChunk emits the initial chunk for a new tool call with only
+// index, ID, type, and name - not arguments. Arguments are emitted separately via
+// writeToolCallDeltaChunk. This follows OpenAI's streaming spec where the initial
+// chunk establishes the tool call identity.
+func writeToolCallStartChunk(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, id, model string, created int64, toolCallIndex int, tcID, tcName string) error {
+	delta := &ChatMessage{
+		Role:    "assistant",
+		Content: "",
+		ToolCalls: []ToolCall{
+			{
+				ID:   tcID,
+				Type: "function",
+				Function: FunctionCall{
+					Name:      tcName,
+					Arguments: "",
+				},
+				Index: &toolCallIndex,
+			},
+		},
+	}
+
+	chunk := &ChatCompletionResponse{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []Choice{
+			{
+				Index:        0,
+				Delta:        delta,
+				FinishReason: nil,
+			},
+		},
+	}
+
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		return fmt.Errorf("marshalling tool call start chunk: %w", err)
+	}
+
+	line := fmt.Sprintf("data: %s\n\n", data)
+	captured.WriteString(line)
+
+	if _, err := w.Write([]byte(line)); err != nil {
+		return err
+	}
+	return rc.Flush()
 }
 
 // writeToolCallDeltaChunk emits a chunk with only the incremental tool call arguments delta,

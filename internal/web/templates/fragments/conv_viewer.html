@@ -23,6 +23,17 @@
             <p>{{.ThinkingContent}}</p>
             {{end}}
         </details>
+        {{else if eq .Type "reasoning"}}
+        <details class="conv-thinking">
+            <summary><strong>Reasoning</strong></summary>
+            {{if .ReasoningTrunc}}
+            <p class="conv-thinking-short">{{.ReasoningContent}}…</p>
+            <p class="conv-thinking-full" hidden>{{.FullText}}</p>
+            <a href="#" class="thinking-expand-link" onclick="return expandThinkingText(this)">show full reasoning</a>
+            {{else}}
+            <p>{{.ReasoningContent}}</p>
+            {{end}}
+        </details>
         {{else if eq .Type "tool_use"}}
         <div class="conv-tool">
             <strong>Tool call:</strong> <code>{{.ToolName}}</code>

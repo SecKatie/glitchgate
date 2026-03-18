@@ -37,7 +37,7 @@ type ConvTurn struct {
 
 // ConvBlock is a typed content block within a turn.
 type ConvBlock struct {
-	// Type is one of: "text", "tool_use", "tool_result", "image", "document", "thinking", "unknown"
+	// Type is one of: "text", "tool_use", "tool_result", "image", "document", "thinking", "reasoning", "unknown"
 	Type string
 
 	// For Type="text"
@@ -59,9 +59,13 @@ type ConvBlock struct {
 	// For Type="image" or "document" — label only, no raw data
 	MediaLabel string // e.g. "[image/jpeg]" or "[application/pdf]"
 
-	// For Type="thinking" — extended reasoning/reasoning_tokens content
-	ThinkingContent string // the thinking/reasoning text content
+	// For Type="thinking" — Anthropic extended thinking content
+	ThinkingContent string // the thinking text content
 	ThinkingTrunc   bool   // true if ThinkingContent was truncated
+
+	// For Type="reasoning" — OpenAI reasoning content (separate from Anthropic thinking)
+	ReasoningContent string // the reasoning text content
+	ReasoningTrunc   bool   // true if ReasoningContent was truncated
 }
 
 // ToolArg is a single key/value pair from a tool_use input object.
@@ -483,10 +487,10 @@ func openAIMessageToTurn(msg translate.ChatMessage, toolNameMap map[string]strin
 	if msg.ReasoningContent != "" {
 		short, full, trunc := truncateLines(msg.ReasoningContent, truncateAtLines)
 		turn.Blocks = append(turn.Blocks, ConvBlock{
-			Type:            "thinking",
-			ThinkingContent: short,
-			ThinkingTrunc:   trunc,
-			FullText:        full,
+			Type:            "reasoning",
+			ReasoningContent: short,
+			ReasoningTrunc:   trunc,
+			FullText:         full,
 		})
 	}
 
@@ -625,8 +629,9 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 		return nil
 	}
 
-	// Accumulate text and tool calls across deltas.
+	// Accumulate text, reasoning, and tool calls across deltas.
 	textBuf := strings.Builder{}
+	reasoningBuf := strings.Builder{}
 	toolCalls := make(map[int]*translate.ToolCall)
 	var toolCallOrder []int
 
@@ -660,6 +665,11 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 			if s, ok := delta.Content.(string); ok {
 				textBuf.WriteString(s)
 			}
+		}
+
+		// Accumulate reasoning (OpenAI extended reasoning).
+		if delta.Reasoning != "" {
+			reasoningBuf.WriteString(delta.Reasoning)
 		}
 
 		// Accumulate tool calls.
@@ -698,6 +708,17 @@ func parseOpenAISSEResponse(body string, _ map[string]string) *ConvTurn {
 			Text:      short,
 			Truncated: trunc,
 			FullText:  full,
+		})
+	}
+
+	// Add accumulated reasoning if present (OpenAI extended reasoning).
+	if reasoning := reasoningBuf.String(); reasoning != "" {
+		short, full, trunc := truncateLines(reasoning, truncateAtLines)
+		turn.Blocks = append(turn.Blocks, ConvBlock{
+			Type:            "reasoning",
+			ReasoningContent: short,
+			ReasoningTrunc:   trunc,
+			FullText:         full,
 		})
 	}
 

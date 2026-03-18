@@ -17,7 +17,7 @@ go test -race ./internal/proxy -run TestHandler         # Run specific test
 go test -race ./internal/proxy -v                       # Verbose test output
 
 # Generate code (sqlc)
-make generate           # Regenerate Go types from queries/*.sql
+make generate           # Regenerate Go types from queries/*.sql (deprecated - sqlc removed)
 
 # Run locally
 ./glitchgate serve      # Start server (requires config.yaml with master_key)
@@ -70,12 +70,18 @@ Each implements `SendRequest()` and reports native `APIFormat()` ("anthropic", "
 
 **pricing/** - Model-to-cost mapping with built-in defaults for Anthropic, OpenAI, Copilot. Metadata overrides via config `model_list` entries.
 
-### Database Workflow (sqlc)
+### OpenAI Streaming API Notes
 
-1. Edit SQL in `queries/*.sql`
-2. Run `make generate` to regenerate Go types
-3. Add method to appropriate Store interface in `store.go`
-4. SQLiteStore automatically implements interface via generated code
+Tool calls in OpenAI SSE streaming work differently than Anthropic:
+- **Initial chunk**: Contains full tool call with `id`, `name`, and empty `arguments`
+- **Delta chunks**: Only include `index` and incremental `arguments` delta - NOT the accumulated full string
+- Do NOT accumulate and re-emit full arguments on each delta (common mistake)
+
+See `stream_translator.go:writeToolCallDeltaChunk` for correct implementation.
+
+### Database Workflow (deprecated - sqlc removed)
+
+The project previously used sqlc but now uses raw `database/sql` with inline SQL in `sqlite_*.go` and `postgres_*.go` files.
 
 ### Testing Patterns
 
@@ -105,15 +111,14 @@ internal/
 ├── provider/           # Provider interface
 │   ├── anthropic/      # Anthropic API client
 │   ├── openai/         # OpenAI-compatible client
-│   ├── copilot/        # GitHub Copilot OAuth client
-│   └── vertex/         # Google Vertex AI Claude client
+│   ├── copilot/       # GitHub Copilot OAuth client
+│   └── vertex/        # Google Vertex AI Claude client
 ├── proxy/              # Core proxy handlers + SSE streaming + pipeline
-├── store/              # SQLite data access + migrations
-│   └── migrations/     # goose migration files
+├── store/              # SQLite + Postgres data access + migrations
+│   └── migrations/    # goose migration files
 ├── translate/          # API format translation (3×3 matrix)
-└── web/                # UI handlers, templates, embedded assets
-queries/                # sqlc query files
-specs/                  # Feature specifications organized by number
+└── web/               # UI handlers, templates, embedded assets
+specs/                 # Feature specifications organized by number
 ```
 
 ## Feature Specifications
