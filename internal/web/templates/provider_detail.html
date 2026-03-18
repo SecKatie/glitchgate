@@ -45,12 +45,28 @@
     <tbody>
         {{range .Models}}
         <tr data-href="/ui/models/{{.EncodedName}}">
-            <td class="mono"><a href="/ui/models/{{.EncodedName}}" class="row-link">{{.ModelName}}</a></td>
+            <td class="mono">
+                <a href="/ui/models/{{.EncodedName}}" class="row-link">{{.ModelName}}</a>
+                {{if .IsWildcard}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-color) 12%,transparent);color:var(--pico-muted-color)">Wildcard</span>{{end}}
+                {{if .Children}}<span class="child-count">{{len .Children}} model{{if gt (len .Children) 1}}s{{end}}</span>{{end}}
+            </td>
             <td class="mono">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
             <td class="cost">{{if .InputPerMTok}}${{printf "%.2f" (deref .InputPerMTok)}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
             <td class="cost">{{if .OutputPerMTok}}${{printf "%.2f" (deref .OutputPerMTok)}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
             <td class="cost">{{if .TotalSpendUSD}}${{printf "%.4f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
         </tr>
+        {{/* ── Child rows for wildcard models ── */}}
+        {{range .Children}}
+        <tr class="child-row" data-href="/ui/models/{{.EncodedName}}">
+            <td class="mono" style="padding-left: 1.5em;">
+                <a href="/ui/models/{{.EncodedName}}" class="row-link">{{.ModelName}}</a>
+            </td>
+            <td class="mono"><span class="muted-dash">&mdash;</span></td>
+            <td class="cost"><span class="muted-dash">&mdash;</span></td>
+            <td class="cost"><span class="muted-dash">&mdash;</span></td>
+            <td class="cost">{{if .TotalSpendUSD}}${{printf "%.4f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+        </tr>
+        {{end}}
         {{end}}
     </tbody>
 </table>

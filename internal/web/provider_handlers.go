@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -251,6 +252,8 @@ func (h *ProviderHandlers) ProviderDetailPageHandler(w http.ResponseWriter, r *h
 		OutputPerMTok *float64
 		TotalSpendUSD float64
 		EncodedName   string
+		IsWildcard    bool
+		Children      []modelRow
 	}
 
 	var models []modelRow
@@ -265,6 +268,7 @@ func (h *ProviderHandlers) ProviderDetailPageHandler(w http.ResponseWriter, r *h
 			ModelName:     m.ModelName,
 			UpstreamModel: m.UpstreamModel,
 			EncodedName:   m.EncodedName,
+			IsWildcard:    m.IsWildcard,
 		}
 
 		if m.HasPricing && m.Pricing != nil {
@@ -274,7 +278,27 @@ func (h *ProviderHandlers) ProviderDetailPageHandler(w http.ResponseWriter, r *h
 			row.OutputPerMTok = &outputRate
 		}
 
-		if u, ok := usageMap[m.ModelName]; ok {
+		// For wildcard models, aggregate usage from all child models that match the wildcard.
+		if m.IsWildcard {
+			prefix := strings.TrimSuffix(m.ModelName, "/*")
+			for modelName, u := range usageMap {
+				if strings.HasPrefix(modelName, prefix+"/") {
+					child := modelRow{ModelName: modelName, EncodedName: url.PathEscape(modelName)}
+					if m.HasPricing && m.Pricing != nil {
+						child.TotalSpendUSD = priceUsage(*m.Pricing, tokenUsage{
+							InputTokens:      u.InputTokens,
+							CacheWriteTokens: u.CacheCreationInputTokens,
+							CacheReadTokens:  u.CacheReadInputTokens,
+							OutputTokens:     u.OutputTokens,
+						}).TotalCostUSD
+					} else if u.LogCostUSD > 0 {
+						child.TotalSpendUSD = u.LogCostUSD
+					}
+					row.Children = append(row.Children, child)
+					row.TotalSpendUSD += child.TotalSpendUSD
+				}
+			}
+		} else if u, ok := usageMap[m.ModelName]; ok {
 			if m.HasPricing && m.Pricing != nil {
 				row.TotalSpendUSD = priceUsage(*m.Pricing, tokenUsage{
 					InputTokens:      u.InputTokens,
