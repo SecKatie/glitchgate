@@ -14,6 +14,7 @@ import (
 )
 
 func TestPeriodStart(t *testing.T) {
+	t.Parallel()
 	utc := time.UTC
 	eastern, _ := time.LoadLocation("America/New_York")
 
@@ -84,6 +85,7 @@ func TestPeriodStart(t *testing.T) {
 }
 
 func TestPeriodResetAt(t *testing.T) {
+	t.Parallel()
 	utc := time.UTC
 
 	tests := []struct {

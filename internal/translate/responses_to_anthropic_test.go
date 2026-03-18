@@ -11,12 +11,14 @@ import (
 )
 
 func TestResponsesToAnthropic_NilRequest(t *testing.T) {
+	t.Parallel()
 	_, err := ResponsesToAnthropic(nil, "claude-sonnet-4-20250514")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must not be nil")
 }
 
 func TestResponsesToAnthropic_StringInput(t *testing.T) {
+	t.Parallel()
 	input, _ := json.Marshal("Hello, Claude!")
 	req := &openai.ResponsesRequest{
 		Model: "test-model",
@@ -32,6 +34,7 @@ func TestResponsesToAnthropic_StringInput(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_Instructions(t *testing.T) {
+	t.Parallel()
 	input, _ := json.Marshal("Hi")
 	instructions := "You are a helpful assistant."
 	req := &openai.ResponsesRequest{
@@ -46,6 +49,7 @@ func TestResponsesToAnthropic_Instructions(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_MaxTokens(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name              string
 		maxOutputTokens   *int
@@ -80,6 +84,7 @@ func TestResponsesToAnthropic_MaxTokens(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_MessageInput(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{
 			Type:    "message",
@@ -101,6 +106,7 @@ func TestResponsesToAnthropic_MessageInput(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_FunctionCallInput(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{Type: "message", Role: "user", Content: json.RawMessage(`"What's the weather?"`)},
 		{Type: "function_call", CallID: "call_123", Name: "get_weather", Arguments: `{"location":"SF"}`},
@@ -127,6 +133,7 @@ func TestResponsesToAnthropic_FunctionCallInput(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_Tools(t *testing.T) {
+	t.Parallel()
 	params := json.RawMessage(`{"type":"object","properties":{"location":{"type":"string"}}}`)
 	input, _ := json.Marshal("Hi")
 	req := &openai.ResponsesRequest{
@@ -145,6 +152,7 @@ func TestResponsesToAnthropic_Tools(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_UnsupportedToolTypeIsSkipped(t *testing.T) {
+	t.Parallel()
 	input, _ := json.Marshal("Hi")
 	req := &openai.ResponsesRequest{
 		Model: "test-model",
@@ -160,6 +168,7 @@ func TestResponsesToAnthropic_UnsupportedToolTypeIsSkipped(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_ToolChoice(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		toolChoice interface{}
@@ -200,6 +209,7 @@ func TestResponsesToAnthropic_ToolChoice(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_InputFileError(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{Type: "input_file", FileData: "base64data"},
 	}
@@ -215,6 +225,7 @@ func TestResponsesToAnthropic_InputFileError(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_InputAudioError(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{Type: "input_audio", Data: "base64audio", Format: "wav"},
 	}
@@ -230,6 +241,7 @@ func TestResponsesToAnthropic_InputAudioError(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_ReasoningEffort(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		effort       *string
@@ -308,6 +320,7 @@ func TestResponsesToAnthropic_ReasoningEffort(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_Streaming(t *testing.T) {
+	t.Parallel()
 	streaming := true
 	input, _ := json.Marshal("Hi")
 	req := &openai.ResponsesRequest{
@@ -322,6 +335,7 @@ func TestResponsesToAnthropic_Streaming(t *testing.T) {
 }
 
 func TestResponsesToAnthropic_Temperature(t *testing.T) {
+	t.Parallel()
 	temp := 0.7
 	topP := 0.9
 	input, _ := json.Marshal("Hi")
@@ -341,6 +355,7 @@ func TestResponsesToAnthropic_Temperature(t *testing.T) {
 }
 
 func TestAnthropicToResponsesResponse_TextOnly(t *testing.T) {
+	t.Parallel()
 	body := `{
 		"id": "msg_123",
 		"content": [{"type": "text", "text": "Hello!"}],
@@ -365,6 +380,7 @@ func TestAnthropicToResponsesResponse_TextOnly(t *testing.T) {
 }
 
 func TestAnthropicToResponsesResponse_ToolUse(t *testing.T) {
+	t.Parallel()
 	body := `{
 		"id": "msg_456",
 		"content": [
@@ -391,6 +407,7 @@ func TestAnthropicToResponsesResponse_ToolUse(t *testing.T) {
 }
 
 func TestAnthropicToResponsesResponse_CacheTokens(t *testing.T) {
+	t.Parallel()
 	body := `{
 		"id": "msg_789",
 		"content": [{"type": "text", "text": "Hi"}],
@@ -405,6 +422,7 @@ func TestAnthropicToResponsesResponse_CacheTokens(t *testing.T) {
 }
 
 func TestAnthropicToResponsesResponse_MaxTokens(t *testing.T) {
+	t.Parallel()
 	body := `{
 		"id": "msg_001",
 		"content": [{"type": "text", "text": "partial..."}],
@@ -417,6 +435,7 @@ func TestAnthropicToResponsesResponse_MaxTokens(t *testing.T) {
 }
 
 func TestAnthropicToResponsesResponse_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	resp := AnthropicToResponsesResponse([]byte("not json"), "test-model")
 	require.Equal(t, "failed", resp.Status)
 	require.NotNil(t, resp.Error)

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,6 +33,81 @@ import (
 	"github.com/seckatie/glitchgate/internal/store"
 )
 
+// --- Template DB (shared across all tests) ---
+
+var (
+	templateDBPath string
+	templateAPIKey string // plaintext proxy key baked into the template DB
+)
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "integration-template-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create template dir: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(dir)
+
+	dbPath := filepath.Join(dir, "template.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create template store: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := st.Migrate(context.Background()); err != nil {
+		_ = st.Close()
+		fmt.Fprintf(os.Stderr, "migrate template store: %v\n", err)
+		os.Exit(1)
+	}
+
+	plaintext, hash, prefix, err := auth.GenerateKey()
+	if err != nil {
+		_ = st.Close()
+		fmt.Fprintf(os.Stderr, "generate key: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := st.CreateProxyKey(context.Background(), "int-key", hash, prefix, "integration"); err != nil {
+		_ = st.Close()
+		fmt.Fprintf(os.Stderr, "create proxy key: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := st.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "close template store: %v\n", err)
+		os.Exit(1)
+	}
+
+	templateDBPath = dbPath
+	templateAPIKey = plaintext
+
+	os.Exit(m.Run())
+}
+
+func cloneTestDB(t *testing.T) *store.SQLiteStore {
+	t.Helper()
+
+	src, err := os.ReadFile(templateDBPath)
+	if err != nil {
+		t.Fatalf("read template DB: %v", err)
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	if err := os.WriteFile(dbPath, src, 0o600); err != nil {
+		t.Fatalf("write test DB: %v", err)
+	}
+
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("open test DB: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	return st
+}
+
 // integrationHarness wires up a full proxy server backed by a mock upstream.
 // It mirrors the setup in cmd/serve.go without the CLI layer.
 type integrationHarness struct {
@@ -50,17 +126,9 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 	upstream := httptest.NewServer(upstreamHandler)
 	t.Cleanup(upstream.Close)
 
-	// --- SQLite store + migrations ---
-	dbPath := filepath.Join(t.TempDir(), "integration.db")
-	st, err := store.NewSQLiteStore(dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = st.Close() })
-	require.NoError(t, st.Migrate(context.Background()))
-
-	// --- proxy API key ---
-	plaintext, hash, prefix, err := auth.GenerateKey()
-	require.NoError(t, err)
-	require.NoError(t, st.CreateProxyKey(context.Background(), "int-key", hash, prefix, "integration"))
+	// --- SQLite store (cloned from pre-migrated template) ---
+	st := cloneTestDB(t)
+	plaintext := templateAPIKey
 
 	// --- config & providers ---
 	cfg := &config.Config{

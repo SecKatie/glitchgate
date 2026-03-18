@@ -14,7 +14,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
@@ -46,21 +45,9 @@ func (h *responsesTestHarness) closeLogger() {
 func newResponsesTestHarness(t *testing.T, upstreamURL string) *responsesTestHarness {
 	t.Helper()
 
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	st, err := store.NewSQLiteStore(dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = st.Close() })
-
-	err = st.Migrate(context.Background())
-	require.NoError(t, err)
-
-	plaintext, hash, prefix, err := auth.GenerateKey()
-	require.NoError(t, err)
-
-	keyID := "test-resp-key-id"
-	err = st.CreateProxyKey(context.Background(), keyID, hash, prefix, "test-resp-key")
-	require.NoError(t, err)
+	st := cloneTestDB(t)
+	plaintext := templateKey.Plaintext
+	keyID := templateKey.ID
 
 	cfg := &config.Config{
 		MasterKey: "test-master-key",
@@ -459,20 +446,11 @@ func TestResponsesProxy_DuplicateToolNames(t *testing.T) {
 func newResponsesFallbackHarness(t *testing.T, primaryURL, secondaryURL string) *responsesTestHarness {
 	t.Helper()
 
+	st := cloneTestDB(t)
+	plaintext := templateKey.Plaintext
+	keyID := templateKey.ID
+
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	st, err := store.NewSQLiteStore(dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = st.Close() })
-
-	require.NoError(t, st.Migrate(context.Background()))
-
-	plaintext, hash, prefix, err := auth.GenerateKey()
-	require.NoError(t, err)
-
-	keyID := "test-resp-fallback-key-id"
-	require.NoError(t, st.CreateProxyKey(context.Background(), keyID, hash, prefix, "test-resp-fallback-key"))
-
 	cfgPath := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(cfgPath, []byte(fmt.Sprintf(`
 master_key: "test-master-key"

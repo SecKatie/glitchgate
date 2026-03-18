@@ -10,6 +10,7 @@ import (
 )
 
 func TestStreamRelayErrorDetailsSuppressesExpectedDisconnects(t *testing.T) {
+	t.Parallel()
 	cases := []error{
 		context.Canceled,
 		io.ErrClosedPipe,
@@ -25,6 +26,7 @@ func TestStreamRelayErrorDetailsSuppressesExpectedDisconnects(t *testing.T) {
 }
 
 func TestStreamRelayErrorDetailsReturnsUnexpectedFailures(t *testing.T) {
+	t.Parallel()
 	err := errors.New("unexpected EOF")
 
 	details := streamRelayErrorDetails(err)
