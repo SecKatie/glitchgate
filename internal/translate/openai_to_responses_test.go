@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,9 +15,9 @@ func float64Ptr(f float64) *float64 { return &f }
 func TestOpenAIToResponses(t *testing.T) {
 	tests := []struct {
 		name    string
-		req     *ChatCompletionRequest
+		req     *openai.ChatCompletionRequest
 		model   string
-		check   func(t *testing.T, resp *ResponsesRequest)
+		check   func(t *testing.T, resp *openai.ResponsesRequest)
 		wantErr bool
 	}{
 		{
@@ -27,17 +28,17 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "StringContent",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hello, world!"},
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Equal(t, "upstream-model", resp.Model)
 
-				var items []InputItem
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 1)
 				require.Equal(t, "message", items[0].Type)
@@ -50,19 +51,19 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "SystemMessage",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "system", Content: "You are helpful."},
 					{Role: "user", Content: "Hi"},
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Instructions)
 				require.Equal(t, "You are helpful.", *resp.Instructions)
 
-				var items []InputItem
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 1)
 				require.Equal(t, "user", items[0].Role)
@@ -70,31 +71,31 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "MaxTokens",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model:     "gpt-4",
 				MaxTokens: intPtr(256),
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.MaxOutputTokens)
 				require.Equal(t, 256, *resp.MaxOutputTokens)
 			},
 		},
 		{
 			name: "AssistantMessage",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 					{Role: "assistant", Content: "Hello there!"},
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
-				var items []InputItem
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 2)
 
@@ -108,17 +109,17 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "ToolCallsInAssistant",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "What is the weather?"},
 					{
 						Role: "assistant",
-						ToolCalls: []ToolCall{
+						ToolCalls: []openai.ToolCall{
 							{
 								ID:   "call_1",
 								Type: "function",
-								Function: FunctionCall{
+								Function: openai.FunctionCall{
 									Name:      "get_weather",
 									Arguments: `{"location":"NYC"}`,
 								},
@@ -126,7 +127,7 @@ func TestOpenAIToResponses(t *testing.T) {
 							{
 								ID:   "call_2",
 								Type: "function",
-								Function: FunctionCall{
+								Function: openai.FunctionCall{
 									Name:      "get_time",
 									Arguments: `{"tz":"EST"}`,
 								},
@@ -136,8 +137,8 @@ func TestOpenAIToResponses(t *testing.T) {
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
-				var items []InputItem
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 3) // 1 user + 2 function_calls
 
@@ -154,9 +155,9 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "ToolMessage",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Weather?"},
 					{
 						Role:       "tool",
@@ -166,8 +167,8 @@ func TestOpenAIToResponses(t *testing.T) {
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
-				var items []InputItem
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 2)
 
@@ -178,15 +179,15 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "Tools",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
-				Tools: []OpenAITool{
+				Tools: []openai.OpenAITool{
 					{
 						Type: "function",
-						Function: ToolFunction{
+						Function: openai.ToolFunction{
 							Name:        "get_weather",
 							Description: "Get current weather",
 							Parameters: map[string]interface{}{
@@ -202,7 +203,7 @@ func TestOpenAIToResponses(t *testing.T) {
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Len(t, resp.Tools, 1)
 				require.Equal(t, "function", resp.Tools[0].Type)
 				require.Equal(t, "get_weather", resp.Tools[0].Name)
@@ -216,23 +217,23 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "ToolChoiceString",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
 				ToolChoice: "auto",
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Equal(t, "auto", resp.ToolChoice)
 			},
 		},
 		{
 			name: "ToolChoiceFunction",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
 				ToolChoice: map[string]interface{}{
@@ -243,7 +244,7 @@ func TestOpenAIToResponses(t *testing.T) {
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				tc, ok := resp.ToolChoice.(map[string]interface{})
 				require.True(t, ok)
 				require.Equal(t, "function", tc["type"])
@@ -252,46 +253,46 @@ func TestOpenAIToResponses(t *testing.T) {
 		},
 		{
 			name: "StreamFlag",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model:  "gpt-4",
 				Stream: true,
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Stream)
 				require.True(t, *resp.Stream)
 			},
 		},
 		{
 			name: "Temperature",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model:       "gpt-4",
 				Temperature: float64Ptr(0.7),
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Temperature)
 				require.InDelta(t, 0.7, *resp.Temperature, 0.001)
 			},
 		},
 		{
 			name: "MultipleSystemMessages",
-			req: &ChatCompletionRequest{
+			req: &openai.ChatCompletionRequest{
 				Model: "gpt-4",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "system", Content: "You are helpful."},
 					{Role: "system", Content: "Be concise."},
 					{Role: "user", Content: "Hi"},
 				},
 			},
 			model: "upstream-model",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Instructions)
 				require.Equal(t, "You are helpful.\nBe concise.", *resp.Instructions)
 			},
@@ -315,18 +316,18 @@ func TestOpenAIToResponses(t *testing.T) {
 }
 
 func TestOpenAIToResponses_PreservesAssistantTextAlongsideToolCalls(t *testing.T) {
-	resp, err := OpenAIToResponses(&ChatCompletionRequest{
+	resp, err := OpenAIToResponses(&openai.ChatCompletionRequest{
 		Model: "gpt-4o",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{Role: "user", Content: "Compute this"},
 			{
 				Role:    "assistant",
 				Content: "I'll check that.",
-				ToolCalls: []ToolCall{
+				ToolCalls: []openai.ToolCall{
 					{
 						ID:   "call_1",
 						Type: "function",
-						Function: FunctionCall{
+						Function: openai.FunctionCall{
 							Name:      "lookup",
 							Arguments: `{"id":1}`,
 						},
@@ -337,7 +338,7 @@ func TestOpenAIToResponses_PreservesAssistantTextAlongsideToolCalls(t *testing.T
 	}, "upstream-model")
 	require.NoError(t, err)
 
-	var items []InputItem
+	var items []openai.InputItem
 	require.NoError(t, json.Unmarshal(resp.Input, &items))
 	require.Len(t, items, 3)
 

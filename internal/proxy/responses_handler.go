@@ -15,6 +15,7 @@ import (
 	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/translate"
 )
 
@@ -53,7 +54,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse the Responses API request.
-	var req translate.ResponsesRequest
+	var req openai.ResponsesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeResponsesError(w, http.StatusBadRequest, "invalid_request_error", "Invalid JSON in request body")
 		return
@@ -145,7 +146,7 @@ func (h *ResponsesHandler) routeBuilders(
 	w http.ResponseWriter,
 	r *http.Request,
 	body []byte,
-	req *translate.ResponsesRequest,
+	req *openai.ResponsesRequest,
 	isStreaming bool,
 ) map[string]routeBuilder {
 	return map[string]routeBuilder{
@@ -245,7 +246,7 @@ type responsesCacheDebugFields struct {
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention"`
 }
 
-func logResponsesCacheDebug(body []byte, req *translate.ResponsesRequest) {
+func logResponsesCacheDebug(body []byte, req *openai.ResponsesRequest) {
 	if !slog.Default().Enabled(context.Background(), slog.LevelDebug) {
 		return
 	}
@@ -487,7 +488,7 @@ func (h *ResponsesHandler) handleOpenAICCProviderStreaming(w http.ResponseWriter
 // and Gemini→Responses on response.
 func (h *ResponsesHandler) buildGeminiRoute(
 	w http.ResponseWriter, r *http.Request,
-	req *translate.ResponsesRequest, rawBody []byte, isStreaming bool,
+	req *openai.ResponsesRequest, rawBody []byte, isStreaming bool,
 	mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	gemReq, err := translate.ResponsesToGeminiRequest(req)
@@ -617,10 +618,10 @@ func (h *ResponsesHandler) handleGeminiForcedStreamToResponses(w http.ResponseWr
 func writeResponsesError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	resp := translate.ResponsesResponse{
+	resp := openai.ResponsesResponse{
 		Object: "response",
 		Status: "failed",
-		Error: &translate.ResponsesError{
+		Error: &openai.ResponsesError{
 			Code:    code,
 			Message: message,
 		},

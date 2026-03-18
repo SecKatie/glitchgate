@@ -5,6 +5,7 @@ package translate
 import (
 	"testing"
 
+	"github.com/seckatie/glitchgate/internal/provider/gemini"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,7 +56,7 @@ func TestSanitizeSchemaForGemini_RemovesAdditionalPropertiesRecursively(t *testi
 		},
 	}
 
-	sanitized, ok := sanitizeSchemaForGemini(schema).(map[string]any)
+	sanitized, ok := gemini.SanitizeSchemaForGemini(schema).(map[string]any)
 	require.True(t, ok)
 	assertNoAdditionalProperties(t, sanitized)
 }

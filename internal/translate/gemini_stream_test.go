@@ -9,13 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/seckatie/glitchgate/internal/provider/gemini"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGeminiUsageTotals(t *testing.T) {
 	t.Parallel()
 
-	input, output, cacheRead, reasoning := GeminiUsageTotals(&GeminiUsageMetadata{
+	input, output, cacheRead, reasoning := gemini.GeminiUsageTotals(&gemini.GeminiUsageMetadata{
 		PromptTokenCount:        42,
 		CachedContentTokenCount: 10,
 		CandidatesTokenCount:    17,

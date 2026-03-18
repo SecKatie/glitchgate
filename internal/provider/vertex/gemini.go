@@ -16,7 +16,7 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/provider"
-	"github.com/seckatie/glitchgate/internal/translate"
+	"github.com/seckatie/glitchgate/internal/provider/gemini"
 )
 
 // GeminiClient implements provider.Provider for Gemini models on Vertex AI
@@ -153,8 +153,8 @@ func (c *GeminiClient) SendRequest(ctx context.Context, req *provider.Request) (
 
 // extractGeminiTokens parses Gemini usageMetadata from a response body.
 func extractGeminiTokens(body []byte, resp *provider.Response) {
-	var gr translate.GeminiResponse
+	var gr gemini.GeminiResponse
 	if err := json.Unmarshal(body, &gr); err == nil && gr.UsageMetadata != nil {
-		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = translate.GeminiUsageTotals(gr.UsageMetadata)
+		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = gemini.GeminiUsageTotals(gr.UsageMetadata)
 	}
 }

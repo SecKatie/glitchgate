@@ -20,10 +20,9 @@ import (
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
-	openaiprov "github.com/seckatie/glitchgate/internal/provider/openai"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/proxy"
 	"github.com/seckatie/glitchgate/internal/store"
-	"github.com/seckatie/glitchgate/internal/translate"
 )
 
 // openAITestHarness bundles resources for OpenAI handler tests.
@@ -180,7 +179,7 @@ func TestOpenAIProxy_NonStreaming(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	var resp translate.ChatCompletionResponse
+	var resp openai.ChatCompletionResponse
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	require.Equal(t, "chat.completion", resp.Object)
@@ -329,7 +328,7 @@ func TestOpenAIProxy_SystemMessage(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	var resp translate.ChatCompletionResponse
+	var resp openai.ChatCompletionResponse
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	require.Equal(t, "I am helpful.", resp.Choices[0].Message.Content)
@@ -367,7 +366,7 @@ func TestOpenAIProxy_UnknownModel(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 
-	var errResp translate.OpenAIErrorResponse
+	var errResp openai.OpenAIErrorResponse
 	err := json.Unmarshal(rec.Body.Bytes(), &errResp)
 	require.NoError(t, err)
 	require.Contains(t, errResp.Error.Message, "Unknown model")
@@ -596,14 +595,14 @@ model_list:
 	var apiType string
 	switch primaryType {
 	case "openai_responses":
-		apiType = openaiprov.APITypeResponses
+		apiType = openai.APITypeResponses
 	default:
-		apiType = openaiprov.APITypeChatCompletions
+		apiType = openai.APITypeChatCompletions
 	}
 
 	providers := map[string]provider.Provider{}
 
-	primaryClient, err2 := openaiprov.NewClient("primary", primaryURL, "proxy_key", "key1", apiType)
+	primaryClient, err2 := openai.NewClient("primary", primaryURL, "proxy_key", "key1", apiType)
 	require.NoError(t, err2)
 	providers["primary"] = primaryClient
 

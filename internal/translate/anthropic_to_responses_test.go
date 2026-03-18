@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestAnthropicToResponses(t *testing.T) {
 		name    string
 		req     *anthropic.MessagesRequest
 		model   string
-		check   func(t *testing.T, resp *ResponsesRequest)
+		check   func(t *testing.T, resp *openai.ResponsesRequest)
 		wantErr bool
 	}{
 		{
@@ -36,10 +37,10 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Equal(t, "gpt-4o", resp.Model)
 
-				var items []InputItem
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 1)
 				require.Equal(t, "message", items[0].Type)
@@ -61,7 +62,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Instructions)
 				require.Equal(t, "You are a helpful assistant.", *resp.Instructions)
 			},
@@ -76,7 +77,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.MaxOutputTokens)
 				require.Equal(t, 2048, *resp.MaxOutputTokens)
 			},
@@ -97,8 +98,8 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
-				var items []InputItem
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 2)
 
@@ -128,8 +129,8 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
-				var items []InputItem
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 1)
 				require.Equal(t, "function_call", items[0].Type)
@@ -151,17 +152,17 @@ func TestAnthropicToResponses(t *testing.T) {
 						Role: "user",
 						Content: []anthropic.ContentBlock{
 							{
-								Type: "tool_result",
-								ID:   "call_123",
-								Text: "72°F and sunny",
+								Type:      "tool_result",
+								ToolUseID: "call_123",
+								Text:      "72°F and sunny",
 							},
 						},
 					},
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
-				var items []InputItem
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
+				var items []openai.InputItem
 				require.NoError(t, json.Unmarshal(resp.Input, &items))
 				require.Len(t, items, 1)
 				require.Equal(t, "function_call_output", items[0].Type)
@@ -191,7 +192,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Len(t, resp.Tools, 1)
 				require.Equal(t, "function", resp.Tools[0].Type)
 				require.Equal(t, "get_weather", resp.Tools[0].Name)
@@ -214,7 +215,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				ToolChoice: map[string]interface{}{"type": "auto"},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Equal(t, "auto", resp.ToolChoice)
 			},
 		},
@@ -229,7 +230,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				ToolChoice: map[string]interface{}{"type": "any"},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Equal(t, "required", resp.ToolChoice)
 			},
 		},
@@ -244,7 +245,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				ToolChoice: map[string]interface{}{"type": "tool", "name": "get_weather"},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				tc, ok := resp.ToolChoice.(map[string]interface{})
 				require.True(t, ok)
 				require.Equal(t, "function", tc["type"])
@@ -262,7 +263,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Stream)
 				require.True(t, *resp.Stream)
 			},
@@ -278,7 +279,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Temperature)
 				require.InDelta(t, 0.7, *resp.Temperature, 0.001)
 			},
@@ -297,7 +298,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Reasoning)
 				require.NotNil(t, resp.Reasoning.Effort)
 				require.Equal(t, "high", *resp.Reasoning.Effort)
@@ -319,7 +320,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Reasoning)
 				require.NotNil(t, resp.Reasoning.Effort)
 				require.Equal(t, "low", *resp.Reasoning.Effort)
@@ -339,7 +340,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.NotNil(t, resp.Reasoning)
 				require.NotNil(t, resp.Reasoning.Effort)
 				require.Equal(t, "medium", *resp.Reasoning.Effort)
@@ -355,7 +356,7 @@ func TestAnthropicToResponses(t *testing.T) {
 				},
 			},
 			model: "gpt-4o",
-			check: func(t *testing.T, resp *ResponsesRequest) {
+			check: func(t *testing.T, resp *openai.ResponsesRequest) {
 				require.Nil(t, resp.Reasoning)
 			},
 		},

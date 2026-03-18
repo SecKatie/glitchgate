@@ -9,13 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	anthropic "github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/gemini"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 )
 
 func TestEncodeGeminiToolCallIDRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	encoded := encodeGeminiToolCallID("call_123", "sig+/=")
-	baseID, thoughtSignature := decodeGeminiToolCallID(encoded)
+	encoded := gemini.EncodeGeminiToolCallID("call_123", "sig+/=")
+	baseID, thoughtSignature := gemini.DecodeGeminiToolCallID(encoded)
 
 	require.Equal(t, "call_123", baseID)
 	require.Equal(t, "sig+/=", thoughtSignature)
@@ -48,10 +50,10 @@ func TestOpenAIGeminiRoundTripPreservesThoughtSignature(t *testing.T) {
 	toolCall := ccResp.Choices[0].Message.ToolCalls[0]
 	require.NotEqual(t, "call_000000", toolCall.ID)
 
-	req := &ChatCompletionRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "gemini-2.5-pro",
-		Messages: []ChatMessage{
-			{Role: "assistant", ToolCalls: []ToolCall{toolCall}},
+		Messages: []openai.ChatMessage{
+			{Role: "assistant", ToolCalls: []openai.ToolCall{toolCall}},
 			{Role: "tool", ToolCallID: toolCall.ID, Content: `{"ok":true}`},
 		},
 	}
@@ -144,7 +146,7 @@ func TestResponsesGeminiRoundTripPreservesThoughtSignature(t *testing.T) {
 	respResp := GeminiToResponsesResponse(body, "gemini-2.5-pro")
 	require.Len(t, respResp.Output, 1)
 
-	input, err := json.Marshal([]InputItem{
+	input, err := json.Marshal([]openai.InputItem{
 		{
 			Type:      "function_call",
 			CallID:    respResp.Output[0].CallID,
@@ -159,7 +161,7 @@ func TestResponsesGeminiRoundTripPreservesThoughtSignature(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := &ResponsesRequest{
+	req := &openai.ResponsesRequest{
 		Model: "gemini-2.5-pro",
 		Input: input,
 	}

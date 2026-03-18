@@ -7,12 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 )
 
 func TestOpenAIToAnthropic_BasicMessage(t *testing.T) {
-	req := &ChatCompletionRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{Role: "user", Content: "Hello, Claude!"},
 		},
 		MaxTokens: intPtr(200),
@@ -32,13 +33,13 @@ func TestOpenAIToAnthropic_BasicMessage(t *testing.T) {
 func TestOpenAIToAnthropic_SystemExtraction(t *testing.T) {
 	tests := []struct {
 		name           string
-		messages       []ChatMessage
+		messages       []openai.ChatMessage
 		expectedSystem string
 		expectedCount  int // number of non-system messages
 	}{
 		{
 			name: "single system message",
-			messages: []ChatMessage{
+			messages: []openai.ChatMessage{
 				{Role: "system", Content: "You are a helpful assistant."},
 				{Role: "user", Content: "Hi"},
 			},
@@ -47,7 +48,7 @@ func TestOpenAIToAnthropic_SystemExtraction(t *testing.T) {
 		},
 		{
 			name: "multiple system messages concatenated",
-			messages: []ChatMessage{
+			messages: []openai.ChatMessage{
 				{Role: "system", Content: "You are a helpful assistant."},
 				{Role: "system", Content: "Be concise."},
 				{Role: "user", Content: "Hi"},
@@ -57,7 +58,7 @@ func TestOpenAIToAnthropic_SystemExtraction(t *testing.T) {
 		},
 		{
 			name: "no system message",
-			messages: []ChatMessage{
+			messages: []openai.ChatMessage{
 				{Role: "user", Content: "Hi"},
 			},
 			expectedSystem: "",
@@ -65,7 +66,7 @@ func TestOpenAIToAnthropic_SystemExtraction(t *testing.T) {
 		},
 		{
 			name: "system between user messages",
-			messages: []ChatMessage{
+			messages: []openai.ChatMessage{
 				{Role: "system", Content: "Be brief."},
 				{Role: "user", Content: "Hello"},
 				{Role: "assistant", Content: "Hi"},
@@ -78,7 +79,7 @@ func TestOpenAIToAnthropic_SystemExtraction(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := &ChatCompletionRequest{
+			req := &openai.ChatCompletionRequest{
 				Model:     "claude-sonnet-4-20250514",
 				Messages:  tc.messages,
 				MaxTokens: intPtr(100),
@@ -124,9 +125,9 @@ func TestOpenAIToAnthropic_DefaultMaxTokens(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := &ChatCompletionRequest{
+			req := &openai.ChatCompletionRequest{
 				Model: "claude-sonnet-4-20250514",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
 				MaxTokens: tc.maxTokens,
@@ -150,9 +151,9 @@ func TestOpenAIToAnthropic_OptionalParams(t *testing.T) {
 	temp := 0.7
 	topP := 0.9
 
-	req := &ChatCompletionRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{Role: "user", Content: "Hi"},
 		},
 		MaxTokens:   intPtr(100),
@@ -192,9 +193,9 @@ func TestOpenAIToAnthropic_StopSequences(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := &ChatCompletionRequest{
+			req := &openai.ChatCompletionRequest{
 				Model: "claude-sonnet-4-20250514",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Hi"},
 				},
 				Stop: tc.stop,
@@ -208,18 +209,18 @@ func TestOpenAIToAnthropic_StopSequences(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_ToolCallMessage(t *testing.T) {
-	req := &ChatCompletionRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{Role: "user", Content: "What is the weather?"},
 			{
 				Role:    "assistant",
 				Content: nil,
-				ToolCalls: []ToolCall{
+				ToolCalls: []openai.ToolCall{
 					{
 						ID:   "call_123",
 						Type: "function",
-						Function: FunctionCall{
+						Function: openai.FunctionCall{
 							Name:      "get_weather",
 							Arguments: `{"location":"NYC"}`,
 						},
@@ -465,7 +466,7 @@ func TestAnthropicErrorToOpenAI(t *testing.T) {
 			result, err := AnthropicErrorToOpenAI(tc.body)
 			require.NoError(t, err)
 
-			var oaiErr OpenAIErrorResponse
+			var oaiErr openai.OpenAIErrorResponse
 			err = json.Unmarshal(result, &oaiErr)
 			require.NoError(t, err)
 			require.Equal(t, tc.expectedType, oaiErr.Error.Type)
@@ -526,9 +527,9 @@ func TestOpenAIToAnthropic_ReasoningEffort(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := &ChatCompletionRequest{
+			req := &openai.ChatCompletionRequest{
 				Model: "claude-sonnet-4-20250514",
-				Messages: []ChatMessage{
+				Messages: []openai.ChatMessage{
 					{Role: "user", Content: "Think about this."},
 				},
 				MaxTokens:       tc.maxTokens,
@@ -551,33 +552,37 @@ func TestOpenAIToAnthropic_ReasoningEffort(t *testing.T) {
 
 func TestAnthropicToOpenAI_ThinkingBlocks(t *testing.T) {
 	tests := []struct {
-		name     string
-		content  []anthropic.ContentBlock
-		wantText string
+		name          string
+		content       []anthropic.ContentBlock
+		wantText      string
+		wantReasoning string
 	}{
 		{
-			name: "thinking block excluded from text",
+			name: "thinking block mapped to reasoning_content",
 			content: []anthropic.ContentBlock{
 				{Type: "thinking", Thinking: "Let me reason about this carefully step by step..."},
 				{Type: "text", Text: "The answer is 42."},
 			},
-			wantText: "The answer is 42.",
+			wantText:      "The answer is 42.",
+			wantReasoning: "Let me reason about this carefully step by step...",
 		},
 		{
 			name: "no thinking blocks",
 			content: []anthropic.ContentBlock{
 				{Type: "text", Text: "Simple answer."},
 			},
-			wantText: "Simple answer.",
+			wantText:      "Simple answer.",
+			wantReasoning: "",
 		},
 		{
-			name: "multiple thinking blocks",
+			name: "multiple thinking blocks concatenated",
 			content: []anthropic.ContentBlock{
 				{Type: "thinking", Thinking: "First I need to consider..."},
 				{Type: "thinking", Thinking: "Then I should also think about..."},
 				{Type: "text", Text: "Here is my response."},
 			},
-			wantText: "Here is my response.",
+			wantText:      "Here is my response.",
+			wantReasoning: "First I need to consider...\n\nThen I should also think about...",
 		},
 	}
 
@@ -600,6 +605,7 @@ func TestAnthropicToOpenAI_ThinkingBlocks(t *testing.T) {
 			require.NotNil(t, result)
 			require.Len(t, result.Choices, 1)
 			require.Equal(t, tc.wantText, result.Choices[0].Message.Content)
+			require.Equal(t, tc.wantReasoning, result.Choices[0].Message.ReasoningContent)
 			require.Nil(t, result.Usage.CompletionTokensDetails)
 		})
 	}
@@ -684,7 +690,7 @@ func TestAnthropicToOpenAIRequest_ToolResultBlocks(t *testing.T) {
 			require.NotNil(t, result)
 
 			// Find the tool message in the output.
-			var toolMsg *ChatMessage
+			var toolMsg *openai.ChatMessage
 			for i := range result.Messages {
 				if result.Messages[i].Role == "tool" {
 					toolMsg = &result.Messages[i]
@@ -724,7 +730,7 @@ func TestAnthropicToOpenAIRequest_AssistantToolUse(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Last message should be assistant with tool_calls.
-	var assistantMsg *ChatMessage
+	var assistantMsg *openai.ChatMessage
 	for i := range result.Messages {
 		if result.Messages[i].Role == "assistant" {
 			assistantMsg = &result.Messages[i]
@@ -788,9 +794,9 @@ func strPtr(s string) *string { return &s }
 func intPtr(i int) *int { return &i }
 
 func TestOpenAIToAnthropic_ImageURL(t *testing.T) {
-	req := &ChatCompletionRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{
 				Role: "user",
 				Content: []interface{}{
@@ -820,9 +826,9 @@ func TestOpenAIToAnthropic_ImageURL(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_ImageURLExternal(t *testing.T) {
-	req := &ChatCompletionRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{
 				Role: "user",
 				Content: []interface{}{
@@ -851,9 +857,9 @@ func TestOpenAIToAnthropic_ImageURLExternal(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_MixedTextAndImage(t *testing.T) {
-	req := &ChatCompletionRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
-		Messages: []ChatMessage{
+		Messages: []openai.ChatMessage{
 			{
 				Role: "user",
 				Content: []interface{}{
@@ -910,8 +916,8 @@ func TestAnthropicToOpenAIRequest_ImageBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Messages, 1)
 
-	parts, ok := result.Messages[0].Content.([]ContentPart)
-	require.True(t, ok, "expected []ContentPart")
+	parts, ok := result.Messages[0].Content.([]openai.ContentPart)
+	require.True(t, ok, "expected []openai.ContentPart")
 	require.Len(t, parts, 1)
 	require.Equal(t, "image_url", parts[0].Type)
 	require.NotNil(t, parts[0].ImageURL)
@@ -944,8 +950,8 @@ func TestAnthropicToOpenAIRequest_ImageBlockURL(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Messages, 1)
 
-	parts, ok := result.Messages[0].Content.([]ContentPart)
-	require.True(t, ok, "expected []ContentPart")
+	parts, ok := result.Messages[0].Content.([]openai.ContentPart)
+	require.True(t, ok, "expected []openai.ContentPart")
 	require.Len(t, parts, 1)
 	require.Equal(t, "image_url", parts[0].Type)
 	require.NotNil(t, parts[0].ImageURL)
@@ -955,7 +961,7 @@ func TestAnthropicToOpenAIRequest_ImageBlockURL(t *testing.T) {
 func TestAnthropicToOpenAIRequest_ThinkingBlocksPreserved(t *testing.T) {
 	// When an Anthropic client sends a multi-turn conversation that includes
 	// a previous assistant response with thinking blocks, the thinking content
-	// must be preserved as reasoning_content on the OpenAI ChatMessage.
+	// must be preserved as reasoning_content on the OpenAI openai.ChatMessage.
 	req := &anthropic.MessagesRequest{
 		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 1024,
@@ -977,7 +983,7 @@ func TestAnthropicToOpenAIRequest_ThinkingBlocksPreserved(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Find the assistant message.
-	var assistantMsg *ChatMessage
+	var assistantMsg *openai.ChatMessage
 	for i := range result.Messages {
 		if result.Messages[i].Role == "assistant" {
 			assistantMsg = &result.Messages[i]
@@ -1017,8 +1023,8 @@ func TestAnthropicToOpenAIRequest_MixedTextAndImage(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Messages, 1)
 
-	parts, ok := result.Messages[0].Content.([]ContentPart)
-	require.True(t, ok, "expected []ContentPart")
+	parts, ok := result.Messages[0].Content.([]openai.ContentPart)
+	require.True(t, ok, "expected []openai.ContentPart")
 	require.Len(t, parts, 2)
 	require.Equal(t, "text", parts[0].Type)
 	require.Equal(t, "Look at this:", parts[0].Text)

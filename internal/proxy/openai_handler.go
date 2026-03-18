@@ -13,6 +13,7 @@ import (
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 	anthropic "github.com/seckatie/glitchgate/internal/provider/anthropic"
+	"github.com/seckatie/glitchgate/internal/provider/openai"
 	"github.com/seckatie/glitchgate/internal/translate"
 )
 
@@ -54,7 +55,7 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse the OpenAI request.
-	var oaiReq translate.ChatCompletionRequest
+	var oaiReq openai.ChatCompletionRequest
 	if err := json.Unmarshal(body, &oaiReq); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "Invalid JSON in request body")
 		return
@@ -173,7 +174,7 @@ func (h *OpenAIHandler) handleOpenAIStreaming(w http.ResponseWriter, resp *provi
 	return streamingResult(resp, result, err)
 }
 
-func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oaiReq *translate.ChatCompletionRequest, rawBody []byte) map[string]routeBuilder {
+func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oaiReq *openai.ChatCompletionRequest, rawBody []byte) map[string]routeBuilder {
 	return map[string]routeBuilder{
 		"anthropic": func(attempt chainAttempt) (*routePlan, bool) {
 			mapping := attempt.Mapping
@@ -222,7 +223,7 @@ func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oa
 // buildOpenAINativeRoute handles requests to OpenAI-native providers
 // without translating through Anthropic format.
 func (h *OpenAIHandler) buildOpenAINativeRoute(w http.ResponseWriter, r *http.Request,
-	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
+	oaiReq *openai.ChatCompletionRequest, rawBody []byte,
 	mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	// Replace model name in the raw JSON body to preserve all original fields.
@@ -303,7 +304,7 @@ func (h *OpenAIHandler) handleOpenAINativeStreaming(ctx context.Context, w http.
 // buildResponsesRoute handles CC requests that need to be sent to a Responses
 // API upstream. Translates CC→Responses on request and Responses→CC on response.
 func (h *OpenAIHandler) buildResponsesRoute(w http.ResponseWriter, r *http.Request,
-	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
+	oaiReq *openai.ChatCompletionRequest, rawBody []byte,
 	mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	// Translate CC to Responses API format.
@@ -383,7 +384,7 @@ func (h *OpenAIHandler) handleResponsesProviderStreamingToCC(w http.ResponseWrit
 // buildGeminiRoute handles CC requests that need to be sent to a native Gemini
 // (Vertex AI) provider. Translates CC→Gemini on request and Gemini→CC on response.
 func (h *OpenAIHandler) buildGeminiRoute(w http.ResponseWriter, r *http.Request,
-	oaiReq *translate.ChatCompletionRequest, rawBody []byte,
+	oaiReq *openai.ChatCompletionRequest, rawBody []byte,
 	mapping *config.DispatchTarget,
 ) (*routePlan, bool) {
 	oaiReqCopy := *oaiReq
@@ -515,8 +516,8 @@ func (h *OpenAIHandler) handleGeminiForcedStreamToCC(w http.ResponseWriter, resp
 func writeOpenAIError(w http.ResponseWriter, status int, errType, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(translate.OpenAIErrorResponse{
-		Error: translate.OpenAIError{
+	if err := json.NewEncoder(w).Encode(openai.OpenAIErrorResponse{
+		Error: openai.OpenAIError{
 			Message: message,
 			Type:    errType,
 		},
