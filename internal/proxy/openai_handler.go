@@ -201,6 +201,9 @@ func (h *OpenAIHandler) routeBuilders(w http.ResponseWriter, r *http.Request, oa
 				},
 				RequestBody: rawBody,
 				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if provResp.StatusCode >= 400 {
+						return h.handleOpenAINonStreaming(w, provResp, oaiReq.Model)
+					}
 					if oaiReq.Stream {
 						return h.handleOpenAIStreaming(w, provResp, oaiReq.Model)
 					}
@@ -253,6 +256,9 @@ func (h *OpenAIHandler) buildOpenAINativeRoute(w http.ResponseWriter, r *http.Re
 		},
 		RequestBody: rawBody,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			if provResp.StatusCode >= 400 {
+				return h.handleOpenAINativeNonStreaming(w, provResp)
+			}
 			if oaiReq.Stream {
 				return h.handleOpenAINativeStreaming(r.Context(), w, provResp)
 			}
@@ -331,6 +337,9 @@ func (h *OpenAIHandler) buildResponsesRoute(w http.ResponseWriter, r *http.Reque
 		},
 		RequestBody: rawBody,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			if provResp.StatusCode >= 400 {
+				return h.handleResponsesProviderNonStreamingToCC(w, provResp, oaiReq.Model)
+			}
 			if oaiReq.Stream {
 				return h.handleResponsesProviderStreamingToCC(w, r, provResp, oaiReq.Model)
 			}
@@ -415,6 +424,9 @@ func (h *OpenAIHandler) buildGeminiRoute(w http.ResponseWriter, r *http.Request,
 		},
 		RequestBody: rawBody,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			if provResp.StatusCode >= 400 {
+				return h.handleGeminiNonStreamingToCC(w, provResp, oaiReq.Model)
+			}
 			switch {
 			case oaiReq.Stream && forceNonStream:
 				return h.handleGeminiForcedStreamToCC(w, provResp, oaiReq.Model)

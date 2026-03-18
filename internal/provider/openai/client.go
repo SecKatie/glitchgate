@@ -128,7 +128,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		Headers:    resp.Header,
 	}
 
-	if req.IsStreaming {
+	if req.IsStreaming && resp.StatusCode < http.StatusBadRequest {
 		provResp.Stream = resp.Body
 		return provResp, nil
 	}
