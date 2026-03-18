@@ -15,7 +15,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
@@ -49,22 +48,9 @@ func (h *testHarness) closeLogger() {
 func newTestHarness(t *testing.T, upstreamURL string) *testHarness {
 	t.Helper()
 
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	st, err := store.NewSQLiteStore(dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = st.Close() })
-
-	err = st.Migrate(context.Background())
-	require.NoError(t, err)
-
-	// Generate and store a proxy key.
-	plaintext, hash, prefix, err := auth.GenerateKey()
-	require.NoError(t, err)
-
-	keyID := "test-key-id"
-	err = st.CreateProxyKey(context.Background(), keyID, hash, prefix, "test-key")
-	require.NoError(t, err)
+	st := cloneTestDB(t)
+	plaintext := templateKey.Plaintext
+	keyID := templateKey.ID
 
 	cfg := &config.Config{
 		MasterKey: "test-master-key",
@@ -662,17 +648,8 @@ func anthropicSuccessResponse() map[string]interface{} {
 // setupFallbackStore creates a minimal store for fallback tests.
 func setupFallbackStore(t *testing.T) (*store.SQLiteStore, string) {
 	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "fbt.db")
-	st, err := store.NewSQLiteStore(dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = st.Close() })
-	require.NoError(t, st.Migrate(context.Background()))
-
-	_, hash, prefix, err := auth.GenerateKey()
-	require.NoError(t, err)
-	require.NoError(t, st.CreateProxyKey(context.Background(), "fbt-id", hash, prefix, "fbt"))
-	return st, prefix
+	st := cloneTestDB(t)
+	return st, templateKey.Prefix
 }
 
 // buildVirtualFallbackHandler builds a handler with a two-entry virtual model "virtual".

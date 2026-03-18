@@ -11,6 +11,8 @@ import (
 )
 
 func TestOpenAIToAnthropic_BasicMessage(t *testing.T) {
+	t.Parallel()
+
 	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
 		Messages: []openai.ChatMessage{
@@ -31,6 +33,8 @@ func TestOpenAIToAnthropic_BasicMessage(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_SystemExtraction(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		messages       []openai.ChatMessage
@@ -101,6 +105,8 @@ func TestOpenAIToAnthropic_SystemExtraction(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_DefaultMaxTokens(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name              string
 		maxTokens         *int
@@ -141,6 +147,7 @@ func TestOpenAIToAnthropic_DefaultMaxTokens(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_NilRequest(t *testing.T) {
+	t.Parallel()
 	result, err := OpenAIToAnthropic(nil)
 	require.Error(t, err)
 	require.Nil(t, result)
@@ -148,6 +155,8 @@ func TestOpenAIToAnthropic_NilRequest(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_OptionalParams(t *testing.T) {
+	t.Parallel()
+
 	temp := 0.7
 	topP := 0.9
 
@@ -174,6 +183,7 @@ func TestOpenAIToAnthropic_OptionalParams(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_StopSequences(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		stop     interface{}
@@ -209,6 +219,7 @@ func TestOpenAIToAnthropic_StopSequences(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_ToolCallMessage(t *testing.T) {
+	t.Parallel()
 	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
 		Messages: []openai.ChatMessage{
@@ -243,6 +254,7 @@ func TestOpenAIToAnthropic_ToolCallMessage(t *testing.T) {
 }
 
 func TestAnthropicToOpenAI_StopReasons(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                 string
 		anthropicStopReason  *string
@@ -312,6 +324,7 @@ func TestAnthropicToOpenAI_StopReasons(t *testing.T) {
 }
 
 func TestAnthropicToOpenAI_Usage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                     string
 		inputTokens              int64
@@ -372,6 +385,7 @@ func TestAnthropicToOpenAI_Usage(t *testing.T) {
 }
 
 func TestAnthropicToOpenAI_ResponseStructure(t *testing.T) {
+	t.Parallel()
 	anthResp := &anthropic.MessagesResponse{
 		ID:   "msg_struct_test",
 		Type: "message",
@@ -402,6 +416,7 @@ func TestAnthropicToOpenAI_ResponseStructure(t *testing.T) {
 }
 
 func TestAnthropicToOpenAI_ToolUse(t *testing.T) {
+	t.Parallel()
 	anthResp := &anthropic.MessagesResponse{
 		ID:   "msg_tool_test",
 		Type: "message",
@@ -435,6 +450,7 @@ func TestAnthropicToOpenAI_ToolUse(t *testing.T) {
 }
 
 func TestAnthropicErrorToOpenAI(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		body         []byte
@@ -476,6 +492,7 @@ func TestAnthropicErrorToOpenAI(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_ReasoningEffort(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		effort       *string
@@ -551,6 +568,7 @@ func TestOpenAIToAnthropic_ReasoningEffort(t *testing.T) {
 }
 
 func TestAnthropicToOpenAI_ThinkingBlocks(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		content       []anthropic.ContentBlock
@@ -612,6 +630,7 @@ func TestAnthropicToOpenAI_ThinkingBlocks(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_ToolResultBlocks(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		userBlocks      []anthropic.ContentBlock
@@ -705,6 +724,7 @@ func TestAnthropicToOpenAIRequest_ToolResultBlocks(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_AssistantToolUse(t *testing.T) {
+	t.Parallel()
 	req := &anthropic.MessagesRequest{
 		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 1024,
@@ -746,6 +766,7 @@ func TestAnthropicToOpenAIRequest_AssistantToolUse(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_SystemMessage(t *testing.T) {
+	t.Parallel()
 	req := &anthropic.MessagesRequest{
 		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 1024,
@@ -764,6 +785,7 @@ func TestAnthropicToOpenAIRequest_SystemMessage(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_SystemDropsBillingHeader(t *testing.T) {
+	t.Parallel()
 	systemBlocks := []interface{}{
 		map[string]interface{}{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.77; cch=abc123;"},
 		map[string]interface{}{"type": "text", "text": "You are a helpful assistant."},
@@ -794,6 +816,7 @@ func strPtr(s string) *string { return &s }
 func intPtr(i int) *int { return &i }
 
 func TestOpenAIToAnthropic_ImageURL(t *testing.T) {
+	t.Parallel()
 	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
 		Messages: []openai.ChatMessage{
@@ -826,6 +849,7 @@ func TestOpenAIToAnthropic_ImageURL(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_ImageURLExternal(t *testing.T) {
+	t.Parallel()
 	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
 		Messages: []openai.ChatMessage{
@@ -857,6 +881,7 @@ func TestOpenAIToAnthropic_ImageURLExternal(t *testing.T) {
 }
 
 func TestOpenAIToAnthropic_MixedTextAndImage(t *testing.T) {
+	t.Parallel()
 	req := &openai.ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
 		Messages: []openai.ChatMessage{
@@ -890,6 +915,7 @@ func TestOpenAIToAnthropic_MixedTextAndImage(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_ImageBlock(t *testing.T) {
+	t.Parallel()
 	userBlocks := []anthropic.ContentBlock{
 		{
 			Type: "image",
@@ -925,6 +951,7 @@ func TestAnthropicToOpenAIRequest_ImageBlock(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_ImageBlockURL(t *testing.T) {
+	t.Parallel()
 	userBlocks := []anthropic.ContentBlock{
 		{
 			Type: "image",
@@ -959,6 +986,7 @@ func TestAnthropicToOpenAIRequest_ImageBlockURL(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_ThinkingBlocksPreserved(t *testing.T) {
+	t.Parallel()
 	// When an Anthropic client sends a multi-turn conversation that includes
 	// a previous assistant response with thinking blocks, the thinking content
 	// must be preserved as reasoning_content on the OpenAI openai.ChatMessage.
@@ -997,6 +1025,7 @@ func TestAnthropicToOpenAIRequest_ThinkingBlocksPreserved(t *testing.T) {
 }
 
 func TestAnthropicToOpenAIRequest_MixedTextAndImage(t *testing.T) {
+	t.Parallel()
 	userBlocks := []anthropic.ContentBlock{
 		{Type: "text", Text: "Look at this:"},
 		{
@@ -1031,4 +1060,254 @@ func TestAnthropicToOpenAIRequest_MixedTextAndImage(t *testing.T) {
 	require.Equal(t, "image_url", parts[1].Type)
 	require.NotNil(t, parts[1].ImageURL)
 	require.Equal(t, "https://example.com/img.jpg", parts[1].ImageURL.URL)
+}
+
+// ---------------------------------------------------------------------------
+// Prefix-stability tests for prompt caching
+// ---------------------------------------------------------------------------
+//
+// Anthropic prompt caching matches on byte-identical prefixes. If the proxy
+// translates turn N and then turn N+1, the first K bytes (covering the
+// shared prefix) must be identical.
+
+func TestPrefixStability_OpenAIToAnthropic(t *testing.T) {
+	t.Parallel()
+
+	base := &openai.ChatCompletionRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: intPtr(4096),
+		Messages: []openai.ChatMessage{
+			{Role: "system", Content: "You are a helpful assistant."},
+			{Role: "user", Content: "What's the capital of France?"},
+			{Role: "assistant", Content: "The capital of France is Paris."},
+		},
+	}
+
+	extended := &openai.ChatCompletionRequest{
+		Model:     base.Model,
+		MaxTokens: base.MaxTokens,
+		Messages: append(
+			append([]openai.ChatMessage{}, base.Messages...),
+			openai.ChatMessage{Role: "user", Content: "And Germany?"},
+		),
+	}
+
+	baseAnth, err := OpenAIToAnthropic(base)
+	require.NoError(t, err)
+	extAnth, err := OpenAIToAnthropic(extended)
+	require.NoError(t, err)
+
+	baseJSON, err := json.Marshal(baseAnth)
+	require.NoError(t, err)
+	extJSON, err := json.Marshal(extAnth)
+	require.NoError(t, err)
+
+	// The extended request must start with the same bytes as the base request
+	// up to the point where the new message begins. Find the last ']' in
+	// baseJSON (closing the messages array) — everything before it must match.
+	assertJSONPrefixStable(t, baseJSON, extJSON, "OpenAI→Anthropic")
+}
+
+func TestPrefixStability_AnthropicToOpenAI(t *testing.T) {
+	t.Parallel()
+
+	baseBlocks := []anthropic.ContentBlock{
+		{Type: "text", Text: "What's the capital of France?"},
+	}
+	contentJSON, _ := json.Marshal(baseBlocks)
+	var contentRaw interface{}
+	_ = json.Unmarshal(contentJSON, &contentRaw)
+
+	base := &anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 4096,
+		System:    "You are a helpful assistant.",
+		Messages: []anthropic.Message{
+			{Role: "user", Content: contentRaw},
+			{Role: "assistant", Content: "The capital of France is Paris."},
+		},
+	}
+
+	extBlocks := []anthropic.ContentBlock{
+		{Type: "text", Text: "And Germany?"},
+	}
+	extContentJSON, _ := json.Marshal(extBlocks)
+	var extContentRaw interface{}
+	_ = json.Unmarshal(extContentJSON, &extContentRaw)
+
+	extended := &anthropic.MessagesRequest{
+		Model:     base.Model,
+		MaxTokens: base.MaxTokens,
+		System:    base.System,
+		Messages: append(
+			append([]anthropic.Message{}, base.Messages...),
+			anthropic.Message{Role: "user", Content: extContentRaw},
+		),
+	}
+
+	baseOAI, err := AnthropicToOpenAIRequest(base)
+	require.NoError(t, err)
+	extOAI, err := AnthropicToOpenAIRequest(extended)
+	require.NoError(t, err)
+
+	baseJSON, err := json.Marshal(baseOAI)
+	require.NoError(t, err)
+	extJSON, err := json.Marshal(extOAI)
+	require.NoError(t, err)
+
+	assertJSONPrefixStable(t, baseJSON, extJSON, "Anthropic→OpenAI")
+}
+
+func TestPrefixStability_WithToolCalls(t *testing.T) {
+	t.Parallel()
+
+	base := &openai.ChatCompletionRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: intPtr(4096),
+		Tools: []openai.OpenAITool{
+			{
+				Type: "function",
+				Function: openai.ToolFunction{
+					Name:        "get_weather",
+					Description: "Get current weather",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"location": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+		},
+		Messages: []openai.ChatMessage{
+			{Role: "user", Content: "What's the weather in Paris?"},
+			{
+				Role:    "assistant",
+				Content: "",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_abc123",
+						Type: "function",
+						Function: openai.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"location":"Paris"}`,
+						},
+					},
+				},
+			},
+			{Role: "tool", Content: `{"temp": 22, "conditions": "sunny"}`, ToolCallID: "call_abc123"},
+			{Role: "assistant", Content: "The weather in Paris is 22°C and sunny."},
+		},
+	}
+
+	extended := &openai.ChatCompletionRequest{
+		Model:     base.Model,
+		MaxTokens: base.MaxTokens,
+		Tools:     base.Tools,
+		Messages: append(
+			append([]openai.ChatMessage{}, base.Messages...),
+			openai.ChatMessage{Role: "user", Content: "What about London?"},
+		),
+	}
+
+	baseAnth, err := OpenAIToAnthropic(base)
+	require.NoError(t, err)
+	extAnth, err := OpenAIToAnthropic(extended)
+	require.NoError(t, err)
+
+	baseJSON, err := json.Marshal(baseAnth)
+	require.NoError(t, err)
+	extJSON, err := json.Marshal(extAnth)
+	require.NoError(t, err)
+
+	assertJSONPrefixStable(t, baseJSON, extJSON, "OpenAI→Anthropic with tool calls")
+}
+
+func TestPrefixStability_BillingHeaderStripped(t *testing.T) {
+	t.Parallel()
+
+	// Two consecutive requests with different billing header hashes
+	// must produce the same translated prefix.
+	mkReq := func(billingHash string) *anthropic.MessagesRequest {
+		system := []interface{}{
+			map[string]interface{}{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.77; cch=" + billingHash + ";"},
+			map[string]interface{}{"type": "text", "text": "You are a helpful assistant."},
+		}
+		return &anthropic.MessagesRequest{
+			Model:     "claude-sonnet-4-20250514",
+			MaxTokens: 4096,
+			System:    system,
+			Messages: []anthropic.Message{
+				{Role: "user", Content: "Hello"},
+			},
+		}
+	}
+
+	reqA, err := AnthropicToOpenAIRequest(mkReq("hash_turn_1"))
+	require.NoError(t, err)
+	reqB, err := AnthropicToOpenAIRequest(mkReq("hash_turn_2"))
+	require.NoError(t, err)
+
+	jsonA, err := json.Marshal(reqA)
+	require.NoError(t, err)
+	jsonB, err := json.Marshal(reqB)
+	require.NoError(t, err)
+
+	require.Equal(t, string(jsonA), string(jsonB),
+		"different billing header hashes must produce identical translated output")
+}
+
+// assertJSONPrefixStable verifies that extJSON starts with the same bytes as
+// baseJSON up to the last structural boundary (closing of the messages array).
+// This ensures that appending a new turn doesn't change any earlier bytes.
+func assertJSONPrefixStable(t *testing.T, baseJSON, extJSON []byte, label string) {
+	t.Helper()
+
+	// Find the last '}' in baseJSON that closes a message object before the
+	// messages array is closed. We compare everything up to that point.
+	// Strategy: find the byte where they first diverge.
+	minLen := len(baseJSON)
+	if len(extJSON) < minLen {
+		minLen = len(extJSON)
+	}
+
+	divergeAt := -1
+	for i := 0; i < minLen; i++ {
+		if baseJSON[i] != extJSON[i] {
+			divergeAt = i
+			break
+		}
+	}
+
+	if divergeAt == -1 {
+		// base is a prefix of ext (or identical) — that's fine
+		return
+	}
+
+	// The divergence must occur at or after the closing of the last message
+	// in the base request. We expect the divergence to be at the ']' that
+	// closes the messages array (where ext has ',' to continue with another message).
+	// Allow divergence at ']' vs ',' — this is expected.
+	if baseJSON[divergeAt] == ']' && extJSON[divergeAt] == ',' {
+		return // expected: base closes array, ext continues with next message
+	}
+
+	// Unexpected divergence — show context.
+	start := divergeAt - 100
+	if start < 0 {
+		start = 0
+	}
+	end := divergeAt + 100
+	if end > len(baseJSON) {
+		end = len(baseJSON)
+	}
+	endExt := divergeAt + 100
+	if endExt > len(extJSON) {
+		endExt = len(extJSON)
+	}
+
+	t.Errorf("%s: prefix diverged at byte %d (of %d):\n  base[%d:%d]: %s\n  ext[%d:%d]:  %s",
+		label, divergeAt, len(baseJSON),
+		start, end, string(baseJSON[start:end]),
+		start, endExt, string(extJSON[start:endExt]))
 }

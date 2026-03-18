@@ -11,12 +11,14 @@ import (
 )
 
 func TestResponsesToOpenAI_NilRequest(t *testing.T) {
+	t.Parallel()
 	_, err := ResponsesToOpenAI(nil, "gpt-4o")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must not be nil")
 }
 
 func TestResponsesToOpenAI_StringInput(t *testing.T) {
+	t.Parallel()
 	input, _ := json.Marshal("Hello!")
 	req := &openai.ResponsesRequest{
 		Model: "test-model",
@@ -32,6 +34,7 @@ func TestResponsesToOpenAI_StringInput(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_Instructions(t *testing.T) {
+	t.Parallel()
 	input, _ := json.Marshal("Hi")
 	instructions := "You are a helpful assistant."
 	req := &openai.ResponsesRequest{
@@ -50,6 +53,7 @@ func TestResponsesToOpenAI_Instructions(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_MaxTokens(t *testing.T) {
+	t.Parallel()
 	input, _ := json.Marshal("Hi")
 	maxTokens := 500
 	req := &openai.ResponsesRequest{
@@ -65,6 +69,7 @@ func TestResponsesToOpenAI_MaxTokens(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_MessageInput(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{
 			Type:    "message",
@@ -85,6 +90,7 @@ func TestResponsesToOpenAI_MessageInput(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_FunctionCallInput(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{Type: "message", Role: "user", Content: json.RawMessage(`"What's the weather?"`)},
 		{Type: "function_call", CallID: "call_123", Name: "get_weather", Arguments: `{"location":"SF"}`},
@@ -115,6 +121,7 @@ func TestResponsesToOpenAI_FunctionCallInput(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_Tools(t *testing.T) {
+	t.Parallel()
 	params := json.RawMessage(`{"type":"object","properties":{"location":{"type":"string"}}}`)
 	input, _ := json.Marshal("Hi")
 	req := &openai.ResponsesRequest{
@@ -134,6 +141,7 @@ func TestResponsesToOpenAI_Tools(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_UnsupportedToolType(t *testing.T) {
+	t.Parallel()
 	input, _ := json.Marshal("Hi")
 	req := &openai.ResponsesRequest{
 		Model: "test-model",
@@ -149,6 +157,7 @@ func TestResponsesToOpenAI_UnsupportedToolType(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_ToolChoice(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		toolChoice interface{}
@@ -189,6 +198,7 @@ func TestResponsesToOpenAI_ToolChoice(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_Streaming(t *testing.T) {
+	t.Parallel()
 	streaming := true
 	input, _ := json.Marshal("Hi")
 	req := &openai.ResponsesRequest{
@@ -205,6 +215,7 @@ func TestResponsesToOpenAI_Streaming(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_InputFileError(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{Type: "input_file", FileData: "base64data"},
 	}
@@ -220,6 +231,7 @@ func TestResponsesToOpenAI_InputFileError(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_InputAudioPassthrough(t *testing.T) {
+	t.Parallel()
 	items := []openai.InputItem{
 		{Type: "input_audio", Data: "base64audio", Format: "wav"},
 	}
@@ -237,6 +249,7 @@ func TestResponsesToOpenAI_InputAudioPassthrough(t *testing.T) {
 }
 
 func TestResponsesToOpenAI_Temperature(t *testing.T) {
+	t.Parallel()
 	temp := 0.7
 	topP := 0.9
 	input, _ := json.Marshal("Hi")

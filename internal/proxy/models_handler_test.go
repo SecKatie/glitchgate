@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/proxy"
@@ -38,21 +36,9 @@ func (h *modelsTestHarness) closeLogger() {
 func newModelsTestHarness(t *testing.T) *modelsTestHarness {
 	t.Helper()
 
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	st, err := store.NewSQLiteStore(dbPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = st.Close() })
-
-	err = st.Migrate(context.Background())
-	require.NoError(t, err)
-
-	plaintext, hash, prefix, err := auth.GenerateKey()
-	require.NoError(t, err)
-
-	keyID := "test-models-key-id"
-	err = st.CreateProxyKey(context.Background(), keyID, hash, prefix, "test-models-key")
-	require.NoError(t, err)
+	st := cloneTestDB(t)
+	plaintext := templateKey.Plaintext
+	keyID := templateKey.ID
 
 	cfg := &config.Config{
 		MasterKey: "test-master-key",

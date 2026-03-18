@@ -7,6 +7,7 @@ import (
 )
 
 func TestExtractTokens_CacheFields(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name              string
 		data              string
@@ -59,6 +60,7 @@ func TestExtractTokens_CacheFields(t *testing.T) {
 }
 
 func TestExtractResponsesTokens_CacheFields(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		data          string
