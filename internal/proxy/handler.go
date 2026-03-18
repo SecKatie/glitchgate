@@ -19,12 +19,6 @@ import (
 	"github.com/seckatie/glitchgate/internal/translate"
 )
 
-// providerNameFor returns the configured provider name used for runtime
-// identity, logging, and pricing attribution.
-func providerNameFor(prov provider.Provider) string {
-	return prov.Name()
-}
-
 // Handler is the core proxy HTTP handler for Anthropic-compatible requests.
 type Handler struct {
 	cfg           *config.Config
@@ -242,9 +236,8 @@ func (h *Handler) buildOpenAIProviderRoute(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Check if this provider forces non-streaming upstream calls.
-	forceNonStream := false
-	if provCfg, cfgErr := h.cfg.FindProvider(mapping.Provider); cfgErr == nil && provCfg.Stream != nil && !*provCfg.Stream {
-		forceNonStream = true
+	forceNonStream := providerForcesNonStream(h.cfg, mapping.Provider)
+	if forceNonStream {
 		oaiReq.Stream = false
 	}
 
@@ -507,10 +500,7 @@ func (h *Handler) buildGeminiProviderRoute(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Check if this provider forces non-streaming upstream calls.
-	forceNonStream := false
-	if provCfg, cfgErr := h.cfg.FindProvider(mapping.Provider); cfgErr == nil && provCfg.Stream != nil && !*provCfg.Stream {
-		forceNonStream = true
-	}
+	forceNonStream := providerForcesNonStream(h.cfg, mapping.Provider)
 
 	gemBody, err := json.Marshal(gemReq)
 	if err != nil {
@@ -610,21 +600,5 @@ func (h *Handler) handleGeminiProviderForcedStream(w http.ResponseWriter, resp *
 
 	anthResp := translate.GeminiToAnthropicResponse(resp.Body, modelRequested)
 	result, err := SynthesizeAnthropicSSE(w, anthResp)
-
-	var errDetails *string
-	if err != nil {
-		s := fmt.Sprintf("stream synthesis error: %v", err)
-		errDetails = &s
-		slog.Warn("stream synthesis error", "error", err)
-	}
-	return handlerResult{
-		InputTokens:          resp.InputTokens,
-		OutputTokens:         resp.OutputTokens,
-		CacheReadInputTokens: resp.CacheReadInputTokens,
-		ReasoningTokens:      resp.ReasoningTokens,
-		Status:               http.StatusOK,
-		Body:                 result.Body,
-		ErrDetails:           errDetails,
-		IsStreaming:          true,
-	}
+	return synthesizedStreamResult(resp, result, err)
 }

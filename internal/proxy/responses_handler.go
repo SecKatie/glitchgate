@@ -512,10 +512,7 @@ func (h *ResponsesHandler) buildGeminiRoute(
 		return nil, true
 	}
 
-	forceNonStream := false
-	if provCfg, cfgErr := h.cfg.FindProvider(mapping.Provider); cfgErr == nil && provCfg.Stream != nil && !*provCfg.Stream {
-		forceNonStream = true
-	}
+	forceNonStream := providerForcesNonStream(h.cfg, mapping.Provider)
 
 	return &routePlan{
 		ProviderRequest: &provider.Request{
@@ -606,24 +603,7 @@ func (h *ResponsesHandler) handleGeminiForcedStreamToResponses(w http.ResponseWr
 
 	respResp := translate.GeminiToResponsesResponse(resp.Body, modelRequested)
 	result, err := SynthesizeResponsesSSE(w, respResp)
-
-	var errDetails *string
-	if err != nil {
-		s := fmt.Sprintf("stream synthesis error: %v", err)
-		errDetails = &s
-		slog.Warn("stream synthesis error", "error", err)
-	}
-
-	return handlerResult{
-		InputTokens:          resp.InputTokens,
-		OutputTokens:         resp.OutputTokens,
-		CacheReadInputTokens: resp.CacheReadInputTokens,
-		ReasoningTokens:      resp.ReasoningTokens,
-		Status:               http.StatusOK,
-		Body:                 result.Body,
-		ErrDetails:           errDetails,
-		IsStreaming:          true,
-	}
+	return synthesizedStreamResult(resp, result, err)
 }
 
 // writeResponsesError writes an error response in Responses API format.
