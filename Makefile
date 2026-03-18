@@ -32,7 +32,7 @@ IMAGE ?= ghcr.io/seckatie/glitchgate
 TAG   ?= latest
 
 image:
-	podman build --platform linux/amd64,linux/arm64 --manifest $(IMAGE):$(TAG) .
+	podman build --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_DATE=$(DATE) --manifest $(IMAGE):$(TAG) .
 
 image-push:
 	podman manifest push $(IMAGE):$(TAG) docker://$(IMAGE):$(TAG)

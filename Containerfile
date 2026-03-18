@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
 ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
 
 # Build stage
 FROM golang:1.26-alpine AS builder
@@ -21,10 +23,13 @@ COPY main.go ./
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 
+ARG COMMIT
+ARG BUILD_DATE
+
 # Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -trimpath \
-    -ldflags="-s -w -extldflags '-static' -X github.com/seckatie/glitchgate/cmd.version=${VERSION}" \
+    -ldflags="-s -w -extldflags '-static' -X github.com/seckatie/glitchgate/cmd.version=${VERSION} -X github.com/seckatie/glitchgate/cmd.commit=${COMMIT} -X github.com/seckatie/glitchgate/cmd.date=${BUILD_DATE}" \
     -a -installsuffix cgo \
     -o /glitchgate .
 
