@@ -529,7 +529,7 @@ func canonicalMessageToAnthropic(msg CanonicalMessage) anthropic.Message {
 			blocks = append(blocks, anthropic.ContentBlock{
 				Type:      "tool_result",
 				ToolUseID: sanitizeAnthropicToolID(b.ToolUseID),
-				Text:      b.ToolResultText,
+				Content:   b.ToolResultText,
 			})
 		case BlockThinking:
 			blocks = append(blocks, anthropic.ContentBlock{

@@ -172,6 +172,9 @@ func (h *ResponsesHandler) routeBuilders(
 				},
 				RequestBody: body,
 				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if provResp.StatusCode >= 400 {
+						return h.handleResponsesNonStreaming(w, provResp)
+					}
 					if isStreaming {
 						return h.handleResponsesStreaming(r.Context(), w, provResp)
 					}
@@ -200,6 +203,9 @@ func (h *ResponsesHandler) routeBuilders(
 				},
 				RequestBody: body,
 				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if provResp.StatusCode >= 400 {
+						return h.handleAnthropicProviderNonStreaming(w, provResp, req.Model)
+					}
 					if isStreaming {
 						return h.handleAnthropicProviderStreaming(w, provResp, req.Model)
 					}
@@ -228,6 +234,9 @@ func (h *ResponsesHandler) routeBuilders(
 				},
 				RequestBody: body,
 				HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+					if provResp.StatusCode >= 400 {
+						return h.handleOpenAICCProviderNonStreaming(w, provResp, req.Model)
+					}
 					if isStreaming {
 						return h.handleOpenAICCProviderStreaming(w, provResp, req.Model)
 					}
@@ -517,6 +526,9 @@ func (h *ResponsesHandler) buildGeminiRoute(
 		},
 		RequestBody: rawBody,
 		HandleResponse: func(w http.ResponseWriter, provResp *provider.Response) handlerResult {
+			if provResp.StatusCode >= 400 {
+				return h.handleGeminiNonStreamingToResponses(w, provResp, req.Model)
+			}
 			switch {
 			case isStreaming && forceNonStream:
 				return h.handleGeminiForcedStreamToResponses(w, provResp, req.Model)
