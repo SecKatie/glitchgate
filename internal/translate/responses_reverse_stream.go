@@ -10,22 +10,19 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/seckatie/glitchgate/internal/sse"
 )
 
 // ResponsesSSEToAnthropicSSE reads Responses API SSE events from upstream,
 // translates each to Anthropic SSE events, and writes them to the client.
 func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
-	stop := closeOnCancel(ctx, upstream)
+	stop := sse.CloseOnCancel(ctx, upstream)
 	defer stop()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens int64
@@ -34,7 +31,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 	messageID := ""
 	openBlocks := make(map[int]string)
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -70,7 +67,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			messageID = strings.TrimPrefix(event.Response.ID, "resp_")
 
 			if !sentMessageStart {
-				if err := writeAnthropicSSE(w, rc, &captured, "message_start",
+				if err := sse.WriteEvent(w, rc, &captured, "message_start",
 					map[string]interface{}{
 						"type": "message_start",
 						"message": map[string]interface{}{
@@ -100,7 +97,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if event.Item.Type == "reasoning" && openBlocks[event.OutputIndex] == "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         event.OutputIndex,
@@ -121,7 +118,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if openBlocks[event.OutputIndex] == "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         event.OutputIndex,
@@ -143,7 +140,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if openBlocks[event.OutputIndex] == "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         event.OutputIndex,
@@ -155,7 +152,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if event.Delta != "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_delta",
 					map[string]interface{}{
 						"type":  "content_block_delta",
 						"index": event.OutputIndex,
@@ -178,7 +175,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if openBlocks[event.OutputIndex] == "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         event.OutputIndex,
@@ -190,7 +187,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if event.Part.Text != "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_delta",
 					map[string]interface{}{
 						"type":  "content_block_delta",
 						"index": event.OutputIndex,
@@ -210,7 +207,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if openBlocks[event.OutputIndex] != "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": event.OutputIndex}); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 				}
@@ -230,7 +227,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 			}
 
 			if event.Item.Type == "reasoning" && openBlocks[event.OutputIndex] != "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": event.OutputIndex}); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, 0, 0, 0), err
 				}
@@ -259,7 +256,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 
 			sentStop = true
 			stopReason := "end_turn"
-			if err := writeAnthropicSSE(w, rc, &captured, "message_delta",
+			if err := sse.WriteEvent(w, rc, &captured, "message_delta",
 				map[string]interface{}{
 					"type":  "message_delta",
 					"delta": map[string]interface{}{"stop_reason": stopReason},
@@ -268,7 +265,7 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 			}
 
-			if err := writeAnthropicSSE(w, rc, &captured, "message_stop",
+			if err := sse.WriteEvent(w, rc, &captured, "message_stop",
 				map[string]interface{}{"type": "message_stop"}); err != nil {
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, 0), err
 			}
@@ -286,16 +283,11 @@ func ResponsesSSEToAnthropicSSE(ctx context.Context, w http.ResponseWriter, upst
 // translates each to Chat Completions SSE events, and writes them to the client.
 func ResponsesSSEToOpenAISSE(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
-	stop := closeOnCancel(ctx, upstream)
+	stop := sse.CloseOnCancel(ctx, upstream)
 	defer stop()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens int64
@@ -304,7 +296,7 @@ func ResponsesSSEToOpenAISSE(ctx context.Context, w http.ResponseWriter, upstrea
 	sentInitial := false
 	sentStop := false
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 

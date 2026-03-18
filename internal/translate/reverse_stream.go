@@ -6,12 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/seckatie/glitchgate/internal/sse"
 )
 
 // ReverseSSEStream reads OpenAI SSE events from upstream, translates each to
@@ -20,16 +21,11 @@ import (
 // streaming request to an OpenAI-native provider.
 func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.ReadCloser, model string) (*StreamResult, error) {
 	defer func() { _ = upstream.Close() }()
-	stop := closeOnCancel(ctx, upstream)
+	stop := sse.CloseOnCancel(ctx, upstream)
 	defer stop()
 
 	rc := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	sse.WriteHeaders(w)
 
 	var captured bytes.Buffer
 	var inputTokens, outputTokens, cacheReadTokens, reasoningTokens int64
@@ -49,7 +45,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 	textBlockIndex := -1     // -1 = no text block started yet
 	thinkingBlockIndex := -1 // -1 = no thinking block started yet
 
-	scanner := newSSEScanner(upstream)
+	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -62,7 +58,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 		if data == "[DONE]" {
 			// Close thinking block if open.
 			if thinkingBlockIndex >= 0 {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": thinkingBlockIndex}); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
@@ -70,7 +66,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 
 			// Close text block if open.
 			if textBlockIndex >= 0 {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": textBlockIndex}); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
@@ -88,7 +84,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				return entries[i].state.blockIndex < entries[j].state.blockIndex
 			})
 			for _, e := range entries {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_stop",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_stop",
 					map[string]interface{}{"type": "content_block_stop", "index": e.state.blockIndex}); err != nil {
 					return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 				}
@@ -100,7 +96,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				stopReason = "tool_use"
 			}
 
-			if err := writeAnthropicSSE(w, rc, &captured, "message_delta",
+			if err := sse.WriteEvent(w, rc, &captured, "message_delta",
 				map[string]interface{}{
 					"type":  "message_delta",
 					"delta": map[string]interface{}{"stop_reason": stopReason},
@@ -114,7 +110,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
 
-			if err := writeAnthropicSSE(w, rc, &captured, "message_stop",
+			if err := sse.WriteEvent(w, rc, &captured, "message_stop",
 				map[string]interface{}{"type": "message_stop"}); err != nil {
 				return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), err
 			}
@@ -151,7 +147,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 
 		// Send message_start on first chunk.
 		if !sentMessageStart {
-			if err := writeAnthropicSSE(w, rc, &captured, "message_start",
+			if err := sse.WriteEvent(w, rc, &captured, "message_start",
 				map[string]interface{}{
 					"type": "message_start",
 					"message": map[string]interface{}{
@@ -198,7 +194,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 			if thinkingBlockIndex < 0 {
 				thinkingBlockIndex = nextBlockIndex
 				nextBlockIndex++
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         thinkingBlockIndex,
@@ -208,7 +204,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				}
 			}
 
-			if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+			if err := sse.WriteEvent(w, rc, &captured, "content_block_delta",
 				map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": thinkingBlockIndex,
@@ -238,7 +234,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 			if textBlockIndex < 0 {
 				textBlockIndex = nextBlockIndex
 				nextBlockIndex++
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         textBlockIndex,
@@ -248,7 +244,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				}
 			}
 
-			if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+			if err := sse.WriteEvent(w, rc, &captured, "content_block_delta",
 				map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": textBlockIndex,
@@ -264,7 +260,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 			if textBlockIndex < 0 {
 				textBlockIndex = nextBlockIndex
 				nextBlockIndex++
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":          "content_block_start",
 						"index":         textBlockIndex,
@@ -274,7 +270,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				}
 			}
 
-			if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+			if err := sse.WriteEvent(w, rc, &captured, "content_block_delta",
 				map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": textBlockIndex,
@@ -300,7 +296,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 				}
 				toolCalls[oaiIdx] = state
 				nextBlockIndex++
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_start",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_start",
 					map[string]interface{}{
 						"type":  "content_block_start",
 						"index": state.blockIndex,
@@ -316,7 +312,7 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 			}
 
 			if tc.Function.Arguments != "" {
-				if err := writeAnthropicSSE(w, rc, &captured, "content_block_delta",
+				if err := sse.WriteEvent(w, rc, &captured, "content_block_delta",
 					map[string]interface{}{
 						"type":  "content_block_delta",
 						"index": state.blockIndex,
@@ -336,20 +332,4 @@ func ReverseSSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Re
 	}
 
 	return buildResult(&captured, inputTokens, outputTokens, 0, cacheReadTokens, reasoningTokens), scanner.Err()
-}
-
-// writeAnthropicSSE writes a single Anthropic-format SSE event to the client.
-func writeAnthropicSSE(w http.ResponseWriter, rc *http.ResponseController, captured *bytes.Buffer, event string, data interface{}) error {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("marshalling SSE data: %w", err)
-	}
-
-	line := fmt.Sprintf("event: %s\ndata: %s\n\n", event, jsonData)
-	captured.WriteString(line)
-
-	if _, err := w.Write([]byte(line)); err != nil {
-		return err
-	}
-	return rc.Flush()
 }

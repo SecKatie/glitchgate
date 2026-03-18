@@ -385,30 +385,7 @@ func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, re
 // handleResponsesStreaming relays a Responses API SSE stream.
 func (h *ResponsesHandler) handleResponsesStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
 	result, err := RelayResponsesSSEStream(ctx, w, resp.Stream)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 func (h *ResponsesHandler) handleAnthropicProviderNonStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
@@ -464,26 +441,7 @@ func (h *ResponsesHandler) handleAnthropicProviderNonStreaming(w http.ResponseWr
 
 func (h *ResponsesHandler) handleAnthropicProviderStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
 	result, err := translate.AnthropicSSEToResponsesSSE(w, provResp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   http.StatusOK,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(provResp, result, err)
 }
 
 func (h *ResponsesHandler) handleOpenAICCProviderNonStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
@@ -521,24 +479,7 @@ func (h *ResponsesHandler) handleOpenAICCProviderNonStreaming(w http.ResponseWri
 
 func (h *ResponsesHandler) handleOpenAICCProviderStreaming(w http.ResponseWriter, provResp *provider.Response, modelRequested string) handlerResult {
 	result, err := translate.OpenAISSEToResponsesSSE(w, provResp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("stream relay error", "error", err)
-		}
-	}
-
-	return handlerResult{
-		InputTokens:     result.InputTokens,
-		OutputTokens:    result.OutputTokens,
-		ReasoningTokens: result.ReasoningTokens,
-		Status:          http.StatusOK,
-		Body:            result.Body,
-		ErrDetails:      errDetails,
-		IsStreaming:     true,
-	}
+	return streamingResult(provResp, result, err)
 }
 
 // buildGeminiRoute handles Responses API requests that need to be sent to a
@@ -630,32 +571,8 @@ func (h *ResponsesHandler) handleGeminiStreamingToResponses(w http.ResponseWrite
 	if resp.Stream == nil {
 		return h.handleGeminiForcedStreamToResponses(w, resp, modelRequested)
 	}
-
 	result, err := translate.GeminiSSEToResponsesSSE(w, resp.Stream, modelRequested)
-
-	var errDetails *string
-	if err != nil {
-		errDetails = streamRelayErrorDetails(err)
-		if errDetails != nil {
-			slog.Warn("gemini stream relay error", "error", err)
-		}
-	}
-
-	status := resp.StatusCode
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return handlerResult{
-		InputTokens:              result.InputTokens,
-		OutputTokens:             result.OutputTokens,
-		CacheCreationInputTokens: result.CacheCreationInputTokens,
-		CacheReadInputTokens:     result.CacheReadInputTokens,
-		ReasoningTokens:          result.ReasoningTokens,
-		Status:                   status,
-		Body:                     result.Body,
-		ErrDetails:               errDetails,
-		IsStreaming:              true,
-	}
+	return streamingResult(resp, result, err)
 }
 
 func (h *ResponsesHandler) handleGeminiForcedStreamToResponses(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
