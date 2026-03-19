@@ -88,7 +88,7 @@ func cloneTestDB(t *testing.T) *store.SQLiteStore {
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	if err := os.WriteFile(dbPath, src, 0o600); err != nil {
+	if err := os.WriteFile(dbPath, src, 0o600); err != nil { //nolint:gosec // dbPath is t.TempDir() + hardcoded filename
 		t.Fatalf("write test DB: %v", err)
 	}
 
