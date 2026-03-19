@@ -192,7 +192,7 @@ func (s *oidcTestServer) handleAuthorize(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *oidcTestServer) handleToken(w http.ResponseWriter, r *http.Request) {
-	require.NoError(s.t, r.ParseForm())
+	require.NoError(s.t, r.ParseForm()) //nolint:gosec // test handler; request body comes from test client
 	s.lastForm = cloneValues(r.PostForm)
 
 	if s.tokenStatusCode != 0 {
