@@ -806,7 +806,19 @@ func contentBlocksToTurn(role string, blocks []anthropic.ContentBlock, toolNameM
 	for _, b := range blocks {
 		appendConvBlock(&turn, contentBlockToConvBlock(b, toolNameMap))
 	}
+	// Ensure reasoning/thinking blocks appear before text blocks.
+	sortBlocksReasoningFirst(&turn)
 	return turn
+}
+
+// sortBlocksReasoningFirst reorders turn blocks so that reasoning and thinking
+// blocks appear before text blocks, preserving relative order within each group.
+func sortBlocksReasoningFirst(turn *ConvTurn) {
+	sort.SliceStable(turn.Blocks, func(i, j int) bool {
+		iReasoning := turn.Blocks[i].Type == "reasoning" || turn.Blocks[i].Type == "thinking"
+		jReasoning := turn.Blocks[j].Type == "reasoning" || turn.Blocks[j].Type == "thinking"
+		return iReasoning && !jReasoning
+	})
 }
 
 func appendConvBlock(turn *ConvTurn, cb ConvBlock) {
@@ -1173,6 +1185,10 @@ func responsesResponseToTurn(resp *openai.ResponsesResponse, toolNameMap map[str
 	if len(turn.Blocks) == 0 {
 		return nil
 	}
+
+	// Ensure reasoning/thinking blocks appear before text blocks.
+	sortBlocksReasoningFirst(turn)
+
 	return turn
 }
 
