@@ -19,6 +19,10 @@ proxy_rate_limit_burst: 30
 proxy_ip_rate_limit_per_minute: 240
 proxy_ip_rate_limit_burst: 60
 
+# Circuit breaker
+circuit_breaker_threshold: 5        # consecutive failures before tripping
+circuit_breaker_cooldown_secs: 30   # seconds before half-open probe
+
 # Request logging
 request_log_retention: "720h"  # 30 days
 request_log_prune_interval: "1h"
@@ -35,6 +39,15 @@ providers:
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
 
+  # Example: Anthropic (Vertex AI)
+  # - name: anthropic-vertex
+  #   type: anthropic
+  #   auth_mode: vertex
+  #   project: my-gcp-project
+  #   region: us-east5
+  #   credentials_file: /path/to/service-account.json  # optional; omit for ADC
+  #   default_version: "vertex-2023-10-16"              # optional
+
   # Example: OpenAI
   # - name: openai
   #   type: openai
@@ -42,11 +55,19 @@ providers:
   #   auth_mode: proxy_key
   #   api_key: "${OPENAI_API_KEY}"
 
-  # Example: Gemini Developer API
+  # Example: Gemini (API key)
   # - name: gemini
   #   type: gemini
-  #   auth_mode: proxy_key
+  #   auth_mode: api_key
   #   api_key: "${GEMINI_API_KEY}"
+
+  # Example: Gemini (Vertex AI)
+  # - name: gemini-vertex
+  #   type: gemini
+  #   auth_mode: vertex
+  #   project: my-gcp-project
+  #   region: us-central1
+  #   credentials_file: /path/to/service-account.json  # optional; omit for ADC
 
   # Example: GitHub Copilot
   # - name: copilot
