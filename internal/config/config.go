@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,31 +17,33 @@ import (
 
 // Config holds the top-level application configuration.
 type Config struct {
-	MasterKey                 string           `mapstructure:"master_key"    yaml:"master_key"`
-	Listen                    string           `mapstructure:"listen"        yaml:"listen"`
-	DatabasePath              string           `mapstructure:"database_path" yaml:"database_path"`
-	DatabaseURL               string           `mapstructure:"database_url"  yaml:"database_url"`
-	LogPath                   string           `mapstructure:"log_path"      yaml:"log_path"` // Path to log file; default "glitchgate.log"
-	Timezone                  string           `mapstructure:"timezone"      yaml:"timezone"` // IANA timezone name, e.g. "America/New_York"
-	ProxyMaxBodyBytes         int              `mapstructure:"proxy_max_body_bytes"          yaml:"proxy_max_body_bytes"`
-	UpstreamRequestTimeout    time.Duration    `mapstructure:"upstream_request_timeout"      yaml:"upstream_request_timeout"`
-	AsyncLogBufferSize        int              `mapstructure:"async_log_buffer_size"         yaml:"async_log_buffer_size"`
-	AsyncLogWriteTimeout      time.Duration    `mapstructure:"async_log_write_timeout"       yaml:"async_log_write_timeout"`
-	LoginRateLimitPerMinute   int              `mapstructure:"login_rate_limit_per_minute"   yaml:"login_rate_limit_per_minute"`
-	LoginRateLimitBurst       int              `mapstructure:"login_rate_limit_burst"        yaml:"login_rate_limit_burst"`
-	ProxyRateLimitPerMinute   int              `mapstructure:"proxy_rate_limit_per_minute"   yaml:"proxy_rate_limit_per_minute"`
-	ProxyRateLimitBurst       int              `mapstructure:"proxy_rate_limit_burst"        yaml:"proxy_rate_limit_burst"`
-	ProxyIPRateLimitPerMinute int              `mapstructure:"proxy_ip_rate_limit_per_minute" yaml:"proxy_ip_rate_limit_per_minute"`
-	ProxyIPRateLimitBurst     int              `mapstructure:"proxy_ip_rate_limit_burst"     yaml:"proxy_ip_rate_limit_burst"`
-	RequestLogRetention       time.Duration    `mapstructure:"request_log_retention"         yaml:"request_log_retention"`
-	RequestLogPruneInterval   time.Duration    `mapstructure:"request_log_prune_interval"    yaml:"request_log_prune_interval"`
-	RequestLogPruneBatchSize  int              `mapstructure:"request_log_prune_batch_size"  yaml:"request_log_prune_batch_size"`
-	RequestLogBodyMaxBytes    int              `mapstructure:"request_log_body_max_bytes"    yaml:"request_log_body_max_bytes"`
-	Providers                 []ProviderConfig `mapstructure:"providers"  yaml:"providers"`
-	ModelList                 []ModelMapping   `mapstructure:"model_list" yaml:"model_list"`
-	OIDC                      *OIDCConfig      `mapstructure:"oidc"       yaml:"oidc"`
-	MetricsEnabled            bool             `mapstructure:"metrics_enabled" yaml:"metrics_enabled"`
-	LogLevel                  string           `mapstructure:"log_level"       yaml:"log_level"`
+	MasterKey                  string           `mapstructure:"master_key"    yaml:"master_key"`
+	Listen                     string           `mapstructure:"listen"        yaml:"listen"`
+	DatabasePath               string           `mapstructure:"database_path" yaml:"database_path"`
+	DatabaseURL                string           `mapstructure:"database_url"  yaml:"database_url"`
+	LogPath                    string           `mapstructure:"log_path"      yaml:"log_path"` // Path to log file; default "glitchgate.log"
+	Timezone                   string           `mapstructure:"timezone"      yaml:"timezone"` // IANA timezone name, e.g. "America/New_York"
+	ProxyMaxBodyBytes          int              `mapstructure:"proxy_max_body_bytes"          yaml:"proxy_max_body_bytes"`
+	UpstreamRequestTimeout     time.Duration    `mapstructure:"upstream_request_timeout"      yaml:"upstream_request_timeout"`
+	AsyncLogBufferSize         int              `mapstructure:"async_log_buffer_size"         yaml:"async_log_buffer_size"`
+	AsyncLogWriteTimeout       time.Duration    `mapstructure:"async_log_write_timeout"       yaml:"async_log_write_timeout"`
+	LoginRateLimitPerMinute    int              `mapstructure:"login_rate_limit_per_minute"   yaml:"login_rate_limit_per_minute"`
+	LoginRateLimitBurst        int              `mapstructure:"login_rate_limit_burst"        yaml:"login_rate_limit_burst"`
+	ProxyRateLimitPerMinute    int              `mapstructure:"proxy_rate_limit_per_minute"   yaml:"proxy_rate_limit_per_minute"`
+	ProxyRateLimitBurst        int              `mapstructure:"proxy_rate_limit_burst"        yaml:"proxy_rate_limit_burst"`
+	ProxyIPRateLimitPerMinute  int              `mapstructure:"proxy_ip_rate_limit_per_minute" yaml:"proxy_ip_rate_limit_per_minute"`
+	ProxyIPRateLimitBurst      int              `mapstructure:"proxy_ip_rate_limit_burst"     yaml:"proxy_ip_rate_limit_burst"`
+	RequestLogRetention        time.Duration    `mapstructure:"request_log_retention"         yaml:"request_log_retention"`
+	RequestLogPruneInterval    time.Duration    `mapstructure:"request_log_prune_interval"    yaml:"request_log_prune_interval"`
+	RequestLogPruneBatchSize   int              `mapstructure:"request_log_prune_batch_size"  yaml:"request_log_prune_batch_size"`
+	RequestLogBodyMaxBytes     int              `mapstructure:"request_log_body_max_bytes"    yaml:"request_log_body_max_bytes"`
+	Providers                  []ProviderConfig `mapstructure:"providers"  yaml:"providers"`
+	ModelList                  []ModelMapping   `mapstructure:"model_list" yaml:"model_list"`
+	OIDC                       *OIDCConfig      `mapstructure:"oidc"       yaml:"oidc"`
+	MetricsEnabled             bool             `mapstructure:"metrics_enabled" yaml:"metrics_enabled"`
+	LogLevel                   string           `mapstructure:"log_level"       yaml:"log_level"`
+	CircuitBreakerThreshold    int              `mapstructure:"circuit_breaker_threshold"      yaml:"circuit_breaker_threshold"`
+	CircuitBreakerCooldownSecs int              `mapstructure:"circuit_breaker_cooldown_secs"  yaml:"circuit_breaker_cooldown_secs"`
 
 	// resolvedChains is populated at Load time. It maps every non-wildcard model
 	// name to its ordered dispatch slice (one entry for direct models, multiple
@@ -52,20 +55,22 @@ type Config struct {
 // Default operational limits and retention settings used when config values
 // are omitted or invalid.
 const (
-	DefaultProxyMaxBodyBytes         = 4 << 20
-	DefaultUpstreamRequestTimeout    = 5 * time.Minute
-	DefaultAsyncLogBufferSize        = 1000
-	DefaultAsyncLogWriteTimeout      = 5 * time.Second
-	DefaultLoginRateLimitPerMinute   = 10
-	DefaultLoginRateLimitBurst       = 5
-	DefaultProxyRateLimitPerMinute   = 120
-	DefaultProxyRateLimitBurst       = 30
-	DefaultProxyIPRateLimitPerMinute = 240
-	DefaultProxyIPRateLimitBurst     = 60
-	DefaultRequestLogRetention       = 30 * 24 * time.Hour
-	DefaultRequestLogPruneInterval   = time.Hour
-	DefaultRequestLogPruneBatchSize  = 1000
-	DefaultRequestLogBodyMaxBytes    = DefaultProxyMaxBodyBytes
+	DefaultProxyMaxBodyBytes          = 4 << 20
+	DefaultUpstreamRequestTimeout     = 5 * time.Minute
+	DefaultAsyncLogBufferSize         = 1000
+	DefaultAsyncLogWriteTimeout       = 5 * time.Second
+	DefaultLoginRateLimitPerMinute    = 10
+	DefaultLoginRateLimitBurst        = 5
+	DefaultProxyRateLimitPerMinute    = 120
+	DefaultProxyRateLimitBurst        = 30
+	DefaultProxyIPRateLimitPerMinute  = 240
+	DefaultProxyIPRateLimitBurst      = 60
+	DefaultRequestLogRetention        = 30 * 24 * time.Hour
+	DefaultRequestLogPruneInterval    = time.Hour
+	DefaultRequestLogPruneBatchSize   = 1000
+	DefaultRequestLogBodyMaxBytes     = DefaultProxyMaxBodyBytes
+	DefaultCircuitBreakerThreshold    = 5
+	DefaultCircuitBreakerCooldownSecs = 30
 )
 
 // OIDCConfig holds the OIDC provider configuration.
@@ -93,15 +98,15 @@ func (c *Config) DBBackend() string {
 // ProviderConfig describes an upstream LLM provider endpoint.
 type ProviderConfig struct {
 	Name                    string   `mapstructure:"name"                      yaml:"name"`
-	Type                    string   `mapstructure:"type"                      yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses", "gemini", "vertex_claude", "vertex_gemini"
+	Type                    string   `mapstructure:"type"                      yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses", "gemini"
 	BaseURL                 string   `mapstructure:"base_url"                  yaml:"base_url"`
-	AuthMode                string   `mapstructure:"auth_mode"                 yaml:"auth_mode"` // "proxy_key" or "forward"
+	AuthMode                string   `mapstructure:"auth_mode"                 yaml:"auth_mode"` // "proxy_key", "forward"; anthropic/gemini also support "vertex"
 	APIKey                  string   `mapstructure:"api_key"                   yaml:"api_key"`   //nolint:gosec // struct field for runtime config, not a hardcoded secret
 	DefaultVersion          string   `mapstructure:"default_version"           yaml:"default_version"`
 	TokenDir                string   `mapstructure:"token_dir"                 yaml:"token_dir"`                           // github_copilot: OAuth token storage directory
-	CredentialsFile         string   `mapstructure:"credentials_file"          yaml:"credentials_file"`                    // vertex_claude: path to service account JSON; empty = ADC
-	Project                 string   `mapstructure:"project"                   yaml:"project"`                             // vertex_claude: GCP project ID
-	Region                  string   `mapstructure:"region"                    yaml:"region"`                              // vertex_claude: GCP region (e.g. "us-east5")
+	CredentialsFile         string   `mapstructure:"credentials_file"          yaml:"credentials_file"`                    // anthropic/gemini (vertex mode): path to service account JSON; empty = ADC
+	Project                 string   `mapstructure:"project"                   yaml:"project"`                             // anthropic/gemini (vertex mode): GCP project ID
+	Region                  string   `mapstructure:"region"                    yaml:"region"`                              // anthropic/gemini (vertex mode): GCP region (e.g. "us-east5")
 	Stream                  *bool    `mapstructure:"stream"                    yaml:"stream,omitempty"`                    // nil = follow client; false = force non-streaming upstream
 	MonthlySubscriptionCost *float64 `mapstructure:"monthly_subscription_cost" yaml:"monthly_subscription_cost,omitempty"` // optional provider-level monthly spend baseline in USD
 }
@@ -214,6 +219,8 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("request_log_body_max_bytes", DefaultRequestLogBodyMaxBytes)
 	v.SetDefault("metrics_enabled", true)
 	v.SetDefault("log_level", "info")
+	v.SetDefault("circuit_breaker_threshold", DefaultCircuitBreakerThreshold)
+	v.SetDefault("circuit_breaker_cooldown_secs", DefaultCircuitBreakerCooldownSecs)
 	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
 
 	// Read config file (not an error if none exists).
@@ -244,14 +251,30 @@ func Load(configFile string) (*Config, error) {
 		if cfg.Providers[i].Type == "" {
 			cfg.Providers[i].Type = "anthropic"
 		}
+		if cfg.Providers[i].Type == "vertex_gemini" {
+			return nil, fmt.Errorf("provider %q: type \"vertex_gemini\" has been removed; use type \"gemini\" with auth_mode \"vertex\" instead", cfg.Providers[i].Name)
+		}
+		if cfg.Providers[i].Type == "vertex_claude" {
+			return nil, fmt.Errorf("provider %q: type \"vertex_claude\" has been removed; use type \"anthropic\" with auth_mode \"vertex\" instead", cfg.Providers[i].Name)
+		}
 		cfg.Providers[i].APIKey = os.ExpandEnv(cfg.Providers[i].APIKey)
 		// Apply default token directory for github_copilot providers.
 		if cfg.Providers[i].Type == "github_copilot" {
 			cfg.Providers[i].TokenDir = expandTilde(cfg.Providers[i].TokenDir)
 		}
-		// Expand paths for vertex providers.
-		if cfg.Providers[i].Type == "vertex_claude" || cfg.Providers[i].Type == "vertex_gemini" {
+		// Expand paths for providers that use credentials files (vertex auth mode).
+		if cfg.Providers[i].AuthMode == "vertex" {
 			cfg.Providers[i].CredentialsFile = expandTilde(cfg.Providers[i].CredentialsFile)
+		}
+		// Normalize deprecated gemini auth_mode values.
+		if cfg.Providers[i].Type == "gemini" {
+			switch cfg.Providers[i].AuthMode {
+			case "proxy_key":
+				slog.Warn("gemini auth_mode \"proxy_key\" is deprecated, use \"api_key\" instead", "provider", cfg.Providers[i].Name)
+				cfg.Providers[i].AuthMode = "api_key"
+			case "forward":
+				return nil, fmt.Errorf("provider %q: gemini auth_mode \"forward\" is no longer supported; use \"api_key\" or \"vertex\"", cfg.Providers[i].Name)
+			}
 		}
 	}
 
@@ -267,7 +290,7 @@ func Load(configFile string) (*Config, error) {
 		return nil, err
 	}
 
-	if err := validateVertexProviders(cfg.Providers); err != nil {
+	if err := validateVertexAuthProviders(cfg.Providers); err != nil {
 		return nil, err
 	}
 
@@ -490,24 +513,49 @@ func validateCopilotProviders(providers []ProviderConfig) error {
 	return nil
 }
 
-// validateVertexProviders checks that vertex_claude and vertex_gemini providers
-// have the required project field, and that credentials_file (if set) exists.
-// Region is required for vertex_claude; for vertex_gemini it defaults to "us-central1".
-func validateVertexProviders(providers []ProviderConfig) error {
+// validateVertexAuthProviders checks that providers using auth_mode "vertex"
+// have the required project field and that credentials_file (if set) exists.
+// Also validates gemini-specific auth_mode requirements.
+func validateVertexAuthProviders(providers []ProviderConfig) error {
 	for _, p := range providers {
-		if p.Type != "vertex_claude" && p.Type != "vertex_gemini" {
-			continue
-		}
-		if p.Project == "" {
-			return fmt.Errorf("provider %q: project is required for %s providers", p.Name, p.Type)
-		}
-		if p.Type == "vertex_claude" && p.Region == "" {
-			return fmt.Errorf("provider %q: region is required for vertex_claude providers", p.Name)
-		}
-		if p.CredentialsFile != "" {
-			if _, err := os.Stat(p.CredentialsFile); err != nil {
-				return fmt.Errorf("provider %q: credentials_file %q: %w", p.Name, p.CredentialsFile, err)
+		switch p.Type {
+		case "gemini":
+			switch p.AuthMode {
+			case "api_key":
+				if p.APIKey == "" {
+					return fmt.Errorf("provider %q: api_key is required when auth_mode is \"api_key\"", p.Name)
+				}
+			case "vertex":
+				if p.Project == "" {
+					return fmt.Errorf("provider %q: project is required when auth_mode is \"vertex\"", p.Name)
+				}
+				if err := validateCredentialsFile(p); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("provider %q: auth_mode must be \"api_key\" or \"vertex\" for gemini providers (got %q)", p.Name, p.AuthMode)
 			}
+		case "anthropic":
+			if p.AuthMode == "vertex" {
+				if p.Project == "" {
+					return fmt.Errorf("provider %q: project is required when auth_mode is \"vertex\"", p.Name)
+				}
+				if p.Region == "" {
+					return fmt.Errorf("provider %q: region is required when auth_mode is \"vertex\"", p.Name)
+				}
+				if err := validateCredentialsFile(p); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateCredentialsFile(p ProviderConfig) error {
+	if p.CredentialsFile != "" {
+		if _, err := os.Stat(p.CredentialsFile); err != nil {
+			return fmt.Errorf("provider %q: credentials_file %q: %w", p.Name, p.CredentialsFile, err)
 		}
 	}
 	return nil

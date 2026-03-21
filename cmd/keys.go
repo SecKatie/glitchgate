@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -47,8 +48,11 @@ var keysUpdateCmd = &cobra.Command{
 }
 
 var (
-	keyLabel    string
-	keyNewLabel string
+	keyLabel       string
+	keyNewLabel    string
+	keyAllowModels string
+	keyRateLimit   int
+	keyRateBurst   int
 )
 
 func init() {
@@ -57,10 +61,17 @@ func init() {
 		panic(fmt.Sprintf("mark label flag required: %v", err))
 	}
 
+	keysCreateCmd.Flags().StringVar(&keyAllowModels, "allowed-models", "", "comma-separated model patterns (e.g., claude-*,gpt-4o)")
+	keysCreateCmd.Flags().IntVar(&keyRateLimit, "rate-limit", 0, "per-key requests per minute (0 = use global)")
+	keysCreateCmd.Flags().IntVar(&keyRateBurst, "rate-burst", 0, "per-key burst size (0 = use global)")
+
 	keysUpdateCmd.Flags().StringVar(&keyNewLabel, "label", "", "new label for the key (required)")
 	if err := keysUpdateCmd.MarkFlagRequired("label"); err != nil {
 		panic(fmt.Sprintf("mark label flag required: %v", err))
 	}
+	keysUpdateCmd.Flags().StringVar(&keyAllowModels, "allowed-models", "", "comma-separated model patterns (empty = clear)")
+	keysUpdateCmd.Flags().IntVar(&keyRateLimit, "rate-limit", 0, "per-key requests per minute (0 = clear)")
+	keysUpdateCmd.Flags().IntVar(&keyRateBurst, "rate-burst", 0, "per-key burst size (0 = clear)")
 
 	keysCmd.AddCommand(keysCreateCmd)
 	keysCmd.AddCommand(keysListCmd)
@@ -72,6 +83,8 @@ func init() {
 // keyStore combines the store operations needed by CLI key management commands.
 type keyStore interface {
 	store.ProxyKeyStore
+	store.ProxyKeyAuthStore
+	store.KeyScopingStore
 	RecordAuditEvent(ctx context.Context, action, keyPrefix, detail, actorEmail string) error
 	Migrate(ctx context.Context) error
 	Close() error
@@ -112,6 +125,31 @@ func runKeysCreate(_ *cobra.Command, _ []string) error {
 
 	if err := st.RecordAuditEvent(context.Background(), "key_created", prefix, keyLabel, "cli"); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: record audit event: %v\n", err)
+	}
+
+	// Apply optional scoping.
+	ctx := context.Background()
+	if keyAllowModels != "" {
+		patterns := parseModelPatterns(keyAllowModels)
+		if err := st.SetKeyAllowedModels(ctx, id, patterns); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: set allowed models: %v\n", err)
+		} else {
+			fmt.Printf("Allowed models: %s\n", strings.Join(patterns, ", "))
+		}
+	}
+	if keyRateLimit > 0 {
+		burst := keyRateBurst
+		if burst <= 0 {
+			burst = keyRateLimit / 4
+			if burst < 1 {
+				burst = 1
+			}
+		}
+		if err := st.SetKeyRateLimit(ctx, id, keyRateLimit, burst); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: set rate limit: %v\n", err)
+		} else {
+			fmt.Printf("Rate limit: %d/min (burst %d)\n", keyRateLimit, burst)
+		}
 	}
 
 	fmt.Printf("Created API key: %s\n", plaintext)
@@ -185,5 +223,50 @@ func runKeysUpdate(_ *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Updated label for key %s: %s\n", prefix, keyNewLabel)
+
+	// Apply optional scoping updates.
+	// To look up key ID we need to fetch the key by prefix.
+	pk, err := st.GetActiveProxyKeyByPrefix(context.Background(), prefix)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: could not look up key for scoping update: %v\n", err)
+		return nil
+	}
+
+	ctx := context.Background()
+	if keyAllowModels != "" {
+		patterns := parseModelPatterns(keyAllowModels)
+		if err := st.SetKeyAllowedModels(ctx, pk.ID, patterns); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: set allowed models: %v\n", err)
+		} else {
+			fmt.Printf("Allowed models: %s\n", strings.Join(patterns, ", "))
+		}
+	}
+	if keyRateLimit > 0 {
+		burst := keyRateBurst
+		if burst <= 0 {
+			burst = keyRateLimit / 4
+			if burst < 1 {
+				burst = 1
+			}
+		}
+		if err := st.SetKeyRateLimit(ctx, pk.ID, keyRateLimit, burst); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: set rate limit: %v\n", err)
+		} else {
+			fmt.Printf("Rate limit: %d/min (burst %d)\n", keyRateLimit, burst)
+		}
+	}
+
 	return nil
+}
+
+func parseModelPatterns(s string) []string {
+	parts := strings.Split(s, ",")
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

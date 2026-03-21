@@ -22,6 +22,7 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/app"
 	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/circuitbreaker"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/proxy"
@@ -67,10 +68,18 @@ func runServe(_ *cobra.Command, _ []string) error {
 	defer maintenanceCancel()
 	runtime.StartMaintenance(maintenanceCtx, cfg)
 
+	// Build circuit breaker registry.
+	cbRegistry := circuitbreaker.NewRegistry(
+		positiveInt(cfg.CircuitBreakerThreshold, config.DefaultCircuitBreakerThreshold),
+		time.Duration(positiveInt(cfg.CircuitBreakerCooldownSecs, config.DefaultCircuitBreakerCooldownSecs))*time.Second,
+	)
+
 	// Build the proxy handlers.
-	proxyHandler := proxy.NewHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
-	openaiHandler := proxy.NewOpenAIHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
-	responsesHandler := proxy.NewResponsesHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, proxy.NewBudgetChecker(runtime.Store, runtime.Timezone))
+	budgetChecker := proxy.NewBudgetChecker(runtime.Store, runtime.Timezone)
+	modelChecker := proxy.NewModelChecker(runtime.Store, 30*time.Second)
+	proxyHandler := proxy.NewAnthropicHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, budgetChecker, cbRegistry, modelChecker)
+	openaiHandler := proxy.NewOpenAIHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, budgetChecker, cbRegistry, modelChecker)
+	responsesHandler := proxy.NewResponsesHandler(cfg, runtime.Providers, runtime.Calculator, runtime.AsyncLogger, budgetChecker, cbRegistry, modelChecker)
 	modelsHandler := proxy.NewModelsHandler(cfg, runtime.Calculator, runtime.AsyncLogger)
 
 	// Build chi router.
@@ -90,6 +99,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		positiveInt(cfg.ProxyRateLimitBurst, config.DefaultProxyRateLimitBurst),
 		15*time.Minute,
 	)
+	keyAwareRateLimiter := proxy.NewKeyAwareRateLimiter(proxyKeyRateLimiter, runtime.Store, 30*time.Second)
 	proxyIPRateLimiter := ratelimit.New(
 		positiveInt(cfg.ProxyIPRateLimitPerMinute, config.DefaultProxyIPRateLimitPerMinute),
 		positiveInt(cfg.ProxyIPRateLimitBurst, config.DefaultProxyIPRateLimitBurst),
@@ -100,7 +110,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(proxy.IPRateLimitMiddleware(proxyIPRateLimiter))
 		r.Use(proxy.AuthMiddleware(runtime.Store))
-		r.Use(proxy.KeyRateLimitMiddleware(proxyKeyRateLimiter))
+		r.Use(proxy.KeyAwareRateLimitMiddleware(keyAwareRateLimiter))
 		r.Post("/messages", proxyHandler.ServeHTTP)
 		r.Post("/chat/completions", openaiHandler.ServeHTTP)
 		r.Post("/responses", responsesHandler.ServeHTTP)
@@ -115,7 +125,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	authHandlers := web.NewAuthHandlers(runtime.Store, sessions, runtime.OIDCProvider)
 	costHandlers := web.NewCostHandlers(runtime.Store, runtime.Store, runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
 	dashboardHandlers := web.NewDashboardHandlers(runtime.Store, runtime.Store, runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions)
-	providerHandlers := web.NewProviderHandlers(runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions, cfg)
+	providerHandlers := web.NewProviderHandlers(runtime.Store, runtime.Store, tmpl, runtime.Timezone, runtime.Calculator, runtime.ProviderNames, runtime.ProviderMonthlySubscriptions, cfg, cbRegistry)
 	auditHandlers := web.NewAuditHandlers(runtime.Store, tmpl, runtime.Timezone)
 	userHandlers := web.NewUserHandlers(runtime.Store, sessions, tmpl)
 	teamHandlers := web.NewTeamHandlers(runtime.Store, sessions, tmpl)

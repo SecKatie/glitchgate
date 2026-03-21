@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/seckatie/glitchgate/internal/circuitbreaker"
 	"github.com/seckatie/glitchgate/internal/store"
 )
 
@@ -109,6 +110,18 @@ var (
 		Name:      "async_logger_failed_total",
 		Help:      "Total entries that failed to persist.",
 	})
+
+	circuitBreakerState = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "circuit_breaker_state",
+		Help:      "Circuit breaker state per provider (0=closed, 1=open, 2=half-open).",
+	}, []string{"provider"})
+
+	circuitBreakerTripsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "circuit_breaker_trips_total",
+		Help:      "Total times a provider circuit breaker has tripped.",
+	}, []string{"provider"})
 )
 
 func init() {
@@ -128,6 +141,8 @@ func init() {
 		asyncLoggerPersisted,
 		asyncLoggerDropped,
 		asyncLoggerFailed,
+		circuitBreakerState,
+		circuitBreakerTripsTotal,
 	)
 }
 
@@ -196,4 +211,15 @@ func RecordLoggerStats(enqueued, persisted, dropped, failed uint64) {
 	asyncLoggerPersisted.Set(float64(persisted))
 	asyncLoggerDropped.Set(float64(dropped))
 	asyncLoggerFailed.Set(float64(failed))
+}
+
+// RecordCircuitBreakerStats updates circuit breaker state and trip gauges.
+func RecordCircuitBreakerStats(stats map[string]circuitbreaker.Stats) {
+	if !Enabled {
+		return
+	}
+	for provider, s := range stats {
+		circuitBreakerState.WithLabelValues(provider).Set(float64(s.State))
+		circuitBreakerTripsTotal.WithLabelValues(provider).Add(0) // ensure label exists
+	}
 }
