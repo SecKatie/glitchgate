@@ -491,7 +491,7 @@ func TestOpenAIFallback_4xxNoRetry(t *testing.T) {
 	require.Equal(t, 0, secondaryHits)
 }
 
-func TestOpenAIFallback_AllExhausted503(t *testing.T) {
+func TestOpenAIFallback_AllExhaustedReturnsLastStatus(t *testing.T) {
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -509,7 +509,7 @@ func TestOpenAIFallback_AllExhausted503(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func TestOpenAIFallback_FallbackAttempts_Count(t *testing.T) {
