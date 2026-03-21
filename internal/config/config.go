@@ -15,10 +15,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// errPendingDiscovery is a sentinel error returned when a fallback reference
-// cannot be resolved yet because it may be satisfied by model discovery.
-var errPendingDiscovery = errors.New("pending discovery")
-
 // Config holds the top-level application configuration.
 type Config struct {
 	MasterKey                  string           `mapstructure:"master_key"    yaml:"master_key"`
@@ -308,8 +304,13 @@ func Load(configFile string) (*Config, error) {
 		return nil, err
 	}
 
-	if err := cfg.buildResolvedChains(); err != nil {
-		return nil, err
+	// Only build resolved chains here when no providers use model discovery.
+	// When discovery is enabled, chains are built after InjectDiscoveredModels
+	// so that discovered models are available for fallback reference resolution.
+	if !cfg.hasDiscoveryProviders() {
+		if err := cfg.buildResolvedChains(); err != nil {
+			return nil, err
+		}
 	}
 
 	return &cfg, nil
@@ -363,34 +364,12 @@ func (c *Config) buildResolvedChains() error {
 		}
 	}
 
-	// Build the set of discovery prefixes so that fallback references to
-	// not-yet-discovered models are allowed during initial config load.
-	// They will be fully validated when buildResolvedChains is called again
-	// after InjectDiscoveredModels.
-	discoveryPrefixes := c.discoveryPrefixes()
-
-	// couldBeDiscovered returns true if name matches a discovery-capable
-	// provider prefix (e.g. "anthropic/claude-sonnet-4-6" when the
-	// "anthropic" provider has discover_models enabled).
-	couldBeDiscovered := func(name string) bool {
-		for _, pfx := range discoveryPrefixes {
-			if pfx == "" {
-				continue // empty prefix = unprefixed; can't reliably match
-			}
-			if strings.HasPrefix(name, pfx) {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Pass 2: validate that all names in fallbacks[] exist in model_list (either
-	// as an explicit non-wildcard entry, resolvable via a wildcard entry, or
-	// potentially satisfiable by a discovery-capable provider).
+	// Pass 2: validate that all names in fallbacks[] exist in model_list
+	// (either as an explicit non-wildcard entry or resolvable via a wildcard entry).
 	for _, m := range c.ModelList {
 		for _, ref := range m.Fallbacks {
 			if _, ok := byName[ref]; !ok {
-				if resolveWildcard(ref) == nil && !couldBeDiscovered(ref) {
+				if resolveWildcard(ref) == nil {
 					return fmt.Errorf("model %q: fallback %q is not defined in model_list", m.ModelName, ref)
 				}
 			}
@@ -465,9 +444,6 @@ func (c *Config) buildResolvedChains() error {
 				chains[name] = chain
 				return chain, nil
 			}
-			if couldBeDiscovered(name) {
-				return nil, errPendingDiscovery
-			}
 			return nil, fmt.Errorf("model %q not found during flattening", name)
 		}
 		m := c.ModelList[idx]
@@ -486,9 +462,6 @@ func (c *Config) buildResolvedChains() error {
 		for _, ref := range m.Fallbacks {
 			sub, err := flatten(ref)
 			if err != nil {
-				if errors.Is(err, errPendingDiscovery) {
-					return nil, errPendingDiscovery // propagate: skip this chain until discovery runs
-				}
 				return nil, err
 			}
 			chain = append(chain, sub...)
@@ -502,11 +475,6 @@ func (c *Config) buildResolvedChains() error {
 			continue
 		}
 		if _, err := flatten(m.ModelName); err != nil {
-			if errors.Is(err, errPendingDiscovery) {
-				slog.Warn("skipping chain resolution: fallback references a model that may be discovered at startup",
-					"model", m.ModelName)
-				continue
-			}
 			return err
 		}
 	}
@@ -515,22 +483,14 @@ func (c *Config) buildResolvedChains() error {
 	return nil
 }
 
-// discoveryPrefixes returns the model name prefixes for all providers that
-// have discover_models enabled. These are used to defer validation of fallback
-// references that will be satisfied once model discovery runs.
-func (c *Config) discoveryPrefixes() []string {
-	var prefixes []string
+// hasDiscoveryProviders returns true if any provider has discover_models enabled.
+func (c *Config) hasDiscoveryProviders() bool {
 	for _, p := range c.Providers {
-		if !p.DiscoverModels {
-			continue
+		if p.DiscoverModels {
+			return true
 		}
-		prefix := p.Name + "/"
-		if p.ModelPrefix != nil {
-			prefix = *p.ModelPrefix
-		}
-		prefixes = append(prefixes, prefix)
 	}
-	return prefixes
+	return false
 }
 
 func validateProviderNames(providers []ProviderConfig) error {
