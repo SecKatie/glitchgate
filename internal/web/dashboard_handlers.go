@@ -14,6 +14,7 @@ import (
 	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 )
 
 // DashboardHandlers groups the HTTP handlers for the overview dashboard.
@@ -124,8 +125,8 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Cost summary from pricing groups.
-	summary := deriveSummaryFromPricingGroups(pricingGroups)
-	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
+	summary := billing.DeriveSummaryFromPricingGroups(pricingGroups)
+	tokenCosts := billing.ComputeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
 
 	// Daily trend.
 	timeseries := aggregatePricedTimeseries(
@@ -139,8 +140,8 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Top 5 models by cost (today only).
-	breakdown := deriveBreakdownFromPricingGroups(todayPricingGroups, "model", h.providerNames)
-	breakdownCosts := buildBreakdownCosts(todayPricingGroups, h.calc, "model", h.providerNames)
+	breakdown := billing.DeriveBreakdownFromPricingGroups(todayPricingGroups, "model", h.providerNames)
+	breakdownCosts := billing.BuildBreakdownCosts(todayPricingGroups, h.calc, "model", h.providerNames)
 	type topModel struct {
 		Name    string
 		CostUSD float64
@@ -164,18 +165,18 @@ func (h *DashboardHandlers) DashboardPageHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Provider subsidy.
-	subsidyAnalysis := buildSubsidyAnalysis(
+	subsidyAnalysis := billing.BuildSubsidyAnalysis(
 		pricingGroups, timeseriesPricingGroups,
 		h.calc, h.providerNames, h.providerMonthlySubscriptions, 30,
 	)
 
 	// Monthly spend projection from MTD data.
-	mtdCosts := computeAggregateCostBreakdownWithAliases(mtdPricingGroups, h.calc, h.providerNames)
+	mtdCosts := billing.ComputeAggregateCostBreakdownWithAliases(mtdPricingGroups, h.calc, h.providerNames)
 	var subscriptionCostUSD float64
 	if subsidyAnalysis != nil {
 		subscriptionCostUSD = subsidyAnalysis.SubscriptionCostUSD
 	}
-	monthlyProjection := buildMonthlyProjection(mtdCosts.TotalCostUSD, h.tz, subscriptionCostUSD)
+	monthlyProjection := billing.BuildMonthlyProjection(mtdCosts.TotalCostUSD, h.tz, subscriptionCostUSD)
 
 	// Budget status.
 	budgetEntries := BuildBudgetStatusEntries(r.Context(), budgets, h.budgetStore, h.keyStore, h.tz)

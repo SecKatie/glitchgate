@@ -19,6 +19,7 @@ import (
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/proxy"
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -290,12 +291,12 @@ func (h *CostHandlers) CostSummaryHandler(w http.ResponseWriter, r *http.Request
 
 	// Derive summary and breakdown from pricing groups in-memory
 	// instead of running separate SQL queries.
-	summary := deriveSummaryFromPricingGroups(pricingGroups)
-	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
+	summary := billing.DeriveSummaryFromPricingGroups(pricingGroups)
+	breakdown := billing.DeriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
 
-	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
-	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, params.GroupBy, h.providerNames)
-	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
+	tokenCosts := billing.ComputeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
+	breakdownCosts := billing.BuildBreakdownCosts(pricingGroups, h.calc, params.GroupBy, h.providerNames)
+	providerComparisons, providerComparisonSummary := billing.BuildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
 
 	bd := make([]costBreakdownEntryJSON, len(breakdown))
 	for i, e := range breakdown {
@@ -403,7 +404,7 @@ func priceTimeseriesGroups(groups []store.CostTimeseriesPricingGroup, calc *pric
 	entries := make([]pricedTimeseriesEntry, 0, len(groups))
 	for _, group := range groups {
 		cost := 0.0
-		if priced, _, ok := lookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+		if priced, _, ok := billing.LookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, billing.TokenUsage{
 			InputTokens:      group.InputTokens,
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
@@ -466,16 +467,6 @@ func aggregatePricedTimeseries(entries []pricedTimeseriesEntry, interval string)
 	return buckets
 }
 
-func providerDisplayName(rawKey string, providerNames map[string]string) (string, bool) {
-	if providerNames == nil {
-		return rawKey, false
-	}
-	if mapped, ok := providerNames[rawKey]; ok && mapped != "" {
-		return mapped, true
-	}
-	return rawKey, false
-}
-
 // --------------------------------------------------------------------------
 // Shared cost dashboard data computation
 // --------------------------------------------------------------------------
@@ -498,11 +489,11 @@ func (h *CostHandlers) defaultDateRange(r *http.Request) (fromDate, toDate strin
 // dashboard page and the HTMX cost summary fragment.
 type costDashboardData struct {
 	Summary                   *store.CostSummary
-	TokenCosts                *AggregateCostBreakdown
+	TokenCosts                *billing.AggregateCostBreakdown
 	Breakdown                 []store.CostBreakdownEntry
 	BreakdownCosts            map[string]float64
-	ProviderComparisons       map[string]*ProviderSpendComparison
-	ProviderComparisonSummary ProviderSpendComparisonSummary
+	ProviderComparisons       map[string]*billing.ProviderSpendComparison
+	ProviderComparisonSummary billing.ProviderSpendComparisonSummary
 	Timeseries                []pricedTimeseriesEntry
 	MaxCost                   float64
 	MaxBreakdownRequests      int64
@@ -539,8 +530,8 @@ func (h *CostHandlers) buildCostDashboardData(r *http.Request) (*costDashboardDa
 		return nil, err
 	}
 
-	summary := deriveSummaryFromPricingGroups(pricingGroups)
-	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
+	summary := billing.DeriveSummaryFromPricingGroups(pricingGroups)
+	breakdown := billing.DeriveBreakdownFromPricingGroups(pricingGroups, params.GroupBy, h.providerNames)
 
 	aggregatedTimeseries := aggregatePricedTimeseries(
 		priceTimeseriesGroups(timeseriesPricingGroups, h.calc, h.providerNames), "day",
@@ -572,9 +563,9 @@ func (h *CostHandlers) buildCostDashboardData(r *http.Request) (*costDashboardDa
 		}
 	}
 
-	tokenCosts := computeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
-	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
-	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
+	tokenCosts := billing.ComputeAggregateCostBreakdownWithAliases(pricingGroups, h.calc, h.providerNames)
+	breakdownCosts := billing.BuildBreakdownCosts(pricingGroups, h.calc, groupBy, h.providerNames)
+	providerComparisons, providerComparisonSummary := billing.BuildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
 
 	fromDate, toDate := h.defaultDateRange(r)
 
@@ -668,12 +659,12 @@ func (h *CostHandlers) CostSummaryFragmentHandler(w http.ResponseWriter, r *http
 }
 
 // buildBudgetStatusEntries delegates to the package-level BuildBudgetStatusEntries.
-func (h *CostHandlers) buildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBudget) []BudgetStatusEntry {
+func (h *CostHandlers) buildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBudget) []billing.BudgetStatusEntry {
 	return BuildBudgetStatusEntries(ctx, budgets, h.budgetStore, h.keyStore, h.tz)
 }
 
 // BuildBudgetStatusEntries computes budget utilization for each configured budget.
-func BuildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBudget, budgetStore store.BudgetCheckStore, keyStore store.ProxyKeyStore, tz *time.Location) []BudgetStatusEntry {
+func BuildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBudget, budgetStore store.BudgetCheckStore, keyStore store.ProxyKeyStore, tz *time.Location) []billing.BudgetStatusEntry {
 	// Pre-fetch key summaries for key-scoped budget labels.
 	keyLabels := make(map[string]string)
 	if keyStore != nil {
@@ -698,7 +689,7 @@ func BuildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBud
 	}
 
 	now := time.Now()
-	var entries []BudgetStatusEntry
+	var entries []billing.BudgetStatusEntry
 
 	for _, b := range budgets {
 		start := proxy.PeriodStart(b.Period, now, tz)
@@ -737,7 +728,7 @@ func BuildBudgetStatusEntries(ctx context.Context, budgets []store.ApplicableBud
 			label += ": " + b.ScopeID
 		}
 
-		entries = append(entries, BudgetStatusEntry{
+		entries = append(entries, billing.BudgetStatusEntry{
 			Scope:          b.Scope,
 			ScopeID:        b.ScopeID,
 			ScopeLabel:     label,

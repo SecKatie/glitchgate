@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 )
 
 func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
@@ -25,7 +26,7 @@ func TestCostSummaryTemplateKeepsPercentagesWhenPricingIsPartial(t *testing.T) {
 			TotalOutputTokens:        20,
 		},
 		"TotalAllInputTokens": int64(100),
-		"TokenCosts": &AggregateCostBreakdown{
+		"TokenCosts": &billing.AggregateCostBreakdown{
 			PricingKnown:      false,
 			PartialPricing:    true,
 			HasAnyPricing:     true,
@@ -62,7 +63,7 @@ func TestCostSummaryTemplateShowsProviderLinkInsteadOfSubscriptionColumns(t *tes
 			TotalOutputTokens: 20,
 		},
 		"TotalAllInputTokens": int64(100),
-		"TokenCosts": &AggregateCostBreakdown{
+		"TokenCosts": &billing.AggregateCostBreakdown{
 			HasAnyPricing: true,
 			TotalCostUSD:  18.5,
 		},
@@ -72,12 +73,12 @@ func TestCostSummaryTemplateShowsProviderLinkInsteadOfSubscriptionColumns(t *tes
 		"BreakdownCosts": map[string]float64{
 			"chatgpt-pro": 18.5,
 		},
-		"ProviderComparisons": map[string]*ProviderSpendComparison{
+		"ProviderComparisons": map[string]*billing.ProviderSpendComparison{
 			"chatgpt-pro": {
 				MonthlySubscriptionCost: 20.0,
 			},
 		},
-		"ProviderComparisonSummary": ProviderSpendComparisonSummary{
+		"ProviderComparisonSummary": billing.ProviderSpendComparisonSummary{
 			HasAnySubscription:    true,
 			TotalSubscriptionCost: 20.0,
 		},
@@ -107,7 +108,7 @@ func TestCostsPageTemplatePushesFilterStateIntoURL(t *testing.T) {
 		"GroupBy":             "provider",
 		"GroupFilter":         "chatgpt",
 		"Summary":             store.CostSummary{},
-		"TokenCosts":          &AggregateCostBreakdown{},
+		"TokenCosts":          &billing.AggregateCostBreakdown{},
 		"TotalAllInputTokens": int64(0),
 	})
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 )
 
 func TestBuildSubsidyAnalysis(t *testing.T) {
@@ -29,7 +30,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 		groups := []store.CostPricingGroup{
 			{ProviderName: "claude-max", ModelUpstream: "claude-sonnet-4-6", InputTokens: 1000, OutputTokens: 500, Requests: 1},
 		}
-		result := buildSubsidyAnalysis(groups, nil, calc, nil, nil, 30)
+		result := billing.BuildSubsidyAnalysis(groups, nil, calc, nil, nil, 30)
 		require.Nil(t, result)
 	})
 
@@ -38,7 +39,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 			{ProviderName: "claude-max", ModelUpstream: "claude-sonnet-4-6", InputTokens: 1000, OutputTokens: 500, Requests: 1},
 		}
 		subs := map[string]float64{"claude-max": 100}
-		result := buildSubsidyAnalysis(groups, nil, nil, nil, subs, 30)
+		result := billing.BuildSubsidyAnalysis(groups, nil, nil, nil, subs, 30)
 		require.Nil(t, result)
 	})
 
@@ -47,7 +48,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 			{ProviderName: "other-provider", ModelUpstream: "some-model", InputTokens: 1000, OutputTokens: 500, Requests: 1},
 		}
 		subs := map[string]float64{"claude-max": 100}
-		result := buildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
+		result := billing.BuildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
 		require.Nil(t, result)
 	})
 
@@ -62,7 +63,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 		}
 		subs := map[string]float64{"claude-max": 100}
 
-		result := buildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
+		result := billing.BuildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
 		require.NotNil(t, result)
 
 		// API costs: input=3.00, cache_write=0.375, cache_read=0.06, output=7.50
@@ -84,7 +85,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 		}
 		subs := map[string]float64{"claude-max": 100}
 
-		result := buildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
+		result := billing.BuildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
 		require.NotNil(t, result)
 
 		// API costs: input=$3.00, output=$7.50, total=$10.50
@@ -109,7 +110,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 		}
 		subs := map[string]float64{"claude-max": 100, "chatgpt-pro": 20}
 
-		result := buildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
+		result := billing.BuildSubsidyAnalysis(groups, nil, calc, nil, subs, 30)
 		require.NotNil(t, result)
 
 		// claude-max API: input=1.50, output=3.00 -> 4.50
@@ -131,7 +132,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 		}
 		subs := map[string]float64{"claude-max": 100}
 
-		result := buildSubsidyAnalysis(groups, tsGroups, calc, nil, subs, 3)
+		result := billing.BuildSubsidyAnalysis(groups, tsGroups, calc, nil, subs, 3)
 		require.NotNil(t, result)
 		require.Len(t, result.CumulativeData, 3)
 
@@ -159,7 +160,7 @@ func TestBuildSubsidyAnalysis(t *testing.T) {
 		}
 		subs := map[string]float64{"claude-max": 100}
 
-		result := buildSubsidyAnalysis(groups, nil, calc, providerNames, subs, 30)
+		result := billing.BuildSubsidyAnalysis(groups, nil, calc, providerNames, subs, 30)
 		require.NotNil(t, result)
 		require.InDelta(t, 10.50, result.TrueCostUSD, 1e-2)
 	})
