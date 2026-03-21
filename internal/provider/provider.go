@@ -42,7 +42,7 @@ type Response struct {
 type Provider interface {
 	// Name returns a short identifier for the provider (e.g. "anthropic").
 	Name() string
-	// AuthMode returns "proxy_key" or "forward" to indicate how the proxy
+	// AuthMode returns "api_key" or "forward" to indicate how the proxy
 	// authenticates with the upstream service.
 	AuthMode() string
 	// APIFormat returns the native API format the provider speaks upstream.

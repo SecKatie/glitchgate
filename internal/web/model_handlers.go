@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,24 +25,26 @@ import (
 
 // ModelListItem is a row on the Models list page.
 type ModelListItem struct {
-	ModelName       string
-	ProviderName    string
-	ProviderType    string
-	ProviderKey     string // raw config provider key (e.g. "anthropic"), used for pricing lookups
-	UpstreamModel   string
-	IsVirtual       bool
-	IsWildcard      bool
-	IsUnconfigured  bool // seen in logs but not in model_list config
-	IsLogGroup      bool // synthetic group header for all unconfigured models
-	Fallbacks       []string
-	Pricing         *pricing.Entry
-	HasPricing      bool
-	EncodedName     string // url.PathEscape(ModelName)
-	TotalSpendUSD   float64
-	Children        []ModelListItem  // wildcard: matched models from logs; virtual: fallback targets
-	ChildCount      int              // number of children (for display)
-	RequestCount    int64            // aggregate request count (for wildcards/virtual)
-	FallbackDetails []FallbackDetail // resolved fallback chain (virtual models only)
+	ModelName        string
+	ProviderName     string
+	ProviderType     string
+	ProviderKey      string // raw config provider key (e.g. "anthropic"), used for pricing lookups
+	UpstreamModel    string
+	IsVirtual        bool
+	IsWildcard       bool
+	IsUnconfigured   bool // seen in logs but not in model_list config
+	IsLogGroup       bool // synthetic group header for all unconfigured models
+	IsDiscovered     bool // model injected by provider discovery
+	IsDiscoveryGroup bool // synthetic group header for discovered models from one provider
+	Fallbacks        []string
+	Pricing          *pricing.Entry
+	HasPricing       bool
+	EncodedName      string // url.PathEscape(ModelName)
+	TotalSpendUSD    float64
+	Children         []ModelListItem  // wildcard: matched models from logs; virtual: fallback targets
+	ChildCount       int              // number of children (for display)
+	RequestCount     int64            // aggregate request count (for wildcards/virtual)
+	FallbackDetails  []FallbackDetail // resolved fallback chain (virtual models only)
 }
 
 // FallbackDetail holds resolved information about a single fallback in a virtual model's chain.
@@ -131,11 +134,12 @@ func buildModelList(modelList []config.ModelMapping, providerMap map[string]conf
 
 	for _, m := range modelList {
 		item := ModelListItem{
-			ModelName:   m.ModelName,
-			IsVirtual:   m.IsVirtual(),
-			IsWildcard:  m.IsWildcard(),
-			Fallbacks:   m.Fallbacks,
-			EncodedName: url.PathEscape(m.ModelName),
+			ModelName:    m.ModelName,
+			IsVirtual:    m.IsVirtual(),
+			IsWildcard:   m.IsWildcard(),
+			IsDiscovered: m.Discovered,
+			Fallbacks:    m.Fallbacks,
+			EncodedName:  url.PathEscape(m.ModelName),
 		}
 
 		if !item.IsVirtual && m.Provider != "" {
@@ -388,6 +392,51 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Group discovered models by provider into collapsible sections.
+	discoveredByProvider := make(map[string][]ModelListItem)
+	{
+		kept := items[:0]
+		for _, it := range items {
+			if it.IsDiscovered && !it.IsWildcard && !it.IsVirtual {
+				discoveredByProvider[it.ProviderName] = append(discoveredByProvider[it.ProviderName], it)
+			} else {
+				kept = append(kept, it)
+			}
+		}
+		items = kept
+	}
+	if len(discoveredByProvider) > 0 {
+		provNames := make([]string, 0, len(discoveredByProvider))
+		for name := range discoveredByProvider {
+			provNames = append(provNames, name)
+		}
+		sort.Strings(provNames)
+		for _, name := range provNames {
+			children := discoveredByProvider[name]
+			var groupSpend float64
+			var groupReqs int64
+			provType := ""
+			for _, ch := range children {
+				groupSpend += ch.TotalSpendUSD
+				groupReqs += ch.RequestCount
+				if provType == "" {
+					provType = ch.ProviderType
+				}
+			}
+			items = append(items, ModelListItem{
+				ModelName:        name + " (discovered)",
+				ProviderName:     name,
+				ProviderType:     provType,
+				IsDiscoveryGroup: true,
+				Children:         children,
+				ChildCount:       len(children),
+				TotalSpendUSD:    groupSpend,
+				RequestCount:     groupReqs,
+				EncodedName:      "_discovered_" + url.PathEscape(name),
+			})
+		}
+	}
+
 	// Group unconfigured (log-only) models into a single collapsible section.
 	var logOnly []ModelListItem
 	filtered := items[:0]
@@ -418,9 +467,45 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 		items = filtered
 	}
 
+	// Compute summary stats for the page header.
+	var totalConfigured, totalDiscovered, totalWithPricing int
+	var totalSpend float64
+	for _, it := range items {
+		if it.IsLogGroup {
+			continue
+		}
+		if it.IsDiscoveryGroup {
+			totalDiscovered += it.ChildCount
+			for _, ch := range it.Children {
+				if ch.HasPricing {
+					totalWithPricing++
+				}
+			}
+			totalSpend += it.TotalSpendUSD
+			continue
+		}
+		if !it.IsUnconfigured {
+			totalConfigured++
+		}
+		if it.HasPricing {
+			totalWithPricing++
+		}
+		totalSpend += it.TotalSpendUSD
+		for _, ch := range it.Children {
+			if ch.HasPricing {
+				totalWithPricing++
+			}
+		}
+	}
+
 	data := map[string]any{
-		"ActiveTab": "models",
-		"Models":    items,
+		"ActiveTab":        "models",
+		"Models":           items,
+		"TotalModels":      len(items),
+		"TotalConfigured":  totalConfigured,
+		"TotalDiscovered":  totalDiscovered,
+		"TotalWithPricing": totalWithPricing,
+		"TotalSpend":       totalSpend,
 	}
 	setNavData(data, auth.SessionFromContext(r.Context()))
 

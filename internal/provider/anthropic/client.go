@@ -32,9 +32,9 @@ const (
 // ClientConfig holds the parameters needed to construct an Anthropic [Client].
 type ClientConfig struct {
 	Name            string
-	BaseURL         string // required for proxy_key/forward modes
-	AuthMode        string // "proxy_key", "forward", or "vertex"
-	APIKey          string // proxy_key mode
+	BaseURL         string // required for api_key/forward modes
+	AuthMode        string // "api_key", "forward", or "vertex"
+	APIKey          string // api_key mode
 	DefaultVersion  string
 	Project         string // vertex mode
 	Region          string // vertex mode; defaults to us-central1
@@ -45,8 +45,8 @@ type ClientConfig struct {
 type Client struct {
 	name           string
 	baseURL        string
-	authMode       string // "proxy_key", "forward", or "vertex"
-	apiKey         string // proxy_key mode
+	authMode       string // "api_key", "forward", or "vertex"
+	apiKey         string // api_key mode
 	defaultVersion string
 	tokenSource    oauth2.TokenSource // vertex mode
 	project        string             // vertex mode
@@ -126,7 +126,7 @@ func (c *Client) SetTimeouts(requestTimeout time.Duration) {
 // Name returns the provider's short identifier.
 func (c *Client) Name() string { return c.name }
 
-// AuthMode returns "proxy_key", "forward", or "internal" (vertex manages its own OAuth2 auth).
+// AuthMode returns "api_key", "forward", or "internal" (vertex manages its own OAuth2 auth).
 func (c *Client) AuthMode() string {
 	if c.authMode == "vertex" {
 		return "internal"
@@ -153,7 +153,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 	return c.sendDirect(ctx, req)
 }
 
-// sendDirect handles proxy_key and forward auth modes against the Anthropic API.
+// sendDirect handles api_key and forward auth modes against the Anthropic API.
 func (c *Client) sendDirect(ctx context.Context, req *provider.Request) (*provider.Response, error) {
 	url := c.baseURL + "/v1/messages"
 
@@ -175,7 +175,7 @@ func (c *Client) sendDirect(ctx context.Context, req *provider.Request) (*provid
 
 	// Auth mode: either use the proxy's own API key or forward the client's.
 	switch c.authMode {
-	case "proxy_key":
+	case "api_key":
 		// Anthropic's official API expects X-Api-Key header.
 		// Third-party Anthropic-compatible APIs (like Minimax) expect Bearer prefix.
 		if strings.Contains(c.baseURL, "minimax.io") {
@@ -397,7 +397,11 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 			return nil, fmt.Errorf("anthropic provider %q: creating list request: %w", c.name, err)
 		}
 		req.Header.Set("X-Api-Key", c.apiKey)
-		req.Header.Set("Anthropic-Version", c.defaultVersion)
+		version := c.defaultVersion
+		if version == "" {
+			version = "2023-06-01"
+		}
+		req.Header.Set("Anthropic-Version", version)
 
 		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
 		if err != nil {

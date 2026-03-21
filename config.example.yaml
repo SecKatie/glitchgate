@@ -35,7 +35,7 @@ providers:
   - name: anthropic
     type: anthropic
     base_url: https://api.anthropic.com
-    auth_mode: proxy_key
+    auth_mode: api_key
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
     # discover_models: true             # Auto-discover available models at startup
@@ -57,7 +57,7 @@ providers:
   # - name: openai
   #   type: openai
   #   base_url: https://api.openai.com/v1
-  #   auth_mode: proxy_key
+  #   auth_mode: api_key
   #   api_key: "${OPENAI_API_KEY}"
 
   # Example: Gemini (API key)

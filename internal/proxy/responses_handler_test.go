@@ -57,7 +57,7 @@ func newResponsesTestHarness(t *testing.T, upstreamURL string) *responsesTestHar
 				Name:     "openai-resp",
 				Type:     "openai_responses",
 				BaseURL:  upstreamURL,
-				AuthMode: "proxy_key",
+				AuthMode: "api_key",
 				APIKey:   "test-key",
 			},
 		},
@@ -70,7 +70,7 @@ func newResponsesTestHarness(t *testing.T, upstreamURL string) *responsesTestHar
 		},
 	}
 
-	openaiClient, err := openaiProv.NewClient("openai-resp", upstreamURL, "proxy_key", "test-key", openaiProv.APITypeResponses)
+	openaiClient, err := openaiProv.NewClient("openai-resp", upstreamURL, "api_key", "test-key", openaiProv.APITypeResponses)
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -479,9 +479,9 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	primaryClient, err := openaiProv.NewClient("primary", primaryURL, "proxy_key", "key1", openaiProv.APITypeResponses)
+	primaryClient, err := openaiProv.NewClient("primary", primaryURL, "api_key", "key1", openaiProv.APITypeResponses)
 	require.NoError(t, err)
-	secondaryClient, err := openaiProv.NewClient("secondary", secondaryURL, "proxy_key", "key2", openaiProv.APITypeResponses)
+	secondaryClient, err := openaiProv.NewClient("secondary", secondaryURL, "api_key", "key2", openaiProv.APITypeResponses)
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{

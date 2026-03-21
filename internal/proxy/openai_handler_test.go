@@ -57,7 +57,7 @@ func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 			{
 				Name:           "anthropic",
 				BaseURL:        upstreamURL,
-				AuthMode:       "proxy_key",
+				AuthMode:       "api_key",
 				APIKey:         "test-upstream-key",
 				DefaultVersion: "2023-06-01",
 			},
@@ -76,7 +76,7 @@ func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 		},
 	}
 
-	anthropicClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "anthropic", BaseURL: upstreamURL, AuthMode: "proxy_key", APIKey: "test-upstream-key", DefaultVersion: "2023-06-01"})
+	anthropicClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "anthropic", BaseURL: upstreamURL, AuthMode: "api_key", APIKey: "test-upstream-key", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -396,9 +396,9 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	primaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primaryURL, AuthMode: "proxy_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
+	primaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primaryURL, AuthMode: "api_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
-	secondaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondaryURL, AuthMode: "proxy_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
+	secondaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondaryURL, AuthMode: "api_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -589,11 +589,11 @@ model_list:
 
 	providers := map[string]provider.Provider{}
 
-	primaryClient, err2 := openai.NewClient("primary", primaryURL, "proxy_key", "key1", apiType)
+	primaryClient, err2 := openai.NewClient("primary", primaryURL, "api_key", "key1", apiType)
 	require.NoError(t, err2)
 	providers["primary"] = primaryClient
 
-	secondaryClient, err2 := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondaryURL, AuthMode: "proxy_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
+	secondaryClient, err2 := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondaryURL, AuthMode: "api_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err2)
 	providers["secondary"] = secondaryClient
 
