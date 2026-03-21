@@ -136,15 +136,15 @@ glitchgate auth copilot --name copilot-personal
 | Field             | Required | Description |
 |-------------------|----------|-------------|
 | `name`            | Yes      | Unique identifier, referenced by `model_list` |
-| `type`            | No       | `anthropic` (default), `github_copilot`, `openai`, `openai_responses`, `gemini`, `vertex_claude`, `vertex_gemini` |
-| `base_url`        | Depends  | Required for `anthropic`. Defaults to `https://api.openai.com` for `openai`/`openai_responses`, and `https://generativelanguage.googleapis.com` for `gemini`. Not used by `github_copilot`, `vertex_claude`, or `vertex_gemini` |
-| `auth_mode`       | Depends  | `proxy_key` or `forward`. Not used by `github_copilot`, `vertex_claude`, or `vertex_gemini` |
-| `api_key`         | Depends  | For `proxy_key` mode. Supports `${ENV_VAR}` expansion |
+| `type`            | No       | `anthropic` (default), `github_copilot`, `openai`, `openai_responses`, `gemini` |
+| `base_url`        | Depends  | Required for `anthropic` (non-vertex). Defaults to `https://api.openai.com` for `openai`/`openai_responses`. Not used by `github_copilot` or `gemini` |
+| `auth_mode`       | Depends  | `proxy_key` or `forward` for most providers. `anthropic` and `gemini` also support `vertex`. For `gemini`: `api_key` or `vertex`. Not used by `github_copilot` |
+| `api_key`         | Depends  | For `proxy_key`/`api_key` mode. Supports `${ENV_VAR}` expansion |
 | `default_version` | No       | Sets `anthropic-version` header when client omits it. `anthropic` only |
 | `token_dir`       | No       | Token storage for `github_copilot`. Default: `~/.config/glitchgate/copilot/` |
-| `credentials_file`| No       | Path to GCP service account JSON for `vertex_claude`/`vertex_gemini`. Omit to use Application Default Credentials (ADC). Supports `~` and `${ENV_VAR}` |
-| `project`         | Depends  | GCP project ID. Required for `vertex_claude` and `vertex_gemini` |
-| `region`          | Depends  | GCP region (e.g. `us-east5`). Required for `vertex_claude`. Defaults to `us-central1` for `vertex_gemini` |
+| `credentials_file`| No       | Path to GCP service account JSON for `anthropic` or `gemini` (vertex mode). Omit to use Application Default Credentials (ADC). Supports `~` and `${ENV_VAR}` |
+| `project`         | Depends  | GCP project ID. Required for `anthropic` and `gemini` in vertex mode |
+| `region`          | Depends  | GCP region (e.g. `us-east5`). Required for `anthropic` (vertex mode). Defaults to `us-central1` for `gemini` (vertex mode) |
 | `stream`          | No       | `false` forces non-streaming upstream even when client requests streaming (proxy synthesizes SSE). Omit to follow client preference |
 | `monthly_subscription_cost` | No | Optional monthly provider subscription cost in USD, used by the cost dashboard to compare flat subscription spend against token-based usage |
 
@@ -240,7 +240,7 @@ Tokens are stored in `token_dir` with `0600` permissions. The short-lived Copilo
 
 ---
 
-### Vertex Claude Provider
+### Anthropic via Vertex AI
 
 Routes Claude model requests through Google Cloud Vertex AI. Authentication uses GCP OAuth2 credentials (service account JSON or Application Default Credentials). The proxy manages token refresh automatically.
 
@@ -249,7 +249,8 @@ Routes Claude model requests through Google Cloud Vertex AI. Authentication uses
 ```yaml
 providers:
   - name: "vertex-claude"
-    type: "vertex_claude"
+    type: "anthropic"
+    auth_mode: "vertex"
     project: "my-gcp-project"
     region: "us-east5"
     # credentials_file: "/path/to/service-account.json"  # optional; omit for ADC
@@ -283,9 +284,9 @@ Built-in Anthropic pricing is applied automatically. Override with `metadata` on
 - The `model` field is stripped from the request body (Vertex expects it in the URL path)
 - `anthropic_version` is injected into the request body automatically (Vertex requires it there rather than as a header)
 
-### Vertex Gemini Provider
+### Gemini via Vertex AI
 
-Routes Gemini model requests through Google Cloud Vertex AI using the native `generateContent`/`streamGenerateContent` endpoints. Shares the same GCP OAuth2 authentication as the Vertex Claude provider.
+Routes Gemini model requests through Google Cloud Vertex AI using the native `generateContent`/`streamGenerateContent` endpoints with OAuth2 authentication.
 
 The native endpoints require only the standard `Vertex AI User` role (`roles/aiplatform.user`), unlike the OpenAI-compatible endpoint which requires `aiplatform.endpoints.predict`.
 
@@ -294,7 +295,8 @@ The native endpoints require only the standard `Vertex AI User` role (`roles/aip
 ```yaml
 providers:
   - name: "vertex-gemini"
-    type: "vertex_gemini"
+    type: "gemini"
+    auth_mode: "vertex"
     project: "my-gcp-project"
     region: "us-central1"  # defaults to "us-central1"
     # credentials_file: "/path/to/service-account.json"  # optional; omit for ADC
@@ -648,7 +650,8 @@ providers:
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
   - name: "vertex-claude"
-    type: "vertex_claude"
+    type: "anthropic"
+    auth_mode: "vertex"
     project: "my-gcp-project"
     region: "us-east5"
 
