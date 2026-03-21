@@ -256,3 +256,135 @@ func newTokenSource(providerName, credentialsFile string) (oauth2.TokenSource, e
 
 	return oauth2.ReuseTokenSource(nil, ts), nil
 }
+
+// ListModels queries the provider's model listing endpoint and returns all
+// available models that support generateContent. For direct API key mode
+// it calls GET /v1beta/models. For Vertex mode it calls the publisher models endpoint.
+func (c *Client) ListModels(ctx context.Context) ([]provider.DiscoveredModel, error) {
+	if c.authMode == "vertex" {
+		return c.listModelsVertex(ctx)
+	}
+	return c.listModelsDirect(ctx)
+}
+
+func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredModel, error) {
+	var all []provider.DiscoveredModel
+	pageToken := ""
+
+	for {
+		u := developerAPIBaseURL + "/v1beta/models?pageSize=1000&key=" + c.apiKey
+		if pageToken != "" {
+			u += "&pageToken=" + pageToken
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: creating list request: %w", c.name, err)
+		}
+
+		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: listing models: %w", c.name, err)
+		}
+
+		body, err := io.ReadAll(io.LimitReader(resp.Body, provider.MaxUpstreamResponseBytes))
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: reading models response: %w", c.name, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("gemini provider %q: models endpoint returned %d: %s", c.name, resp.StatusCode, string(body))
+		}
+
+		var listResp geminiModelsListResponse
+		if err := json.Unmarshal(body, &listResp); err != nil {
+			return nil, fmt.Errorf("gemini provider %q: decoding models response: %w", c.name, err)
+		}
+
+		for _, m := range listResp.Models {
+			if !supportsGenerateContent(m.SupportedGenerationMethods) {
+				continue
+			}
+			id := strings.TrimPrefix(m.Name, "models/")
+			all = append(all, provider.DiscoveredModel{
+				ID:          id,
+				DisplayName: m.DisplayName,
+			})
+		}
+
+		if listResp.NextPageToken == "" {
+			break
+		}
+		pageToken = listResp.NextPageToken
+	}
+
+	return all, nil
+}
+
+func (c *Client) listModelsVertex(ctx context.Context) ([]provider.DiscoveredModel, error) {
+	token, err := c.tokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("gemini provider %q: obtaining access token: %w", c.name, err)
+	}
+
+	var all []provider.DiscoveredModel
+	pageToken := ""
+
+	for {
+		u := fmt.Sprintf(
+			"https://%s-aiplatform.googleapis.com/v1beta1/publishers/google/models?pageSize=100",
+			c.region,
+		)
+		if pageToken != "" {
+			u += "&pageToken=" + pageToken
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: creating vertex list request: %w", c.name, err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+
+		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: listing vertex models: %w", c.name, err)
+		}
+
+		body, err := io.ReadAll(io.LimitReader(resp.Body, provider.MaxUpstreamResponseBytes))
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: reading vertex models response: %w", c.name, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("gemini provider %q: vertex models endpoint returned %d: %s", c.name, resp.StatusCode, string(body))
+		}
+
+		var listResp vertexGeminiModelsListResponse
+		if err := json.Unmarshal(body, &listResp); err != nil {
+			return nil, fmt.Errorf("gemini provider %q: decoding vertex models response: %w", c.name, err)
+		}
+
+		for _, m := range listResp.PublisherModels {
+			parts := strings.SplitN(m.Name, "/", 4)
+			if len(parts) == 4 {
+				all = append(all, provider.DiscoveredModel{ID: parts[3]})
+			}
+		}
+
+		if listResp.NextPageToken == "" {
+			break
+		}
+		pageToken = listResp.NextPageToken
+	}
+
+	return all, nil
+}
+
+func supportsGenerateContent(methods []string) bool {
+	for _, m := range methods {
+		if m == "generateContent" {
+			return true
+		}
+	}
+	return false
+}

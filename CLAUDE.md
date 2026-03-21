@@ -144,3 +144,10 @@ Features are specced in `specs/NNN-feature-name/` with:
 - `tasks.md` - Actionable tasks
 
 Check `specs/ROADMAP.md` for planned features.
+
+## Active Technologies
+- Go (latest stable, currently 1.24) + `cobra`+`viper` (CLI/config), `chi/v5` (router), `golang.org/x/oauth2` (Vertex auth) (001-model-discovery)
+- SQLite via `modernc.org/sqlite` — not impacted by this feature (001-model-discovery)
+
+## Recent Changes
+- 001-model-discovery: Added Go (latest stable, currently 1.24) + `cobra`+`viper` (CLI/config), `chi/v5` (router), `golang.org/x/oauth2` (Vertex auth)

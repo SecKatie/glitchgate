@@ -330,3 +330,14 @@ type ResponsesStreamEvent struct {
 	Type     string          `json:"type"`
 	Response json.RawMessage `json:"response,omitempty"`
 }
+
+// modelsListResponse is the response from GET /v1/models.
+type modelsListResponse struct {
+	Data []openAIModelInfo `json:"data"`
+}
+
+// openAIModelInfo is a single model entry in the OpenAI listing response.
+type openAIModelInfo struct {
+	ID      string `json:"id"`
+	OwnedBy string `json:"owned_by"`
+}

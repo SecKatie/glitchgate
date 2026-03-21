@@ -150,3 +150,27 @@ type ErrorDetail struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
 }
+
+// modelsListResponse is the response from GET /v1/models (direct API).
+type modelsListResponse struct {
+	Data    []modelInfo `json:"data"`
+	HasMore bool        `json:"has_more"`
+	LastID  string      `json:"last_id"`
+}
+
+// modelInfo is a single model entry in the listing response.
+type modelInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+}
+
+// vertexModelsListResponse is the response from the Vertex AI publisher models endpoint.
+type vertexModelsListResponse struct {
+	PublisherModels []vertexPublisherModel `json:"publisherModels"`
+	NextPageToken   string                 `json:"nextPageToken"`
+}
+
+// vertexPublisherModel is a model entry from the Vertex AI listing.
+type vertexPublisherModel struct {
+	Name string `json:"name"` // e.g. "publishers/anthropic/models/claude-sonnet-4-6"
+}

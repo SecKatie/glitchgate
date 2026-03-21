@@ -38,6 +38,11 @@ providers:
     auth_mode: proxy_key
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
+    # discover_models: true             # Auto-discover available models at startup
+    # model_prefix: "anthropic/"        # Default: "{name}/" — prefix for discovered model names
+    # discover_filter:                  # Glob patterns to include/exclude discovered models
+    #   - "claude-*"                    # Include only claude models
+    #   - "!*-preview"                  # Exclude preview models
 
   # Example: Anthropic (Vertex AI)
   # - name: anthropic-vertex
