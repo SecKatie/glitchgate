@@ -124,7 +124,7 @@ func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) {
 		slog.Error("generate CSRF token", "error", err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // HttpOnly intentionally false: JS/HTMX must read the CSRF cookie value
 		Name:     csrfCookieName,
 		Value:    hex.EncodeToString(raw),
 		Path:     "/ui",
