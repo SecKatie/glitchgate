@@ -23,7 +23,7 @@ func TestClient(t *testing.T) {
 		{
 			name: "Name",
 			run: func(t *testing.T) {
-				c, err := NewClient("my-openai", "http://localhost", "proxy_key", "sk-test", "")
+				c, err := NewClient("my-openai", "http://localhost", "api_key", "sk-test", "")
 				require.NoError(t, err)
 				require.Equal(t, "my-openai", c.Name())
 			},
@@ -39,7 +39,7 @@ func TestClient(t *testing.T) {
 		{
 			name: "APIFormat_ChatCompletions",
 			run: func(t *testing.T) {
-				c, err := NewClient("oai", "http://localhost", "proxy_key", "sk-test", APITypeChatCompletions)
+				c, err := NewClient("oai", "http://localhost", "api_key", "sk-test", APITypeChatCompletions)
 				require.NoError(t, err)
 				require.Equal(t, "openai", c.APIFormat())
 			},
@@ -47,7 +47,7 @@ func TestClient(t *testing.T) {
 		{
 			name: "APIFormat_Responses",
 			run: func(t *testing.T) {
-				c, err := NewClient("oai", "http://localhost", "proxy_key", "sk-test", APITypeResponses)
+				c, err := NewClient("oai", "http://localhost", "api_key", "sk-test", APITypeResponses)
 				require.NoError(t, err)
 				require.Equal(t, "responses", c.APIFormat())
 			},
@@ -55,7 +55,7 @@ func TestClient(t *testing.T) {
 		{
 			name: "APIFormat_Default",
 			run: func(t *testing.T) {
-				c, err := NewClient("oai", "http://localhost", "proxy_key", "sk-test", "")
+				c, err := NewClient("oai", "http://localhost", "api_key", "sk-test", "")
 				require.NoError(t, err)
 				require.Equal(t, "openai", c.APIFormat())
 			},
@@ -141,7 +141,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-secret", APITypeChatCompletions)
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-secret", APITypeChatCompletions)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),
@@ -178,7 +178,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-resp", APITypeResponses)
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-resp", APITypeResponses)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),
@@ -211,7 +211,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL+"/backend-api/codex", "proxy_key", "sk-custom", APITypeResponses)
+				c, err := NewClient("oai", srv.URL+"/backend-api/codex", "api_key", "sk-custom", APITypeResponses)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),
@@ -220,7 +220,7 @@ func TestClient(t *testing.T) {
 
 				_, err = c.SendRequest(context.Background(), req)
 				require.NoError(t, err)
-				require.Equal(t, "/backend-api/codex/responses", gotPath)
+				require.Equal(t, "/backend-api/codex/v1/responses", gotPath)
 			},
 		},
 		{
@@ -239,7 +239,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL+"/v1", "proxy_key", "sk-v1", APITypeChatCompletions)
+				c, err := NewClient("oai", srv.URL+"/v1", "api_key", "sk-v1", APITypeChatCompletions)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),
@@ -287,7 +287,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-test", APITypeChatCompletions)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:        []byte(`{"model":"gpt-4","stream":true}`),
@@ -327,7 +327,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-test", APITypeChatCompletions)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),
@@ -361,7 +361,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeResponses)
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-test", APITypeResponses)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),
@@ -385,7 +385,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", APITypeChatCompletions)
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-test", APITypeChatCompletions)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),
@@ -430,7 +430,7 @@ func TestListModels(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", "")
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-test", "")
 				require.NoError(t, err)
 
 				models, err := c.ListModels(context.Background())
@@ -450,7 +450,7 @@ func TestListModels(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-bad", "")
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-bad", "")
 				require.NoError(t, err)
 
 				models, err := c.ListModels(context.Background())
@@ -470,7 +470,7 @@ func TestListModels(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-verify-auth", "")
+				c, err := NewClient("oai", srv.URL, "api_key", "sk-verify-auth", "")
 				require.NoError(t, err)
 
 				_, err = c.ListModels(context.Background())
