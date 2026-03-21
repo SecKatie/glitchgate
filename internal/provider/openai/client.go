@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -22,8 +21,8 @@ import (
 type Client struct {
 	name           string
 	baseURL        string
-	authMode       string // "proxy_key" or "forward"
-	apiKey         string // used when authMode == "proxy_key"
+	authMode       string // "api_key" or "forward"
+	apiKey         string // used when authMode == "api_key"
 	apiType        string // "chat_completions" or "responses"
 	httpClient     *http.Client
 	requestTimeout time.Duration
@@ -57,7 +56,7 @@ func (c *Client) SetTimeouts(requestTimeout time.Duration) {
 // Name returns the provider's short identifier.
 func (c *Client) Name() string { return c.name }
 
-// AuthMode returns "proxy_key" or "forward".
+// AuthMode returns "api_key" or "forward".
 func (c *Client) AuthMode() string { return c.authMode }
 
 // APIFormat returns "openai" for Chat Completions or "responses" for Responses API.
@@ -97,7 +96,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 
 	// Auth mode: either use the proxy's own API key or forward the client's.
 	switch c.authMode {
-	case "proxy_key":
+	case "api_key":
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	case "forward":
 		if auth := req.Headers.Get("Authorization"); auth != "" {
@@ -165,7 +164,7 @@ func (c *Client) endpointURL(suffix string) string {
 	case strings.HasSuffix(basePath, "/v1"):
 		u.Path = basePath + suffix
 	default:
-		u.Path = path.Join(basePath, suffix)
+		u.Path = basePath + "/v1" + suffix
 	}
 
 	return u.String()
@@ -269,7 +268,7 @@ func (c *Client) ListModels(ctx context.Context) ([]provider.DiscoveredModel, er
 	}
 
 	switch c.authMode {
-	case "proxy_key":
+	case "api_key":
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
