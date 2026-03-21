@@ -148,6 +148,7 @@ func (c *Config) InjectDiscoveredModels(providers map[string]provider.Provider) 
 				ModelName:     modelName,
 				Provider:      pc.Name,
 				UpstreamModel: m.ID,
+				Discovered:    true,
 			})
 			explicit[modelName] = true
 			added++
