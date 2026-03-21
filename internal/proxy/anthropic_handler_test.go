@@ -367,8 +367,8 @@ func TestAnthropicProxy_UpstreamError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
 
-	// A 429 from the only chain entry exhausts the chain → 503.
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	// A 429 from the only chain entry exhausts the chain and returns 429.
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 
 	// Wait for the async logger.
 	h.closeLogger()
@@ -535,8 +535,8 @@ func TestFallback_4xxNoRetry(t *testing.T) {
 	require.Equal(t, 0, secondaryHits, "secondary should never be reached")
 }
 
-// TestFallback_AllExhausted503 verifies that exhausting all entries returns 503.
-func TestFallback_AllExhausted503(t *testing.T) {
+// TestFallback_AllExhausted returns last upstream status verifies that exhausting all entries returns the last upstream status.
+func TestFallback_AllExhaustedReturnsLastStatus(t *testing.T) {
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -554,7 +554,7 @@ func TestFallback_AllExhausted503(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 // TestFallback_FirstSuccessShortCircuits verifies no unnecessary fallbacks when first entry succeeds.

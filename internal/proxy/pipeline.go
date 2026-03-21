@@ -49,7 +49,7 @@ type pipelineCallbacks struct {
 	onMissingProvider   func(string)
 	onUnsupportedFormat func(provider.Provider) bool
 	onNetworkError      func()
-	onExhaustedError    func()
+	onExhaustedError    func(int)
 }
 
 // newPipelineCallbacks builds the four error callbacks parameterised on the
@@ -69,8 +69,8 @@ func newPipelineCallbacks(w http.ResponseWriter, writeErr errorWriter, serverErr
 		onNetworkError: func() {
 			writeErr(w, http.StatusBadGateway, serverErrType, "Failed to reach upstream provider")
 		},
-		onExhaustedError: func() {
-			writeErr(w, http.StatusServiceUnavailable, serverErrType, "All upstream providers failed")
+		onExhaustedError: func(status int) {
+			writeErr(w, status, serverErrType, "All upstream providers failed")
 		},
 	}
 }
@@ -158,7 +158,7 @@ func executeProviderAttempt(
 	calc *pricing.Calculator,
 	cb *circuitbreaker.Breaker,
 	writeNetworkError func(),
-	writeExhaustedError func(),
+	writeExhaustedError func(int),
 	handleResponse func(*provider.Response) handlerResult,
 ) bool {
 	provResp, err := prov.SendRequest(r.Context(), provReq)
@@ -194,10 +194,10 @@ func executeProviderAttempt(
 		errMsg := fmt.Sprintf("all %d fallback entries exhausted; last status %d", attempt.AttemptCount, provResp.StatusCode)
 		logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, prov.Name(), attempt.ModelRequested, attempt.ModelUpstream, "",
 			latency, attempt.RequestBody, attempt.AttemptCount, handlerResult{
-				Status: http.StatusServiceUnavailable, Body: []byte(errMsg),
+				Status: provResp.StatusCode, Body: []byte(errMsg),
 				ErrDetails: &errMsg, IsStreaming: attempt.IsStreaming,
 			}, calc)
-		writeExhaustedError()
+		writeExhaustedError(provResp.StatusCode)
 		return true
 	}
 
@@ -257,6 +257,6 @@ func executeProxyPipeline(
 	})
 	if !anyAttempted && len(chain) > 0 {
 		slog.Warn("all providers skipped by circuit breaker", "model", spec.ModelRequest)
-		cbs.onExhaustedError()
+		cbs.onExhaustedError(http.StatusServiceUnavailable)
 	}
 }

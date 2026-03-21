@@ -335,9 +335,8 @@ func TestResponsesProxy_UpstreamError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
 
-	// Retryable upstream failures now exhaust to a generic 503, matching the
-	// fallback contract used by the other proxy handlers.
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	// Exhausted fallbacks now return the last upstream status code.
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 
 	// Wait for the async logger.
 	h.closeLogger()
@@ -349,7 +348,7 @@ func TestResponsesProxy_UpstreamError(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
-	require.Equal(t, http.StatusServiceUnavailable, logs[0].Status)
+	require.Equal(t, http.StatusInternalServerError, logs[0].Status)
 }
 
 func TestResponsesProxy_ErrorLogged(t *testing.T) {
@@ -368,7 +367,7 @@ func TestResponsesProxy_ErrorLogged(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 
 	// Wait for the async logger to flush.
 	h.closeLogger()
