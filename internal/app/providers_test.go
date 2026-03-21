@@ -16,7 +16,7 @@ func float64ptr(v float64) *float64 {
 func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	cfg := &config.Config{
 		Providers: []config.ProviderConfig{
-			{Name: "chatgpt-pro", Type: "openai", AuthMode: "proxy_key", MonthlySubscriptionCost: float64ptr(20)},
+			{Name: "chatgpt-pro", Type: "openai", AuthMode: "api_key", MonthlySubscriptionCost: float64ptr(20)},
 			{Name: "segment", Type: "openai", BaseURL: "https://api.synthetic.new/v1"},
 			{Name: "gemini-api", Type: "gemini", AuthMode: "api_key", APIKey: "test-gemini-key"},
 			{Name: "copilot", Type: "github_copilot"},
@@ -66,9 +66,9 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	require.Equal(t, 4.0, override.CacheReadPerMillion)
 	require.Equal(t, 7.0, override.CacheWritePerMillion)
 
-	segment, ok := calc.Lookup("segment", "hf:MiniMaxAI/MiniMax-M2.5")
+	synthetic, ok := calc.Lookup("segment", "hf:MiniMaxAI/MiniMax-M2.5")
 	require.True(t, ok)
-	require.Equal(t, 0.60, segment.InputPerMillion)
+	require.Equal(t, 0.40, synthetic.InputPerMillion)
 
 	geminiFlash, ok := calc.Lookup("gemini-api", "gemini-2.5-flash")
 	require.True(t, ok)

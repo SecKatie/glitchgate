@@ -157,25 +157,88 @@ var ChutesDefaults = map[string]Entry{
 	},
 }
 
-// SegmentDefaults holds pricing for models accessed via the Synthetic.new Segment platform.
+// SyntheticDefaults holds pricing for models accessed via the Synthetic.new platform.
 // Applied for providers with type "openai" whose base_url targets api.synthetic.new.
-// Values are USD per million tokens.
-var SegmentDefaults = map[string]Entry{
-	"hf:MiniMaxAI/MiniMax-M2.5": {
-		InputPerMillion:  0.60,
-		OutputPerMillion: 3.00,
+// Values are USD per million tokens as of 2026-03-20.
+var SyntheticDefaults = map[string]Entry{
+	// DeepSeek (via Together AI)
+	"hf:deepseek-ai/DeepSeek-R1-0528": {
+		InputPerMillion:  3.00,
+		OutputPerMillion: 8.00,
 	},
+	"hf:deepseek-ai/DeepSeek-V3": {
+		InputPerMillion:  1.25,
+		OutputPerMillion: 1.25,
+	},
+	// DeepSeek (via Fireworks)
+	"hf:deepseek-ai/DeepSeek-V3.2": {
+		InputPerMillion:  0.56,
+		OutputPerMillion: 1.68,
+	},
+	// Meta (via Together AI)
+	"hf:meta-llama/Llama-3.3-70B-Instruct": {
+		InputPerMillion:  0.88,
+		OutputPerMillion: 0.88,
+	},
+	// MiniMax (via Fireworks)
+	"hf:MiniMaxAI/MiniMax-M2.1": {
+		InputPerMillion:  0.30,
+		OutputPerMillion: 1.20,
+	},
+	// MiniMax (via Synthetic)
+	"hf:MiniMaxAI/MiniMax-M2.5": {
+		InputPerMillion:  0.40,
+		OutputPerMillion: 2.00,
+	},
+	// Moonshot / Kimi (via Fireworks)
+	"hf:moonshotai/Kimi-K2-Instruct-0905": {
+		InputPerMillion:  1.20,
+		OutputPerMillion: 1.20,
+	},
+	"hf:moonshotai/Kimi-K2-Thinking": {
+		InputPerMillion:  0.60,
+		OutputPerMillion: 2.50,
+	},
+	// Moonshot / Kimi (via Synthetic)
 	"hf:moonshotai/Kimi-K2.5": {
 		InputPerMillion:  0.60,
 		OutputPerMillion: 3.00,
 	},
+	// NVIDIA (via Synthetic)
+	"hf:nvidia/Kimi-K2.5-NVFP4": {
+		InputPerMillion:  0.60,
+		OutputPerMillion: 3.00,
+	},
+	"hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4": {
+		InputPerMillion:  0.30,
+		OutputPerMillion: 1.00,
+	},
+	// OpenAI (via Fireworks)
+	"hf:openai/gpt-oss-120b": {
+		InputPerMillion:  0.10,
+		OutputPerMillion: 0.10,
+	},
+	// Qwen (via Together AI)
+	"hf:Qwen/Qwen3-235B-A22B-Thinking-2507": {
+		InputPerMillion:  0.65,
+		OutputPerMillion: 3.00,
+	},
+	"hf:Qwen/Qwen3-Coder-480B-A35B-Instruct": {
+		InputPerMillion:  2.00,
+		OutputPerMillion: 2.00,
+	},
+	"hf:Qwen/Qwen3.5-397B-A17B": {
+		InputPerMillion:  0.60,
+		OutputPerMillion: 3.60,
+	},
+	// Zhipu AI / GLM (via Synthetic)
 	"hf:zai-org/GLM-4.7": {
 		InputPerMillion:  0.55,
 		OutputPerMillion: 2.19,
 	},
 	"hf:zai-org/GLM-4.7-Flash": {
-		InputPerMillion:  0.06,
-		OutputPerMillion: 0.40,
+		InputPerMillion:  0.10,
+		OutputPerMillion: 0.50,
 	},
 }
 
@@ -290,7 +353,7 @@ const (
 	officialChatGPTHost     = "chatgpt.com"
 	officialCodexPathPrefix = "/backend-api/codex"
 	chutesHost              = "llm.chutes.ai"
-	segmentHost             = "api.synthetic.new"
+	syntheticHost           = "api.synthetic.new"
 )
 
 // IsOfficialOpenAIURL reports whether baseURL targets an official OpenAI-priced endpoint.
@@ -326,9 +389,9 @@ func IsChutesURL(baseURL string) bool {
 	return hostnameOf(baseURL) == chutesHost
 }
 
-// IsSegmentURL reports whether baseURL targets the Synthetic.new Segment platform.
-func IsSegmentURL(baseURL string) bool {
-	return hostnameOf(baseURL) == segmentHost
+// IsSyntheticURL reports whether baseURL targets the Synthetic.new platform.
+func IsSyntheticURL(baseURL string) bool {
+	return hostnameOf(baseURL) == syntheticHost
 }
 
 // ProviderKey returns the canonical provider identifier used as the key prefix

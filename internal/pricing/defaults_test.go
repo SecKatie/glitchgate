@@ -68,9 +68,9 @@ func TestProviderURLClassifiers(t *testing.T) {
 		require.False(t, pricing.IsChutesURL("https://api.openai.com/v1"))
 	})
 
-	t.Run("segment", func(t *testing.T) {
-		require.True(t, pricing.IsSegmentURL("https://api.synthetic.new/v1/responses"))
-		require.False(t, pricing.IsSegmentURL(""))
+	t.Run("synthetic", func(t *testing.T) {
+		require.True(t, pricing.IsSyntheticURL("https://api.synthetic.new/v1/responses"))
+		require.False(t, pricing.IsSyntheticURL(""))
 	})
 }
 

@@ -198,8 +198,8 @@ func defaultPricingForProvider(pc config.ProviderConfig) map[string]pricing.Entr
 			return pricing.OpenAIDefaults
 		case pricing.IsChutesURL(baseURL):
 			return pricing.ChutesDefaults
-		case pricing.IsSegmentURL(baseURL):
-			return pricing.SegmentDefaults
+		case pricing.IsSyntheticURL(baseURL):
+			return pricing.SyntheticDefaults
 		}
 	case "gemini":
 		return pricing.GeminiDefaults
