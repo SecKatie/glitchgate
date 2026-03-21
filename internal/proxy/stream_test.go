@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExtractTokens_CacheFields(t *testing.T) {
+func TestExtractAnthropicTokens_CacheFields(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name              string
@@ -49,12 +49,12 @@ func TestExtractTokens_CacheFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var input, output, cacheCreation, cacheRead int64
-			extractTokens(tc.data, &input, &output, &cacheCreation, &cacheRead)
-			require.Equal(t, tc.wantInput, input, "input tokens")
-			require.Equal(t, tc.wantOutput, output, "output tokens")
-			require.Equal(t, tc.wantCacheCreation, cacheCreation, "cache creation tokens")
-			require.Equal(t, tc.wantCacheRead, cacheRead, "cache read tokens")
+			var result StreamResult
+			extractAnthropicTokens(tc.data, &result)
+			require.Equal(t, tc.wantInput, result.InputTokens, "input tokens")
+			require.Equal(t, tc.wantOutput, result.OutputTokens, "output tokens")
+			require.Equal(t, tc.wantCacheCreation, result.CacheCreationInputTokens, "cache creation tokens")
+			require.Equal(t, tc.wantCacheRead, result.CacheReadInputTokens, "cache read tokens")
 		})
 	}
 }
@@ -105,12 +105,12 @@ func TestExtractResponsesTokens_CacheFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var input, output, cacheRead, reasoning int64
-			extractResponsesTokens(tc.data, &input, &output, &cacheRead, &reasoning)
-			require.Equal(t, tc.wantInput, input, "input tokens")
-			require.Equal(t, tc.wantOutput, output, "output tokens")
-			require.Equal(t, tc.wantCacheRead, cacheRead, "cache read tokens")
-			require.Equal(t, tc.wantReasoning, reasoning, "reasoning tokens")
+			var result StreamResult
+			extractResponsesTokens(tc.data, &result)
+			require.Equal(t, tc.wantInput, result.InputTokens, "input tokens")
+			require.Equal(t, tc.wantOutput, result.OutputTokens, "output tokens")
+			require.Equal(t, tc.wantCacheRead, result.CacheReadInputTokens, "cache read tokens")
+			require.Equal(t, tc.wantReasoning, result.ReasoningTokens, "reasoning tokens")
 		})
 	}
 }

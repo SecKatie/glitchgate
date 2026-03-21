@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/seckatie/glitchgate/internal/circuitbreaker"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
@@ -18,26 +19,21 @@ import (
 )
 
 // OpenAIHandler is the proxy HTTP handler for OpenAI-compatible requests.
-// It translates OpenAI Chat Completions requests to Anthropic format,
-// dispatches them via the configured provider, and translates responses
-// back to OpenAI format.
 type OpenAIHandler struct {
-	cfg           *config.Config
-	providers     map[string]provider.Provider
-	calculator    *pricing.Calculator
-	logger        *AsyncLogger
-	budgetChecker *BudgetChecker
+	baseHandler
 }
 
 // NewOpenAIHandler creates a new OpenAI-compatible proxy handler.
-func NewOpenAIHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker) *OpenAIHandler {
-	return &OpenAIHandler{
+func NewOpenAIHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker, breakers *circuitbreaker.Registry, mc *ModelChecker) *OpenAIHandler {
+	return &OpenAIHandler{baseHandler{
 		cfg:           cfg,
 		providers:     providers,
 		calculator:    calc,
 		logger:        logger,
 		budgetChecker: bc,
-	}
+		breakers:      breakers,
+		modelChecker:  mc,
+	}}
 }
 
 // ServeHTTP handles POST /v1/chat/completions requests.
@@ -85,6 +81,16 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	metrics.RecordActiveRequest("openai")
 	defer metrics.FinishActiveRequest("openai")
 
+	if h.modelChecker != nil && proxyKeyID != "" {
+		if allowed, err := h.modelChecker.IsModelAllowed(r.Context(), proxyKeyID, oaiReq.Model); err != nil {
+			slog.Warn("model allowlist check error", "error", err)
+		} else if !allowed {
+			writeOpenAIError(w, http.StatusForbidden, "permission_error",
+				fmt.Sprintf("Model %q is not allowed for this API key", oaiReq.Model))
+			return
+		}
+	}
+
 	if h.budgetChecker != nil && proxyKeyID != "" {
 		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
 			slog.Warn("budget check error", "error", err)
@@ -97,7 +103,7 @@ func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
+	executeProxyPipeline(w, r, h.logger, chain, h.providers, h.breakers, pipelineSpec{
 		SourceFormat: "openai",
 		ProxyKeyID:   proxyKeyID,
 		KeyPrefix:    keyPrefix,
@@ -303,7 +309,7 @@ func (h *OpenAIHandler) handleOpenAINativeNonStreaming(w http.ResponseWriter, re
 }
 
 func (h *OpenAIHandler) handleOpenAINativeStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
-	result, err := RelayOpenAISSEStream(ctx, w, resp.Stream)
+	result, err := RelaySSEStream(ctx, w, resp.Stream, SkipDone(extractOpenAITokens))
 	return streamingResult(resp, result, err)
 }
 

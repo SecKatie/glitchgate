@@ -86,6 +86,38 @@ func KeyRateLimitMiddleware(l *ratelimit.Limiter) func(http.Handler) http.Handle
 	}
 }
 
+// KeyAwareRateLimitMiddleware limits authenticated proxy traffic using both
+// the global rate limit and any per-key rate limit overrides.
+func KeyAwareRateLimitMiddleware(kl *KeyAwareRateLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if kl == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			pk := KeyFromContext(r.Context())
+			key := "unknown"
+			if pk != nil && pk.ID != "" {
+				key = pk.ID
+			}
+
+			if !kl.Allow(r.Context(), key) {
+				// #nosec G706 -- logged values are normalized via safeLogValue before logging.
+				slog.Warn("proxy rate limit exceeded",
+					"limiter", "proxy_key",
+					"key", safeLogValue(key),
+					"path", safeLogValue(r.URL.Path),
+					"remote_ip", safeLogValue(remoteAddrKey(r.RemoteAddr)),
+				)
+				writeProxyRateLimitError(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func writeProxyRateLimitError(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/chat/completions"):

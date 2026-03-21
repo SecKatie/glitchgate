@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/seckatie/glitchgate/internal/circuitbreaker"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
@@ -21,22 +22,20 @@ import (
 
 // ResponsesHandler is the proxy HTTP handler for Responses API requests.
 type ResponsesHandler struct {
-	cfg           *config.Config
-	providers     map[string]provider.Provider
-	calculator    *pricing.Calculator
-	logger        *AsyncLogger
-	budgetChecker *BudgetChecker
+	baseHandler
 }
 
 // NewResponsesHandler creates a new Responses API proxy handler.
-func NewResponsesHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker) *ResponsesHandler {
-	return &ResponsesHandler{
+func NewResponsesHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker, breakers *circuitbreaker.Registry, mc *ModelChecker) *ResponsesHandler {
+	return &ResponsesHandler{baseHandler{
 		cfg:           cfg,
 		providers:     providers,
 		calculator:    calc,
 		logger:        logger,
 		budgetChecker: bc,
-	}
+		breakers:      breakers,
+		modelChecker:  mc,
+	}}
 }
 
 // ServeHTTP handles POST /v1/responses requests.
@@ -118,6 +117,16 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	metrics.RecordActiveRequest("responses")
 	defer metrics.FinishActiveRequest("responses")
 
+	if h.modelChecker != nil && proxyKeyID != "" {
+		if allowed, err := h.modelChecker.IsModelAllowed(r.Context(), proxyKeyID, req.Model); err != nil {
+			slog.Warn("model allowlist check error", "error", err)
+		} else if !allowed {
+			writeResponsesError(w, http.StatusForbidden, "permission_error",
+				fmt.Sprintf("Model %q is not allowed for this API key", req.Model))
+			return
+		}
+	}
+
 	if h.budgetChecker != nil && proxyKeyID != "" {
 		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
 			slog.Warn("budget check error", "error", err)
@@ -130,7 +139,7 @@ func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
+	executeProxyPipeline(w, r, h.logger, chain, h.providers, h.breakers, pipelineSpec{
 		SourceFormat: "responses",
 		ProxyKeyID:   proxyKeyID,
 		KeyPrefix:    keyPrefix,
@@ -394,7 +403,7 @@ func (h *ResponsesHandler) handleResponsesNonStreaming(w http.ResponseWriter, re
 
 // handleResponsesStreaming relays a Responses API SSE stream.
 func (h *ResponsesHandler) handleResponsesStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
-	result, err := RelayResponsesSSEStream(ctx, w, resp.Stream)
+	result, err := RelaySSEStream(ctx, w, resp.Stream, SkipDone(extractResponsesTokens))
 	return streamingResult(resp, result, err)
 }
 

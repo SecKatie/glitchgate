@@ -76,7 +76,7 @@ func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 		},
 	}
 
-	anthropicClient, err := anthropic.NewClient("anthropic", upstreamURL, "proxy_key", "test-upstream-key", "2023-06-01")
+	anthropicClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "anthropic", BaseURL: upstreamURL, AuthMode: "proxy_key", APIKey: "test-upstream-key", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -86,7 +86,7 @@ func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 
-	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil, nil, nil)
 
 	h := &openAITestHarness{
 		store:     st,
@@ -396,9 +396,9 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	primaryClient, err := anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01")
+	primaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primaryURL, AuthMode: "proxy_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
-	secondaryClient, err := anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01")
+	secondaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondaryURL, AuthMode: "proxy_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -408,7 +408,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil, nil, nil)
 	return handler, st, logger
 }
 
@@ -593,13 +593,13 @@ model_list:
 	require.NoError(t, err2)
 	providers["primary"] = primaryClient
 
-	secondaryClient, err2 := anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01")
+	secondaryClient, err2 := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondaryURL, AuthMode: "proxy_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err2)
 	providers["secondary"] = secondaryClient
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil, nil, nil)
 	return handler, st, logger
 }
 
