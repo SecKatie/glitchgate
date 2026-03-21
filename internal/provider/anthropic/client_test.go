@@ -99,8 +99,8 @@ func TestSendRequest_ForwardsAnthropicAllowlistHeaders(t *testing.T) {
 }
 
 func TestClient_Interface_Direct(t *testing.T) {
-	client := &Client{authMode: "proxy_key"}
-	require.Equal(t, "proxy_key", client.AuthMode())
+	client := &Client{authMode: "api_key"}
+	require.Equal(t, "api_key", client.AuthMode())
 	require.Equal(t, "anthropic", client.APIFormat())
 }
 
@@ -111,7 +111,7 @@ func TestSendRequest_TokenExtraction_Direct(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL, AuthMode: "proxy_key", APIKey: "key"})
+	client, err := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL, AuthMode: "api_key", APIKey: "key"})
 	require.NoError(t, err)
 
 	resp, err := client.SendRequest(t.Context(), &provider.Request{
@@ -366,7 +366,7 @@ func TestListModels(t *testing.T) {
 				client, err := NewClient(ClientConfig{
 					Name:           "test",
 					BaseURL:        srv.URL,
-					AuthMode:       "proxy_key",
+					AuthMode:       "api_key",
 					APIKey:         "sk-test-key",
 					DefaultVersion: "2023-06-01",
 				})
@@ -407,7 +407,7 @@ func TestListModels(t *testing.T) {
 				client, err := NewClient(ClientConfig{
 					Name:           "test",
 					BaseURL:        srv.URL,
-					AuthMode:       "proxy_key",
+					AuthMode:       "api_key",
 					APIKey:         "sk-test-key",
 					DefaultVersion: "2023-06-01",
 				})
@@ -430,7 +430,7 @@ func TestListModels(t *testing.T) {
 				client, err := NewClient(ClientConfig{ //nolint:gosec // test credential
 					Name:           "test",
 					BaseURL:        srv.URL,
-					AuthMode:       "proxy_key",
+					AuthMode:       "api_key",
 					APIKey:         "sk-bad-key", //nolint:gosec // test credential
 					DefaultVersion: "2023-06-01",
 				})
@@ -454,9 +454,34 @@ func TestListModels(t *testing.T) {
 				client, err := NewClient(ClientConfig{ //nolint:gosec // test credential
 					Name:           "test",
 					BaseURL:        srv.URL,
-					AuthMode:       "proxy_key",
+					AuthMode:       "api_key",
 					APIKey:         "sk-verify-header", //nolint:gosec // test credential
 					DefaultVersion: "2023-06-01",
+				})
+				require.NoError(t, err)
+				return client, srv
+			},
+			wantModels: []provider.DiscoveredModel{
+				{ID: "claude-sonnet-4-6-20250514"},
+			},
+		},
+		{
+			name: "direct_empty_default_version_uses_fallback",
+			setup: func(t *testing.T) (*Client, *httptest.Server) {
+				t.Helper()
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					require.NotEmpty(t, r.Header.Get("Anthropic-Version"), "should send a non-empty Anthropic-Version even when DefaultVersion is empty")
+					w.Header().Set("Content-Type", "application/json")
+					resp := modelsListResponse{Data: []modelInfo{{ID: "claude-sonnet-4-6-20250514"}}, HasMore: false}
+					b, _ := json.Marshal(resp)
+					_, _ = w.Write(b)
+				}))
+				client, err := NewClient(ClientConfig{
+					Name:     "test",
+					BaseURL:  srv.URL,
+					AuthMode: "api_key",
+					APIKey:   "sk-test-key",
+					// DefaultVersion intentionally empty
 				})
 				require.NoError(t, err)
 				return client, srv

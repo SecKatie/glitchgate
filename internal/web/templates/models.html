@@ -4,6 +4,68 @@
 
 {{define "head"}}
 <style>
+  /* ── Stat cards ─────────────────────────────────────────── */
+  .models-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .models-stat-card {
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.75rem 1rem;
+    text-align: center;
+  }
+  .models-stat-value {
+    font-size: 1.5em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+  .models-stat-label {
+    font-size: 0.7em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pico-muted-color);
+    margin-top: 0.15rem;
+  }
+
+  /* ── Filter bar ─────────────────────────────────────────── */
+  .models-filter-bar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: end;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--pico-card-sectioning-background-color);
+    border-radius: var(--pico-border-radius);
+  }
+  .models-filter-bar label {
+    margin-bottom: 0;
+    font-size: 0.8em;
+    font-weight: 600;
+    color: var(--pico-muted-color);
+  }
+  .models-filter-bar select,
+  .models-filter-bar input {
+    margin-bottom: 0;
+    padding: 0.25rem 0.5rem;
+    height: 2.25rem;
+  }
+  #model-search { min-width: 16rem; }
+  .filter-count {
+    margin-left: auto;
+    align-self: center;
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* ── Sortable headers ───────────────────────────────────── */
   th[data-col] {
     cursor: pointer;
     user-select: none;
@@ -17,22 +79,75 @@
   }
   th[data-col][aria-sort="ascending"]::after  { content: " ↑"; color: var(--pico-primary); }
   th[data-col][aria-sort="descending"]::after { content: " ↓"; color: var(--pico-primary); }
+
+  /* ── Badges ─────────────────────────────────────────────── */
   .model-kind-badge {
     display: inline-block;
-    padding: 0.1em 0.4em;
-    border-radius: 3px;
-    font-size: 0.72em;
+    padding: 0.1em 0.45em;
+    border-radius: 4px;
+    font-size: 0.7em;
     font-weight: 600;
     vertical-align: middle;
-    margin-left: 0.25em;
+    margin-left: 0.3em;
   }
-  .upstream-cell {
-    font-family: var(--pico-font-family-monospace);
-    font-size: 0.85em;
+  .badge-virtual {
+    background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
+    color: var(--pico-primary);
+  }
+  .badge-wildcard {
+    background: color-mix(in srgb, var(--pico-ins-color) 12%, transparent);
+    color: var(--pico-ins-color);
+  }
+  .badge-log {
+    background: color-mix(in srgb, var(--pico-muted-color) 12%, transparent);
     color: var(--pico-muted-color);
   }
-  #model-search { min-width: 16rem; }
-  /* Group header rows */
+  .badge-discovered {
+    background: color-mix(in srgb, var(--pico-color) 10%, transparent);
+    color: var(--pico-secondary);
+  }
+  .child-count {
+    display: inline-block;
+    padding: 0.08em 0.45em;
+    border-radius: 10px;
+    font-size: 0.7em;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--pico-muted-color) 10%, transparent);
+    color: var(--pico-muted-color);
+    vertical-align: middle;
+    margin-left: 0.3em;
+  }
+
+  /* ── Provider cell ──────────────────────────────────────── */
+  .prov-name { font-weight: 500; }
+  .prov-type {
+    font-size: 0.8em;
+    color: var(--pico-muted-color);
+    margin-left: 0.2em;
+  }
+
+  /* ── Upstream & pricing cells ────────────────────────────── */
+  .upstream-cell {
+    font-family: var(--pico-font-family-monospace);
+    font-size: 0.82em;
+    color: var(--pico-muted-color);
+    max-width: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pricing-cell {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.88em;
+  }
+  .pricing-sep {
+    color: var(--pico-muted-color);
+    margin: 0 0.1em;
+  }
+  .muted-dash { color: var(--pico-muted-color); }
+
+  /* ── Group header rows ──────────────────────────────────── */
   tr.group-header {
     cursor: pointer;
   }
@@ -46,49 +161,28 @@
     display: inline-block;
     width: 1.2em;
     text-align: center;
-    font-size: 0.8em;
+    font-size: 0.75em;
     color: var(--pico-muted-color);
     transition: transform 0.15s;
-    margin-right: 0.25em;
+    margin-right: 0.2em;
   }
   tr.group-header.expanded .expand-icon {
     transform: rotate(90deg);
   }
-  /* Child rows */
-  tr.child-row {
-    display: none;
-  }
-  tr.child-row.visible {
-    display: table-row;
-  }
-  tr.child-row td:first-child {
-    padding-left: 2rem;
-  }
+
+  /* ── Child rows ─────────────────────────────────────────── */
+  tr.child-row { display: none; }
+  tr.child-row.visible { display: table-row; }
+  tr.child-row td:first-child { padding-left: 2.2rem; }
   tr.child-row td {
     background: color-mix(in srgb, var(--pico-card-sectioning-background-color) 50%, transparent);
-    font-size: 0.92em;
-  }
-  /* Child count badge */
-  .child-count {
-    display: inline-block;
-    padding: 0.1em 0.5em;
-    border-radius: 3px;
-    font-size: 0.72em;
-    font-weight: 600;
-    background: color-mix(in srgb, var(--pico-muted-color) 10%, transparent);
-    color: var(--pico-muted-color);
-    vertical-align: middle;
-    margin-left: 0.35em;
-  }
-  /* Pricing column */
-  .pricing-cell {
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
     font-size: 0.9em;
   }
-  .pricing-sep {
-    color: var(--pico-muted-color);
-    margin: 0 0.15em;
+
+  /* ── Table row hover ────────────────────────────────────── */
+  #models-table tbody tr[data-href]:hover {
+    cursor: pointer;
+    box-shadow: inset 2px 0 0 var(--pico-primary);
   }
 </style>
 {{end}}
@@ -97,24 +191,51 @@
 <h2>Models</h2>
 {{if .Models}}
 
-<div class="filter-bar">
+{{/* ── Summary stats ───────────────────────────────────────── */}}
+<div class="models-stats">
+  <div class="models-stat-card">
+    <div class="models-stat-value">{{.TotalModels}}</div>
+    <div class="models-stat-label">Total Models</div>
+  </div>
+  <div class="models-stat-card">
+    <div class="models-stat-value">{{.TotalConfigured}}</div>
+    <div class="models-stat-label">Configured</div>
+  </div>
+  <div class="models-stat-card">
+    <div class="models-stat-value">{{.TotalDiscovered}}</div>
+    <div class="models-stat-label">Discovered</div>
+  </div>
+  <div class="models-stat-card">
+    <div class="models-stat-value">{{.TotalWithPricing}}</div>
+    <div class="models-stat-label">With Pricing</div>
+  </div>
+  <div class="models-stat-card">
+    <div class="models-stat-value" style="color:var(--pico-primary)">${{printf "%.2f" .TotalSpend}}</div>
+    <div class="models-stat-label">Total Spend</div>
+  </div>
+</div>
+
+{{/* ── Filter bar ──────────────────────────────────────────── */}}
+<div class="models-filter-bar">
   <label>
     Search
-    <input id="model-search" type="search" placeholder="Filter by name…" oninput="filterModels()" class="mb-0">
+    <input id="model-search" type="search" placeholder="Filter by name…" oninput="filterModels()">
   </label>
   <label>
     Type
-    <select id="model-kind" onchange="filterModels()" class="mb-0">
+    <select id="model-kind" onchange="filterModels()">
       <option value="">All</option>
       <option value="configured">Configured</option>
+      <option value="discovered">Discovered</option>
       <option value="unconfigured">Seen in logs</option>
       <option value="virtual">Virtual</option>
       <option value="wildcard">Wildcard</option>
     </select>
   </label>
-  <small id="model-count" class="text-muted" style="align-self:center"></small>
+  <span id="model-count" class="filter-count"></span>
 </div>
 
+{{/* ── Models table ────────────────────────────────────────── */}}
 <table id="models-table">
   <thead>
     <tr>
@@ -127,13 +248,13 @@
   </thead>
   <tbody>
     {{range .Models}}
-    {{if or .IsWildcard .IsVirtual .IsLogGroup}}
-    {{/* ── Group header row ────────────────────────────────────── */}}
+    {{if or .IsWildcard .IsVirtual .IsLogGroup .IsDiscoveryGroup}}
+    {{/* ── Group header row ────────────────────────────────── */}}
     {{$parent := .}}
     <tr class="group-header"
       data-group="{{.EncodedName}}"
       data-name="{{.ModelName}}"
-      data-kind="{{if .IsLogGroup}}unconfigured{{else if .IsVirtual}}virtual{{else}}wildcard{{end}}"
+      data-kind="{{if .IsLogGroup}}unconfigured{{else if .IsVirtual}}virtual{{else if .IsDiscoveryGroup}}discovered{{else}}wildcard{{end}}"
       data-prov="{{if .IsVirtual}}virtual{{else}}{{.ProviderName}} {{.ProviderType}}{{end}}"
       data-upstream=""
       data-pricing="-1"
@@ -141,18 +262,19 @@
     >
       <td>
         <span class="expand-icon">&#9654;</span>
-        {{if .IsLogGroup}}<span style="color:var(--pico-muted-color)">{{.ModelName}}</span>{{else}}<a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>{{end}}
-        {{if .IsVirtual}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-primary) 15%,transparent);color:var(--pico-primary)">Virtual</span>{{end}}
-        {{if .IsWildcard}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-color) 12%,transparent);color:var(--pico-muted-color)">Wildcard</span>{{end}}
-        {{if .IsLogGroup}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">Log only</span>{{end}}
+        {{if .IsLogGroup}}<span style="color:var(--pico-muted-color)">{{.ModelName}}</span>{{else if .IsDiscoveryGroup}}<span>{{.ProviderName}}</span>{{else}}<a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>{{end}}
+        {{if .IsVirtual}}<span class="model-kind-badge badge-virtual">Virtual</span>{{end}}
+        {{if .IsWildcard}}<span class="model-kind-badge badge-wildcard">Wildcard</span>{{end}}
+        {{if .IsLogGroup}}<span class="model-kind-badge badge-log">Log only</span>{{end}}
+        {{if .IsDiscoveryGroup}}<span class="model-kind-badge badge-discovered">Discovered</span>{{end}}
         {{if gt .ChildCount 0}}<span class="child-count">{{.ChildCount}} {{if .IsVirtual}}fallback{{if gt .ChildCount 1}}s{{end}}{{else}}model{{if gt .ChildCount 1}}s{{end}}{{end}}</span>{{end}}
       </td>
-      <td>{{if .IsVirtual}}&mdash;{{else if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
-      <td class="upstream-cell">&mdash;</td>
-      <td class="pricing-cell">&mdash;</td>
-      <td class="cost">{{if gt .TotalSpendUSD 0.0}}${{printf "%.2f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+      <td>{{if .IsVirtual}}<span class="muted-dash">&mdash;</span>{{else if .ProviderName}}<span class="prov-name">{{.ProviderName}}</span> <span class="prov-type">{{.ProviderType}}</span>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td class="upstream-cell"><span class="muted-dash">&mdash;</span></td>
+      <td class="pricing-cell"><span class="muted-dash">&mdash;</span></td>
+      <td class="cost">{{if gt .TotalSpendUSD 0.0}}${{printf "%.2f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
     </tr>
-    {{/* ── Child rows ──────────────────────────────────────────── */}}
+    {{/* ── Child rows ──────────────────────────────────────── */}}
     {{range .Children}}
     <tr class="child-row"
       data-parent="{{$parent.EncodedName}}"
@@ -166,16 +288,16 @@
     >
       <td>
         <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{.ModelName}}</a>
-        {{if not (eq .ModelName "")}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+        {{if not (eq .ModelName "")}} <button class="copy-btn" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
       </td>
-      <td>{{if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
-      <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
-      <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
-      <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+      <td>{{if .ProviderName}}<span class="prov-name">{{.ProviderName}}</span> <span class="prov-type">{{.ProviderType}}</span>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
     </tr>
     {{end}}
     {{else}}
-    {{/* ── Regular (concrete / unconfigured) row ───────────────── */}}
+    {{/* ── Regular (concrete / unconfigured) row ───────────── */}}
     <tr
       data-href="/ui/models/{{.EncodedName}}"
       data-name="{{.ModelName}}"
@@ -188,13 +310,13 @@
     >
       <td>
         <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{if .ModelName}}{{.ModelName}}{{else}}<em style="color:var(--pico-muted-color)">(empty)</em>{{end}}</a>
-        {{if .IsUnconfigured}}<span class="model-kind-badge" style="background:color-mix(in srgb,var(--pico-muted-color) 12%,transparent);color:var(--pico-muted-color)">seen in logs</span>{{end}}
-        {{if .ModelName}} <button class="copy-btn outline secondary" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+        {{if .IsUnconfigured}}<span class="model-kind-badge badge-log">seen in logs</span>{{end}}
+        {{if .ModelName}} <button class="copy-btn" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
       </td>
-      <td>{{if .ProviderName}}{{.ProviderName}} ({{.ProviderType}}){{else}}&mdash;{{end}}</td>
-      <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}&mdash;{{end}}</td>
-      <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}&mdash;{{end}}</td>
-      <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}&mdash;{{end}}</td>
+      <td>{{if .ProviderName}}<span class="prov-name">{{.ProviderName}}</span> <span class="prov-type">{{.ProviderType}}</span>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
     </tr>
     {{end}}
     {{end}}

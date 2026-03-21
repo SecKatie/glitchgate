@@ -100,7 +100,7 @@ type ProviderConfig struct {
 	Name                    string   `mapstructure:"name"                      yaml:"name"`
 	Type                    string   `mapstructure:"type"                      yaml:"type"` // "anthropic" (default), "github_copilot", "openai", "openai_responses", "gemini"
 	BaseURL                 string   `mapstructure:"base_url"                  yaml:"base_url"`
-	AuthMode                string   `mapstructure:"auth_mode"                 yaml:"auth_mode"` // "proxy_key", "forward"; anthropic/gemini also support "vertex"
+	AuthMode                string   `mapstructure:"auth_mode"                 yaml:"auth_mode"` // "api_key", "forward"; anthropic/gemini also support "vertex"
 	APIKey                  string   `mapstructure:"api_key"                   yaml:"api_key"`   //nolint:gosec // struct field for runtime config, not a hardcoded secret
 	DefaultVersion          string   `mapstructure:"default_version"           yaml:"default_version"`
 	TokenDir                string   `mapstructure:"token_dir"                 yaml:"token_dir"`                           // github_copilot: OAuth token storage directory
@@ -133,6 +133,7 @@ type ModelMapping struct {
 	UpstreamModel string         `mapstructure:"upstream_model" yaml:"upstream_model"`
 	Fallbacks     []string       `mapstructure:"fallbacks"      yaml:"fallbacks"`
 	Metadata      *ModelMetadata `mapstructure:"metadata"       yaml:"metadata"`
+	Discovered    bool           // runtime-only: true for models injected by discovery
 }
 
 // IsWildcard returns true for wildcard prefix entries (e.g. "chatgpt/*").
@@ -269,12 +270,14 @@ func Load(configFile string) (*Config, error) {
 		if cfg.Providers[i].AuthMode == "vertex" {
 			cfg.Providers[i].CredentialsFile = expandTilde(cfg.Providers[i].CredentialsFile)
 		}
+		// Normalize deprecated proxy_key auth_mode value.
+		if cfg.Providers[i].AuthMode == "proxy_key" {
+			slog.Warn("auth_mode \"proxy_key\" is deprecated, use \"api_key\" instead", "provider", cfg.Providers[i].Name)
+			cfg.Providers[i].AuthMode = "api_key"
+		}
 		// Normalize deprecated gemini auth_mode values.
 		if cfg.Providers[i].Type == "gemini" {
 			switch cfg.Providers[i].AuthMode {
-			case "proxy_key":
-				slog.Warn("gemini auth_mode \"proxy_key\" is deprecated, use \"api_key\" instead", "provider", cfg.Providers[i].Name)
-				cfg.Providers[i].AuthMode = "api_key"
 			case "forward":
 				return nil, fmt.Errorf("provider %q: gemini auth_mode \"forward\" is no longer supported; use \"api_key\" or \"vertex\"", cfg.Providers[i].Name)
 			}

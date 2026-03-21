@@ -108,7 +108,7 @@ type mockDiscoverer struct {
 }
 
 func (m *mockDiscoverer) Name() string      { return m.name }
-func (m *mockDiscoverer) AuthMode() string  { return "proxy_key" }
+func (m *mockDiscoverer) AuthMode() string  { return "api_key" }
 func (m *mockDiscoverer) APIFormat() string { return "anthropic" }
 func (m *mockDiscoverer) SendRequest(_ context.Context, _ *provider.Request) (*provider.Response, error) {
 	return nil, nil
