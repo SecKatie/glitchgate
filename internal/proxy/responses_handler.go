@@ -38,7 +38,7 @@ func NewResponsesHandler(cfg *config.Config, providers map[string]provider.Provi
 	}}
 }
 
-// ServeHTTP handles POST /v1/responses requests.
+// ServeHTTP handles POST /openai/v1/responses requests.
 func (h *ResponsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeResponsesError(w, http.StatusMethodNotAllowed, "invalid_request_error", "Method not allowed")

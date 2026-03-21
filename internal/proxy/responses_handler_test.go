@@ -154,7 +154,7 @@ func TestResponsesProxy_NonStreaming_Passthrough(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4o","input":"Hello, world!"}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -205,7 +205,7 @@ func TestResponsesProxy_Streaming_Passthrough(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4o","input":"Stream test","stream":true}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -245,7 +245,7 @@ func TestResponsesProxy_MethodNotAllowed(t *testing.T) {
 
 	h := newResponsesTestHarness(t, upstream.URL)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/v1/responses", "")
+	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/openai/v1/responses", "")
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -261,7 +261,7 @@ func TestResponsesProxy_InvalidJSON(t *testing.T) {
 
 	h := newResponsesTestHarness(t, upstream.URL)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", "not-json{{{")
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", "not-json{{{")
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -278,7 +278,7 @@ func TestResponsesProxy_MissingModel(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"input":"Hello, world!"}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -303,7 +303,7 @@ func TestResponsesProxy_UnknownModel(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"nonexistent-model","input":"Hello"}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -330,7 +330,7 @@ func TestResponsesProxy_UpstreamError(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4o","input":"Hello"}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -363,7 +363,7 @@ func TestResponsesProxy_ErrorLogged(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4o","input":"Hello"}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -398,7 +398,7 @@ func TestResponsesProxy_InvalidInputFormat(t *testing.T) {
 
 	// Input is a number (not string or array).
 	reqBody := `{"model":"gpt-4o","input":42}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -416,7 +416,7 @@ func TestResponsesProxy_TemperatureOutOfRange(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4o","input":"hi","temperature":3.0}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -434,7 +434,7 @@ func TestResponsesProxy_DuplicateToolNames(t *testing.T) {
 	h := newResponsesTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4o","input":"hi","tools":[{"type":"function","name":"my_tool"},{"type":"function","name":"my_tool"}]}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -531,7 +531,7 @@ func TestResponsesProxy_Fallback_5xxTriggersRetry(t *testing.T) {
 
 	h := newResponsesFallbackHarness(t, primary.URL, secondary.URL)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/responses", `{"model":"virtual-responses","input":"hello"}`)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/responses", `{"model":"virtual-responses","input":"hello"}`)
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
 

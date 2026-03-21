@@ -155,7 +155,7 @@ func TestAnthropicProxy_NonStreaming(t *testing.T) {
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Hello"}],"max_tokens":100}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -205,7 +205,7 @@ func TestAnthropicProxy_Streaming(t *testing.T) {
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Stream test"}],"max_tokens":100,"stream":true}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -243,7 +243,7 @@ func TestAnthropicProxy_AuthRequired(t *testing.T) {
 
 	// Send a request without injecting a proxy key into context.
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Hello"}],"max_tokens":100}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	// Use the AuthMiddleware to protect the handler.
@@ -272,7 +272,7 @@ func TestAnthropicProxy_UnknownModel(t *testing.T) {
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"nonexistent-model","messages":[{"role":"user","content":"Hello"}],"max_tokens":100}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -296,7 +296,7 @@ func TestAnthropicProxy_MethodNotAllowed(t *testing.T) {
 
 	h := newTestHarness(t, upstream.URL)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/v1/messages", "")
+	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/anthropic/v1/messages", "")
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -312,7 +312,7 @@ func TestAnthropicProxy_InvalidJSON(t *testing.T) {
 
 	h := newTestHarness(t, upstream.URL)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", "not-json{{{")
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", "not-json{{{")
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -329,7 +329,7 @@ func TestAnthropicProxy_MissingModel(t *testing.T) {
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"messages":[{"role":"user","content":"Hello"}],"max_tokens":100}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -362,7 +362,7 @@ func TestAnthropicProxy_UpstreamError(t *testing.T) {
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Hello"}],"max_tokens":100}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -391,7 +391,7 @@ func strPtr(s string) *string { return &s }
 // Since these use direct Config construction (no Load), we inject the key via context.
 func buildFallbackRequest(t *testing.T, st *store.SQLiteStore, _, body string) *http.Request {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	// Find the key we just created via prefix scan.
 	keys, err := st.ListActiveProxyKeys(context.Background())
@@ -1172,7 +1172,7 @@ func TestAnthropicProxy_Streaming_ForwardsAnthropicBetaHeader(t *testing.T) {
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Think"}],"max_tokens":100,"stream":true}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -1200,7 +1200,7 @@ func TestAnthropicProxy_Streaming_ForwardsMultipleAnthropicHeaders(t *testing.T)
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Headers"}],"max_tokens":100,"stream":true}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -1228,7 +1228,7 @@ func TestAnthropicProxy_Streaming_NonAnthropicHeadersNotForwarded(t *testing.T) 
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Filter test"}],"max_tokens":100,"stream":true}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -1254,7 +1254,7 @@ func TestAnthropicProxy_Streaming_ThinkingEventsPassThrough(t *testing.T) {
 	h := newTestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"claude-sonnet","messages":[{"role":"user","content":"Think deeply"}],"max_tokens":500,"stream":true,"thinking":{"type":"enabled","budget_tokens":1024}}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/messages", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/anthropic/v1/messages", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)

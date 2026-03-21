@@ -627,7 +627,7 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 
 // buildCurlExample returns a pre-formatted curl command for the given model name.
 func buildCurlExample(modelName string) string {
-	return fmt.Sprintf(`curl https://your-glitchgate-host/v1/messages \
+	return fmt.Sprintf(`curl https://your-glitchgate-host/anthropic/v1/messages \
   -H "x-api-key: YOUR_PROXY_KEY" \
   -H "Content-Type: application/json" \
   -d '{

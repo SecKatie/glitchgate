@@ -15,7 +15,7 @@ import (
 // for consistency in responses.
 var modelsCreatedAt = time.Now().Unix()
 
-// ModelsHandler is the HTTP handler for OpenAI-compatible /v1/models endpoint.
+// ModelsHandler is the HTTP handler for OpenAI-compatible /openai/v1/models endpoint.
 type ModelsHandler struct {
 	cfg        *config.Config
 	calculator *pricing.Calculator
@@ -31,7 +31,7 @@ func NewModelsHandler(cfg *config.Config, calc *pricing.Calculator, logger *Asyn
 	}
 }
 
-// ServeHTTP handles GET /v1/models requests.
+// ServeHTTP handles GET /openai/v1/models requests.
 func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "invalid_request_error", "Method not allowed")
@@ -114,7 +114,7 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ModelsListResponse is the top-level response for /v1/models.
+// ModelsListResponse is the top-level response for /openai/v1/models.
 type ModelsListResponse struct {
 	Object string          `json:"object"`
 	Data   []ModelResponse `json:"data"`
