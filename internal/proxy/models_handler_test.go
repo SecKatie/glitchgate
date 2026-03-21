@@ -107,7 +107,7 @@ func (h *modelsTestHarness) buildAuthenticatedRequest(t *testing.T, method, path
 func TestModelsHandler_ReturnsList(t *testing.T) {
 	h := newModelsTestHarness(t)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/v1/models")
+	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/openai/v1/models")
 	w := httptest.NewRecorder()
 
 	h.handler.ServeHTTP(w, req)
@@ -152,7 +152,7 @@ func TestModelsHandler_ReturnsList(t *testing.T) {
 func TestModelsHandler_ExcludesWildcards(t *testing.T) {
 	h := newModelsTestHarness(t)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/v1/models")
+	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/openai/v1/models")
 	w := httptest.NewRecorder()
 
 	h.handler.ServeHTTP(w, req)
@@ -170,7 +170,7 @@ func TestModelsHandler_ExcludesWildcards(t *testing.T) {
 func TestModelsHandler_MethodNotAllowed(t *testing.T) {
 	h := newModelsTestHarness(t)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/models")
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/models")
 	w := httptest.NewRecorder()
 
 	h.handler.ServeHTTP(w, req)

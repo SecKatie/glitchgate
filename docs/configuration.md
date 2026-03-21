@@ -172,8 +172,8 @@ providers:
 
 | Type | Endpoint | Use when |
 |------|----------|----------|
-| `openai` | `/v1/chat/completions` | Standard Chat Completions API |
-| `openai_responses` | `/v1/responses` | Responses API (stateful, tool-native) |
+| `openai` | `/openai/v1/chat/completions` | Standard Chat Completions API |
+| `openai_responses` | `/openai/v1/responses` | Responses API (stateful, tool-native) |
 
 Both default `base_url` to `https://api.openai.com`, making them compatible with any OpenAI-compatible upstream (Azure, local inference, etc.).
 

@@ -35,9 +35,9 @@ For development, copy `config.example.yaml` to `config.yaml` and set `master_key
 ## Architecture Overview
 
 glitchgate is an LLM API reverse proxy with format translation between three API styles:
-- **Anthropic Messages API** (`/v1/messages`)
-- **OpenAI Chat Completions API** (`/v1/chat/completions`)
-- **OpenAI Responses API** (`/v1/responses`)
+- **Anthropic Messages API** (`/anthropic/v1/messages`)
+- **OpenAI Chat Completions API** (`/openai/v1/chat/completions`)
+- **OpenAI Responses API** (`/openai/v1/responses`)
 - **Google Gemini API** (`/v1beta/models/{model}:generateContent`)
 
 Request flow: Client → Proxy Handler → Format Translation → Upstream Provider → Cost Logging → SQLite

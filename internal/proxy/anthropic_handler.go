@@ -44,7 +44,7 @@ func isFallbackStatus(code int) bool {
 	return code >= 500 || code == 429
 }
 
-// ServeHTTP handles POST /v1/messages requests.
+// ServeHTTP handles POST /anthropic/v1/messages requests.
 func (h *AnthropicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAnthropicError(w, http.StatusMethodNotAllowed, "invalid_request_error", "Method not allowed")

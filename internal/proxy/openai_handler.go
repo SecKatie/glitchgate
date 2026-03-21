@@ -36,7 +36,7 @@ func NewOpenAIHandler(cfg *config.Config, providers map[string]provider.Provider
 	}}
 }
 
-// ServeHTTP handles POST /v1/chat/completions requests.
+// ServeHTTP handles POST /openai/v1/chat/completions requests.
 func (h *OpenAIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "invalid_request_error", "Method not allowed")

@@ -159,7 +159,7 @@ func TestOpenAIProxy_NonStreaming(t *testing.T) {
 	h := newOpenAITestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4","messages":[{"role":"user","content":"Hello from OpenAI format"}],"max_tokens":200}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/chat/completions", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/chat/completions", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -223,7 +223,7 @@ func TestOpenAIProxy_Streaming(t *testing.T) {
 	h := newOpenAITestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"gpt-4","messages":[{"role":"user","content":"Stream test"}],"max_tokens":100,"stream":true}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/chat/completions", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/chat/completions", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -308,7 +308,7 @@ func TestOpenAIProxy_SystemMessage(t *testing.T) {
 		],
 		"max_tokens": 100
 	}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/chat/completions", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/chat/completions", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -329,7 +329,7 @@ func TestOpenAIProxy_MethodNotAllowed(t *testing.T) {
 
 	h := newOpenAITestHarness(t, upstream.URL)
 
-	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/v1/chat/completions", "")
+	req := h.buildAuthenticatedRequest(t, http.MethodGet, "/openai/v1/chat/completions", "")
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
@@ -346,7 +346,7 @@ func TestOpenAIProxy_UnknownModel(t *testing.T) {
 	h := newOpenAITestHarness(t, upstream.URL)
 
 	reqBody := `{"model":"unknown-model","messages":[{"role":"user","content":"Hello"}]}`
-	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/v1/chat/completions", reqBody)
+	req := h.buildAuthenticatedRequest(t, http.MethodPost, "/openai/v1/chat/completions", reqBody)
 
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)

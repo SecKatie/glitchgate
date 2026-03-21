@@ -301,7 +301,7 @@ func TestModelDetailPage(t *testing.T) {
 		body := rec.Body.String()
 		require.Contains(t, body, "claude-sonnet")
 		require.Contains(t, body, ">Copy</button>")
-		require.Contains(t, body, "/v1/responses")
+		require.Contains(t, body, "/openai/v1/responses")
 	})
 
 	t.Run("200 for virtual model with fallbacks rendered", func(t *testing.T) {

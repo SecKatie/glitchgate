@@ -107,11 +107,17 @@ func runServe(_ *cobra.Command, _ []string) error {
 	)
 
 	// Proxy routes — authenticated with proxy API key.
-	r.Route("/v1", func(r chi.Router) {
-		r.Use(proxy.IPRateLimitMiddleware(proxyIPRateLimiter))
-		r.Use(proxy.AuthMiddleware(runtime.Store))
-		r.Use(proxy.KeyAwareRateLimitMiddleware(keyAwareRateLimiter))
+	proxyMiddleware := chi.Chain(
+		proxy.IPRateLimitMiddleware(proxyIPRateLimiter),
+		proxy.AuthMiddleware(runtime.Store),
+		proxy.KeyAwareRateLimitMiddleware(keyAwareRateLimiter),
+	)
+	r.Route("/anthropic/v1", func(r chi.Router) {
+		r.Use(proxyMiddleware...)
 		r.Post("/messages", proxyHandler.ServeHTTP)
+	})
+	r.Route("/openai/v1", func(r chi.Router) {
+		r.Use(proxyMiddleware...)
 		r.Post("/chat/completions", openaiHandler.ServeHTTP)
 		r.Post("/responses", responsesHandler.ServeHTTP)
 		r.Get("/models", modelsHandler.ServeHTTP)

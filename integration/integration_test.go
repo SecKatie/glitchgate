@@ -164,9 +164,13 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 	// --- chi router (identical to serve.go) ---
 	r := chi.NewRouter()
 	r.Use(chimw.RealIP, chimw.Recoverer)
-	r.Route("/v1", func(r chi.Router) {
-		r.Use(proxy.AuthMiddleware(st))
+	authMW := proxy.AuthMiddleware(st)
+	r.Route("/anthropic/v1", func(r chi.Router) {
+		r.Use(authMW)
 		r.Post("/messages", proxyHandler.ServeHTTP)
+	})
+	r.Route("/openai/v1", func(r chi.Router) {
+		r.Use(authMW)
 		r.Post("/chat/completions", openaiHandler.ServeHTTP)
 	})
 
@@ -186,17 +190,17 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 func (h *integrationHarness) anthropicClient() anthropicsdk.Client {
 	return anthropicsdk.NewClient(
 		anthropicoption.WithAPIKey(h.apiKey),
-		anthropicoption.WithBaseURL(h.proxy.URL),
+		anthropicoption.WithBaseURL(h.proxy.URL+"/anthropic"),
 	)
 }
 
-// openaiClient returns an OpenAI SDK client pointed at the proxy's /v1 prefix.
+// openaiClient returns an OpenAI SDK client pointed at the proxy's /openai/v1 prefix.
 // The proxy key is passed as Authorization: Bearer (OpenAI-style), which the
 // proxy's AuthMiddleware accepts for keys starting with "llmp_sk_".
 func (h *integrationHarness) openaiClient() openaisdk.Client {
 	return openaisdk.NewClient(
 		openaioption.WithAPIKey(h.apiKey),
-		openaioption.WithBaseURL(h.proxy.URL+"/v1/"),
+		openaioption.WithBaseURL(h.proxy.URL+"/openai/v1/"),
 	)
 }
 
@@ -309,7 +313,7 @@ func TestAnthropicSDK_AuthRejected(t *testing.T) {
 
 	badClient := anthropicsdk.NewClient(
 		anthropicoption.WithAPIKey("llmp_sk_000000000000badkey"),
-		anthropicoption.WithBaseURL(h.proxy.URL),
+		anthropicoption.WithBaseURL(h.proxy.URL+"/anthropic"),
 	)
 	_, err := badClient.Messages.New(context.Background(), anthropicsdk.MessageNewParams{
 		Model:     anthropicsdk.Model("claude-sonnet"),
@@ -419,7 +423,7 @@ func TestOpenAISDK_AuthRejected(t *testing.T) {
 
 	badClient := openaisdk.NewClient(
 		openaioption.WithAPIKey("llmp_sk_000000000000badkey"),
-		openaioption.WithBaseURL(h.proxy.URL+"/v1/"),
+		openaioption.WithBaseURL(h.proxy.URL+"/openai/v1/"),
 	)
 	_, err := badClient.Chat.Completions.New(context.Background(), openaisdk.ChatCompletionNewParams{
 		Model:    "gpt-4",
