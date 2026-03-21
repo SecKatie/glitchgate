@@ -498,10 +498,34 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Compute total model count - count all concrete model instances displayed in the table.
+	// Items contains group headers (wildcard/virtual/log/discovery) and individual models.
+	// For wildcard/virtual groups, count their Children; if no children, count as 1 (edge case).
+	// Skip IsLogGroup and IsDiscoveryGroup headers but count their Children.
+	totalModels := 0
+	for _, it := range items {
+		if it.IsLogGroup || it.IsDiscoveryGroup {
+			// These are group headers - count their children
+			totalModels += it.ChildCount
+			continue
+		}
+		if it.IsWildcard || it.IsVirtual {
+			if it.ChildCount > 0 {
+				totalModels += it.ChildCount
+			} else {
+				// Wildcard/virtual with no children - still counts as 1 configured entry
+				totalModels++
+			}
+		} else {
+			// Regular configured or unconfigured model
+			totalModels++
+		}
+	}
+
 	data := map[string]any{
 		"ActiveTab":        "models",
 		"Models":           items,
-		"TotalModels":      len(items),
+		"TotalModels":      totalModels,
 		"TotalConfigured":  totalConfigured,
 		"TotalDiscovered":  totalDiscovered,
 		"TotalWithPricing": totalWithPricing,

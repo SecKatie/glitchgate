@@ -312,7 +312,7 @@
     >
       <td>
         <span class="expand-icon">&#9654;</span>
-        {{if .IsLogGroup}}<span style="color:var(--pico-muted-color)">{{.ModelName}}</span>{{else if .IsDiscoveryGroup}}<span>{{.ProviderName}}</span>{{else}}<a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>{{end}}
+        {{if .IsLogGroup}}<span style="color:var(--pico-muted-color)">{{.ModelName}}</span>{{else if .IsDiscoveryGroup}}<span>{{.ProviderName}}</span>{{else if or .IsWildcard .IsVirtual}}<span>{{.ModelName}}</span>{{else}}<a href="/ui/models/{{.EncodedName}}" onclick="event.stopPropagation()">{{.ModelName}}</a>{{end}}
         {{if .IsVirtual}}<span class="model-kind-badge badge-virtual">Virtual</span>{{end}}
         {{if .IsWildcard}}<span class="model-kind-badge badge-wildcard">Wildcard</span>{{end}}
         {{if .IsLogGroup}}<span class="model-kind-badge badge-log">Log only</span>{{end}}
