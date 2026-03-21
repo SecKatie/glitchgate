@@ -148,7 +148,7 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 			{ModelName: "gpt-4", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		},
 	}
-	anthropicClient, err := llmanthropic.NewClient("anthropic", upstream.URL, "proxy_key", "fake-upstream-key", "2023-06-01")
+	anthropicClient, err := llmanthropic.NewClient(llmanthropic.ClientConfig{Name: "anthropic", BaseURL: upstream.URL, AuthMode: "proxy_key", APIKey: "fake-upstream-key", DefaultVersion: "2023-06-01"}) // #nosec G101 -- test credentials, not real secrets
 	require.NoError(t, err)
 	providers := map[string]provider.Provider{
 		"anthropic": anthropicClient,
@@ -158,8 +158,8 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 	logger := proxy.NewAsyncLogger(st, 100)
 	t.Cleanup(func() { logger.Close() })
 
-	proxyHandler := proxy.NewHandler(cfg, providers, calc, logger, nil)
-	openaiHandler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil)
+	proxyHandler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
+	openaiHandler := proxy.NewOpenAIHandler(cfg, providers, calc, logger, nil, nil, nil)
 
 	// --- chi router (identical to serve.go) ---
 	r := chi.NewRouter()

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package anthropic implements the provider.Provider interface for the Anthropic Messages API.
+// Package anthropic implements the provider.Provider interface for the
+// Anthropic Messages API, supporting both the direct Anthropic API and
+// Vertex AI (OAuth2 auth).
 package anthropic
 
 import (
@@ -10,39 +12,110 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/provider"
 )
 
+const (
+	cloudPlatformScope   = "https://www.googleapis.com/auth/cloud-platform"
+	defaultVertexVersion = "vertex-2023-10-16"
+	defaultVertexRegion  = "us-central1"
+)
+
+// ClientConfig holds the parameters needed to construct an Anthropic [Client].
+type ClientConfig struct {
+	Name            string
+	BaseURL         string // required for proxy_key/forward modes
+	AuthMode        string // "proxy_key", "forward", or "vertex"
+	APIKey          string // proxy_key mode
+	DefaultVersion  string
+	Project         string // vertex mode
+	Region          string // vertex mode; defaults to us-central1
+	CredentialsFile string // vertex mode; empty = ADC
+}
+
 // Client implements the provider.Provider interface for the Anthropic Messages API.
 type Client struct {
 	name           string
 	baseURL        string
-	authMode       string // "proxy_key" or "forward"
-	apiKey         string // used when authMode == "proxy_key"
+	authMode       string // "proxy_key", "forward", or "vertex"
+	apiKey         string // proxy_key mode
 	defaultVersion string
+	tokenSource    oauth2.TokenSource // vertex mode
+	project        string             // vertex mode
+	region         string             // vertex mode
 	httpClient     *http.Client
 	requestTimeout time.Duration
 }
 
-// NewClient creates an Anthropic provider client. Returns an error if
-// baseURL is not a valid HTTP(S) URL.
-func NewClient(name, baseURL, authMode, apiKey, defaultVersion string) (*Client, error) {
-	if err := provider.ValidateBaseURL(baseURL); err != nil {
-		return nil, fmt.Errorf("anthropic provider %q: %w", name, err)
-	}
-	return &Client{
-		name:           name,
-		baseURL:        strings.TrimRight(baseURL, "/"),
-		authMode:       authMode,
-		apiKey:         apiKey,
-		defaultVersion: defaultVersion,
+// NewClient creates an Anthropic provider client. For proxy_key/forward modes
+// it validates the base URL. For vertex mode it initialises an OAuth2 token
+// source.
+func NewClient(cfg ClientConfig) (*Client, error) {
+	c := &Client{
+		name:           cfg.Name,
+		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
+		authMode:       cfg.AuthMode,
+		apiKey:         cfg.APIKey,
+		defaultVersion: cfg.DefaultVersion,
+		project:        cfg.Project,
+		region:         cfg.Region,
 		httpClient:     provider.BuildHTTPClient(),
 		requestTimeout: config.DefaultUpstreamRequestTimeout,
-	}, nil
+	}
+
+	switch cfg.AuthMode {
+	case "vertex":
+		if c.region == "" {
+			c.region = defaultVertexRegion
+		}
+		if c.defaultVersion == "" {
+			c.defaultVersion = defaultVertexVersion
+		}
+		ts, err := newTokenSource(cfg.Name, cfg.CredentialsFile)
+		if err != nil {
+			return nil, err
+		}
+		c.tokenSource = ts
+	default:
+		if err := provider.ValidateBaseURL(cfg.BaseURL); err != nil {
+			return nil, fmt.Errorf("anthropic provider %q: %w", cfg.Name, err)
+		}
+	}
+
+	return c, nil
+}
+
+// newTestClient creates a Client with a custom token source and HTTP client,
+// for use in unit tests only.
+func newTestClient(cfg ClientConfig, ts oauth2.TokenSource, httpClient *http.Client) *Client {
+	region := cfg.Region
+	if cfg.AuthMode == "vertex" && region == "" {
+		region = defaultVertexRegion
+	}
+	defaultVersion := cfg.DefaultVersion
+	if cfg.AuthMode == "vertex" && defaultVersion == "" {
+		defaultVersion = defaultVertexVersion
+	}
+	return &Client{
+		name:           cfg.Name,
+		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
+		authMode:       cfg.AuthMode,
+		apiKey:         cfg.APIKey,
+		defaultVersion: defaultVersion,
+		tokenSource:    ts,
+		project:        cfg.Project,
+		region:         region,
+		httpClient:     httpClient,
+		requestTimeout: config.DefaultUpstreamRequestTimeout,
+	}
 }
 
 // SetTimeouts overrides the default upstream request deadline.
@@ -53,8 +126,13 @@ func (c *Client) SetTimeouts(requestTimeout time.Duration) {
 // Name returns the provider's short identifier.
 func (c *Client) Name() string { return c.name }
 
-// AuthMode returns "proxy_key" or "forward" indicating how the proxy authenticates upstream.
-func (c *Client) AuthMode() string { return c.authMode }
+// AuthMode returns "proxy_key", "forward", or "internal" (vertex manages its own OAuth2 auth).
+func (c *Client) AuthMode() string {
+	if c.authMode == "vertex" {
+		return "internal"
+	}
+	return c.authMode
+}
 
 // APIFormat returns "anthropic" — this provider speaks the Anthropic Messages API natively.
 func (c *Client) APIFormat() string { return "anthropic" }
@@ -63,16 +141,20 @@ func (c *Client) APIFormat() string { return "anthropic" }
 // For streaming requests, Response.Stream is set and the caller must close it.
 // For non-streaming requests, Response.Body is populated.
 func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	// For streaming requests, don't apply a request timeout that would cancel
-	// the context when this function returns. The stream continues to be read
-	// after SendRequest completes. Rely on ResponseHeaderTimeout for the initial
-	// connection, and let the stream remain open until the server completes.
 	if !req.IsStreaming {
 		var cancel context.CancelFunc
 		ctx, cancel = provider.ContextWithDefaultTimeout(ctx, c.requestTimeout)
 		defer cancel()
 	}
 
+	if c.authMode == "vertex" {
+		return c.sendVertex(ctx, req)
+	}
+	return c.sendDirect(ctx, req)
+}
+
+// sendDirect handles proxy_key and forward auth modes against the Anthropic API.
+func (c *Client) sendDirect(ctx context.Context, req *provider.Request) (*provider.Response, error) {
 	url := c.baseURL + "/v1/messages"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(req.Body)))
@@ -127,7 +209,45 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		}
 	}
 
-	resp, err := c.httpClient.Do(httpReq) //nolint:gosec // URL from validated provider config, not user input
+	return c.doAndParse(httpReq, req.IsStreaming)
+}
+
+// sendVertex handles Vertex AI auth and URL construction.
+func (c *Client) sendVertex(ctx context.Context, req *provider.Request) (*provider.Response, error) {
+	token, err := c.tokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("anthropic provider %q: obtaining access token: %w", c.name, err)
+	}
+
+	body, err := prepareBody(req.Body, c.defaultVersion)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic provider %q: preparing request body: %w", c.name, err)
+	}
+
+	method := "rawPredict"
+	if req.IsStreaming {
+		method = "streamRawPredict"
+	}
+	url := fmt.Sprintf(
+		"https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:%s",
+		c.region, c.project, c.region, req.Model, method,
+	)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+
+	return c.doAndParse(httpReq, req.IsStreaming)
+}
+
+// doAndParse executes the HTTP request and parses the response into a
+// provider.Response, extracting token usage for non-streaming 200 responses.
+func (c *Client) doAndParse(httpReq *http.Request, streaming bool) (*provider.Response, error) {
+	resp, err := c.httpClient.Do(httpReq) // #nosec G704 -- URL from operator-controlled provider config, not user input
 	if err != nil {
 		return nil, fmt.Errorf("sending request to %s: %w", c.name, err)
 	}
@@ -137,7 +257,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 		Headers:    resp.Header,
 	}
 
-	if req.IsStreaming && resp.StatusCode < http.StatusBadRequest {
+	if streaming && resp.StatusCode < http.StatusBadRequest {
 		provResp.Stream = resp.Body
 		return provResp, nil
 	}
@@ -153,7 +273,6 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 	}
 	provResp.Body = body
 
-	// Extract token usage from non-streaming response.
 	if resp.StatusCode == http.StatusOK {
 		var msgResp MessagesResponse
 		if err := json.Unmarshal(body, &msgResp); err == nil {
@@ -166,6 +285,36 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 
 	return provResp, nil
 }
+
+// --- Vertex AI body preparation ---
+
+// vertexUnsupportedFields lists Anthropic API fields that the Vertex AI
+// rawPredict endpoint rejects with "Extra inputs are not permitted".
+var vertexUnsupportedFields = []string{
+	"context_management",
+}
+
+// prepareBody removes the "model" field (Vertex puts it in the URL), strips
+// fields unsupported by Vertex, and injects "anthropic_version" if not present.
+func prepareBody(raw []byte, defaultVersion string) ([]byte, error) {
+	var bodyMap map[string]any
+	if err := json.Unmarshal(raw, &bodyMap); err != nil {
+		return nil, fmt.Errorf("parsing request body: %w", err)
+	}
+
+	delete(bodyMap, "model")
+	for _, field := range vertexUnsupportedFields {
+		delete(bodyMap, field)
+	}
+
+	if _, ok := bodyMap["anthropic_version"]; !ok {
+		bodyMap["anthropic_version"] = defaultVersion
+	}
+
+	return json.Marshal(bodyMap)
+}
+
+// --- Header forwarding (direct API only) ---
 
 func shouldForwardHeader(hdr string) bool {
 	switch {
@@ -182,8 +331,9 @@ func shouldForwardHeader(hdr string) bool {
 	}
 }
 
+// --- Auth helpers ---
+
 // redactKey returns a redacted version of an API key for logging.
-// Shows first 7 characters followed by "..." for easy identification.
 func redactKey(key string) string {
 	if key == "" {
 		return ""
@@ -193,4 +343,31 @@ func redactKey(key string) string {
 		return "***"
 	}
 	return key[:prefixLen] + "***"
+}
+
+// newTokenSource creates an OAuth2 token source from either an explicit
+// credentials file or Application Default Credentials (ADC).
+func newTokenSource(providerName, credentialsFile string) (oauth2.TokenSource, error) {
+	ctx := context.Background()
+
+	var ts oauth2.TokenSource
+	if credentialsFile != "" {
+		data, err := os.ReadFile(credentialsFile) // #nosec G304 -- path comes from operator-controlled config
+		if err != nil {
+			return nil, fmt.Errorf("anthropic provider %q: reading credentials file: %w", providerName, err)
+		}
+		creds, err := google.CredentialsFromJSON(ctx, data, cloudPlatformScope) //nolint:staticcheck // SA1019: credentials_file path is operator-controlled config, not untrusted input
+		if err != nil {
+			return nil, fmt.Errorf("anthropic provider %q: parsing credentials: %w", providerName, err)
+		}
+		ts = creds.TokenSource
+	} else {
+		creds, err := google.FindDefaultCredentials(ctx, cloudPlatformScope)
+		if err != nil {
+			return nil, fmt.Errorf("anthropic provider %q: finding default credentials: %w", providerName, err)
+		}
+		ts = creds.TokenSource
+	}
+
+	return oauth2.ReuseTokenSource(nil, ts), nil
 }

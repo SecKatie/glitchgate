@@ -180,7 +180,7 @@ var SegmentDefaults = map[string]Entry{
 }
 
 // GeminiDefaults holds pricing for Gemini models on native Gemini upstreams.
-// Applied for providers with type "gemini" and "vertex_gemini".
+// Applied for providers with type "gemini".
 // Values are USD per million tokens (standard tier, <=200K context) as of 2026-03-16.
 var GeminiDefaults = map[string]Entry{
 	// Gemini 3.1
