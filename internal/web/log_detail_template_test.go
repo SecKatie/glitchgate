@@ -11,6 +11,7 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 )
 
 func TestLogDetailTemplateShowsTokenAndCostPercentages(t *testing.T) {
@@ -41,7 +42,7 @@ func TestLogDetailTemplateShowsTokenAndCostPercentages(t *testing.T) {
 		},
 	}
 
-	cost := computeCostBreakdown(logEntry, makeCalc(provKey, "claude-test", entry))
+	cost := billing.ComputeCostBreakdown(logEntry, makeCalc(provKey, "claude-test", entry))
 	templates := ParseTemplates(time.UTC)
 	rec := httptest.NewRecorder()
 

@@ -19,6 +19,7 @@
     <thead>
         <tr>
             <th>Provider</th>
+            <th>Status</th>
             <th>Type</th>
             <th>Requests</th>
             <th class="cost">Est. Token Cost</th>
@@ -30,6 +31,7 @@
         {{range .Providers}}
         <tr data-href="/ui/providers/{{.EncodedName}}">
             <td class="mono"><a href="/ui/providers/{{.EncodedName}}" class="row-link">{{.DisplayName}}</a></td>
+            <td>{{if eq .HealthStatus "down"}}<mark class="tag-err">down</mark>{{else if eq .HealthStatus "degraded"}}<mark class="tag-warn">degraded</mark>{{else}}<mark class="tag-ok">healthy</mark>{{end}}</td>
             <td>{{.Type}}</td>
             <td>{{.Requests}}</td>
             <td class="cost">{{if .TokenCostUSD}}${{printf "%.2f" .TokenCostUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>

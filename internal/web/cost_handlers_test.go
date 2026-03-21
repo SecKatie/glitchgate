@@ -11,6 +11,7 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -130,7 +131,7 @@ func TestBuildProviderSpendComparisons(t *testing.T) {
 		"chatgpt-pro": 20.00,
 	}
 
-	comparisons, summary := buildProviderSpendComparisons(breakdown, breakdownCosts, subscriptions)
+	comparisons, summary := billing.BuildProviderSpendComparisons(breakdown, breakdownCosts, subscriptions)
 
 	require.Len(t, comparisons, 1)
 	require.NotNil(t, comparisons["chatgpt-pro"])

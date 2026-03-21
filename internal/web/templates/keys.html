@@ -80,13 +80,27 @@
 </div>
 {{end}}
 
-<form class="key-create-form" hx-post="/ui/api/keys" hx-target="body" hx-swap="outerHTML">
-    <div style="flex:1">
+<form class="key-create-form" hx-post="/ui/api/keys" hx-target="body" hx-swap="outerHTML" style="flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
         <label for="label">New Key Label</label>
         <input type="text" id="label" name="label" placeholder="e.g. Production API Key" required maxlength="64"{{if .LabelError}} aria-invalid="true"{{end}} value="{{.LabelValue}}">
         {{if .LabelError}}<small class="status-err">{{.LabelError}}</small>{{end}}
     </div>
-    <button type="submit">Create Key</button>
+    <div style="flex:1;min-width:200px">
+        <label for="allowed_models">Allowed Models <small class="text-muted">(optional, comma-separated globs)</small></label>
+        <input type="text" id="allowed_models" name="allowed_models" placeholder="e.g. claude-*,gpt-4o">
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:end">
+        <div>
+            <label for="rate_limit">Rate Limit <small class="text-muted">/min</small></label>
+            <input type="number" id="rate_limit" name="rate_limit" min="0" placeholder="global" style="width:100px">
+        </div>
+        <div>
+            <label for="rate_burst">Burst</label>
+            <input type="number" id="rate_burst" name="rate_burst" min="0" placeholder="auto" style="width:80px">
+        </div>
+    </div>
+    <button type="submit" style="align-self:end">Create Key</button>
 </form>
 
 {{if .Keys}}

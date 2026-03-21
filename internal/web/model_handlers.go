@@ -14,6 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/seckatie/glitchgate/internal/web/billing"
+
 	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/pricing"
@@ -302,7 +304,7 @@ func (h *Handlers) ModelsPage(w http.ResponseWriter, r *http.Request) {
 		}
 		item.RequestCount = u.RequestCount
 		if item.HasPricing && item.Pricing != nil {
-			item.TotalSpendUSD = priceUsage(*item.Pricing, tokenUsage{
+			item.TotalSpendUSD = billing.PriceUsage(*item.Pricing, billing.TokenUsage{
 				InputTokens:      u.InputTokens,
 				CacheWriteTokens: u.CacheCreationInputTokens,
 				CacheReadTokens:  u.CacheReadInputTokens,
@@ -534,7 +536,7 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 						child.ProviderName, child.ProviderType, child.Pricing, child.HasPricing = resolveModelPricing(h.providerMap, h.calc, found.Provider, after)
 					}
 					if child.HasPricing && child.Pricing != nil {
-						child.TotalSpendUSD = priceUsage(*child.Pricing, tokenUsage{
+						child.TotalSpendUSD = billing.PriceUsage(*child.Pricing, billing.TokenUsage{
 							InputTokens:      u.InputTokens,
 							CacheWriteTokens: u.CacheCreationInputTokens,
 							CacheReadTokens:  u.CacheReadInputTokens,
@@ -555,7 +557,7 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if view.HasPricing && view.Pricing != nil {
-		usage.TotalCostUSD = priceUsage(*view.Pricing, tokenUsage{
+		usage.TotalCostUSD = billing.PriceUsage(*view.Pricing, billing.TokenUsage{
 			InputTokens:      usage.InputTokens,
 			CacheWriteTokens: usage.CacheCreationInputTokens,
 			CacheReadTokens:  usage.CacheReadInputTokens,
@@ -564,7 +566,7 @@ func (h *Handlers) ModelDetailPage(w http.ResponseWriter, r *http.Request) {
 		view.HasCostData = true
 	} else if view.IsVirtual && len(groups) > 0 {
 		// Virtual models route across multiple upstream models — compute cost per pricing group.
-		agg := computeAggregateCostBreakdownWithAliases(groups, h.calc, h.providerNames)
+		agg := billing.ComputeAggregateCostBreakdownWithAliases(groups, h.calc, h.providerNames)
 		if agg.HasAnyPricing {
 			usage.TotalCostUSD = agg.TotalCostUSD
 			view.HasCostData = true

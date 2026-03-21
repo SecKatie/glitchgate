@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package web
+// Package conversation parses logged request/response bodies into a
+// format-neutral conversation structure for display in the web UI.
+package conversation
 
 import (
 	"encoding/json"
@@ -9,12 +11,11 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/provider/anthropic"
 	"github.com/seckatie/glitchgate/internal/provider/openai"
-	"github.com/seckatie/glitchgate/internal/store"
 )
 
-// ConversationData holds the parsed view of a logged request/response pair.
+// Data holds the parsed view of a logged request/response pair.
 // Passed to log_detail.html as .Conversation.
-type ConversationData struct {
+type Data struct {
 	SystemPrompt    string // normalised from MessagesRequest.System; empty if absent
 	SystemPromptLen int    // length in runes; 0 if no system prompt
 	HasSystem       bool   // true if a system prompt is present
@@ -75,15 +76,6 @@ type ToolArg struct {
 	Trunc bool
 }
 
-// LogDetailData is the top-level struct passed to log_detail.html.
-type LogDetailData struct {
-	ActiveTab    string
-	CurrentUser  string
-	Log          *store.RequestLogDetail
-	Conversation *ConversationData
-	Cost         *CostBreakdown
-}
-
 const (
 	truncateAt        = 500
 	truncateAtLines   = 3
@@ -123,14 +115,14 @@ func stripTruncation(body string) (string, bool) {
 	return body, false
 }
 
-// parseConversation parses the stored request and response bodies into a
-// ConversationData view model. It never returns nil; on any parse failure the
+// ParseConversation parses the stored request and response bodies into a
+// Data view model. It never returns nil; on any parse failure the
 // ParseFailed flag is set and raw pretty-printed bodies are still populated.
 //
 // sourceFormat is the logged source_format value ("anthropic", "openai",
 // "responses", or "" for auto-detect).
-func parseConversation(requestBody, responseBody string, sourceFormat ...string) *ConversationData {
-	cd := &ConversationData{}
+func ParseConversation(requestBody, responseBody string, sourceFormat ...string) *Data {
+	cd := &Data{}
 
 	// Always populate pretty-printed raw bodies.
 	cd.RawRequest = prettyJSON(requestBody)
@@ -181,7 +173,7 @@ func parseConversation(requestBody, responseBody string, sourceFormat ...string)
 		}
 		// Response body looks like OpenAI format even though the request matched
 		// Anthropic structure — reset and try OpenAI.
-		cd = &ConversationData{
+		cd = &Data{
 			RawRequest:       result.RawRequest,
 			RawResponse:      result.RawResponse,
 			TruncatedRequest: result.TruncatedRequest,
@@ -304,7 +296,7 @@ func tryPartialAnthropicDecode(body string, req *anthropic.MessagesRequest) bool
 	return true
 }
 
-func parseAnthropicConversation(cd *ConversationData, req *anthropic.MessagesRequest, responseBody string) *ConversationData {
+func parseAnthropicConversation(cd *Data, req *anthropic.MessagesRequest, responseBody string) *Data {
 	// Normalise system prompt.
 	cd.SystemPrompt = normaliseSystem(req.System)
 	cd.HasSystem = cd.SystemPrompt != ""
@@ -355,7 +347,7 @@ func parseAnthropicConversation(cd *ConversationData, req *anthropic.MessagesReq
 	return cd
 }
 
-func parseResponsesConversation(cd *ConversationData, req *openai.ResponsesRequest, responseBody string) *ConversationData {
+func parseResponsesConversation(cd *Data, req *openai.ResponsesRequest, responseBody string) *Data {
 	if req.Instructions != nil {
 		cd.SystemPrompt = *req.Instructions
 	}
@@ -389,8 +381,8 @@ func parseResponsesConversation(cd *ConversationData, req *openai.ResponsesReque
 }
 
 // parseOpenAIConversation parses OpenAI Chat Completions format into
-// ConversationData.
-func parseOpenAIConversation(cd *ConversationData, req *openai.ChatCompletionRequest, responseBody string) *ConversationData {
+// Data.
+func parseOpenAIConversation(cd *Data, req *openai.ChatCompletionRequest, responseBody string) *Data {
 	// Extract system message if present as first message.
 	if len(req.Messages) > 0 && (req.Messages[0].Role == "system" || req.Messages[0].Role == "developer") {
 		cd.SystemPrompt = normalizeOpenAIContent(req.Messages[0].Content)
@@ -1417,7 +1409,7 @@ func parseToolArgs(input interface{}) []ToolArg {
 		val := argValueString(m[k])
 		r := []rune(val)
 		if len(r) > toolArgTruncateAt {
-			args = append(args, ToolArg{Key: k, Value: string(r[:toolArgTruncateAt]) + "…", Trunc: true})
+			args = append(args, ToolArg{Key: k, Value: string(r[:toolArgTruncateAt]) + "\u2026", Trunc: true})
 		} else {
 			args = append(args, ToolArg{Key: k, Value: val})
 		}

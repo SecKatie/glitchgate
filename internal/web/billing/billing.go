@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package web
+// Package billing computes cost breakdowns, projections, and subsidy analysis
+// from raw token-usage data and pricing tables.
+package billing
 
 import (
 	"slices"
@@ -12,7 +14,8 @@ import (
 	"github.com/seckatie/glitchgate/internal/store"
 )
 
-type tokenUsage struct {
+// TokenUsage holds per-category token counts for a single request or group.
+type TokenUsage struct {
 	InputTokens      int64
 	CacheWriteTokens int64
 	CacheReadTokens  int64
@@ -20,7 +23,8 @@ type tokenUsage struct {
 	ReasoningTokens  int64
 }
 
-type pricedUsage struct {
+// PricedUsage holds per-category costs computed from token counts and pricing.
+type PricedUsage struct {
 	InputCostUSD      float64
 	CacheWriteCostUSD float64
 	CacheReadCostUSD  float64
@@ -30,8 +34,9 @@ type pricedUsage struct {
 	TotalCostUSD      float64
 }
 
-func priceUsage(entry pricing.Entry, usage tokenUsage) pricedUsage {
-	priced := pricedUsage{
+// PriceUsage computes per-category costs from a pricing entry and token counts.
+func PriceUsage(entry pricing.Entry, usage TokenUsage) PricedUsage {
+	priced := PricedUsage{
 		InputCostUSD:      float64(usage.InputTokens) * entry.InputPerMillion / 1_000_000,
 		CacheWriteCostUSD: float64(usage.CacheWriteTokens) * entry.CacheWritePerMillion / 1_000_000,
 		CacheReadCostUSD:  float64(usage.CacheReadTokens) * entry.CacheReadPerMillion / 1_000_000,
@@ -43,30 +48,45 @@ func priceUsage(entry pricing.Entry, usage tokenUsage) pricedUsage {
 	return priced
 }
 
-func lookupPricedUsage(calc *pricing.Calculator, providerName, modelUpstream string, usage tokenUsage) (pricedUsage, pricing.Entry, bool) {
+// LookupPricedUsage looks up pricing for a provider/model pair and computes costs.
+func LookupPricedUsage(calc *pricing.Calculator, providerName, modelUpstream string, usage TokenUsage) (PricedUsage, pricing.Entry, bool) {
 	if calc == nil {
-		return pricedUsage{}, pricing.Entry{}, false
+		return PricedUsage{}, pricing.Entry{}, false
 	}
 	entry, ok := calc.Lookup(providerName, modelUpstream)
 	if !ok {
-		return pricedUsage{}, pricing.Entry{}, false
+		return PricedUsage{}, pricing.Entry{}, false
 	}
-	return priceUsage(entry, usage), entry, true
+	return PriceUsage(entry, usage), entry, true
 }
 
-func lookupPricedUsageWithAliases(calc *pricing.Calculator, providerName, modelUpstream string, usage tokenUsage, providerNames map[string]string) (pricedUsage, pricing.Entry, bool) {
-	priced, entry, ok := lookupPricedUsage(calc, providerName, modelUpstream, usage)
+// LookupPricedUsageWithAliases tries a direct lookup first, then falls back to
+// the display name from providerNames.
+func LookupPricedUsageWithAliases(calc *pricing.Calculator, providerName, modelUpstream string, usage TokenUsage, providerNames map[string]string) (PricedUsage, pricing.Entry, bool) {
+	priced, entry, ok := LookupPricedUsage(calc, providerName, modelUpstream, usage)
 	if ok {
 		return priced, entry, true
 	}
 	if providerNames == nil {
-		return pricedUsage{}, pricing.Entry{}, false
+		return PricedUsage{}, pricing.Entry{}, false
 	}
-	displayName, mapped := providerDisplayName(providerName, providerNames)
+	displayName, mapped := ProviderDisplayName(providerName, providerNames)
 	if !mapped || displayName == providerName {
-		return pricedUsage{}, pricing.Entry{}, false
+		return PricedUsage{}, pricing.Entry{}, false
 	}
-	return lookupPricedUsage(calc, displayName, modelUpstream, usage)
+	return LookupPricedUsage(calc, displayName, modelUpstream, usage)
+}
+
+// ProviderDisplayName maps a raw provider key to its display name via the
+// providerNames map. Returns the original key and false if no mapping exists.
+func ProviderDisplayName(rawKey string, providerNames map[string]string) (string, bool) {
+	if providerNames == nil {
+		return rawKey, false
+	}
+	if mapped, ok := providerNames[rawKey]; ok && mapped != "" {
+		return mapped, true
+	}
+	return rawKey, false
 }
 
 // CostBreakdown holds per-category token counts and costs for a single request.
@@ -139,7 +159,9 @@ type ProviderSpendComparisonSummary struct {
 	EffectiveVsRealPct            *float64
 }
 
-func pricePerMillionTokens(amountUSD float64, totalTokens int64) *float64 {
+// PricePerMillionTokens computes the cost per million tokens, returning nil
+// when totalTokens is zero or negative.
+func PricePerMillionTokens(amountUSD float64, totalTokens int64) *float64 {
 	if totalTokens <= 0 {
 		return nil
 	}
@@ -147,7 +169,9 @@ func pricePerMillionTokens(amountUSD float64, totalTokens int64) *float64 {
 	return &value
 }
 
-func percentDelta(delta, baseline float64) *float64 {
+// PercentDelta computes (delta / baseline) * 100, returning nil when
+// baseline is zero.
+func PercentDelta(delta, baseline float64) *float64 {
 	if baseline == 0 {
 		return nil
 	}
@@ -162,12 +186,12 @@ type LogRowWithCost struct {
 	EstimatedCostUSD *float64
 }
 
-// enrichLogs computes estimated costs for a slice of log summaries.
-func enrichLogs(logs []store.RequestLogSummary, calc *pricing.Calculator) []LogRowWithCost {
+// EnrichLogs computes estimated costs for a slice of log summaries.
+func EnrichLogs(logs []store.RequestLogSummary, calc *pricing.Calculator) []LogRowWithCost {
 	rows := make([]LogRowWithCost, len(logs))
 	for i, log := range logs {
 		row := LogRowWithCost{RequestLogSummary: log}
-		priced, _, ok := lookupPricedUsage(calc, log.ProviderName, log.ModelUpstream, tokenUsage{
+		priced, _, ok := LookupPricedUsage(calc, log.ProviderName, log.ModelUpstream, TokenUsage{
 			InputTokens:      log.InputTokens,
 			CacheWriteTokens: log.CacheCreationInputTokens,
 			CacheReadTokens:  log.CacheReadInputTokens,
@@ -183,10 +207,10 @@ func enrichLogs(logs []store.RequestLogSummary, calc *pricing.Calculator) []LogR
 	return rows
 }
 
-// computeCostBreakdown computes per-category token costs from a log entry
+// ComputeCostBreakdown computes per-category token costs from a log entry
 // and a pricing calculator. If the model is not in the pricing table,
 // PricingKnown is false and all cost fields are nil.
-func computeCostBreakdown(log *store.RequestLogDetail, calc *pricing.Calculator) *CostBreakdown {
+func ComputeCostBreakdown(log *store.RequestLogDetail, calc *pricing.Calculator) *CostBreakdown {
 	cb := &CostBreakdown{
 		TotalInputTokens: log.InputTokens + log.CacheCreationInputTokens + log.CacheReadInputTokens,
 		InputTokens:      log.InputTokens,
@@ -196,7 +220,7 @@ func computeCostBreakdown(log *store.RequestLogDetail, calc *pricing.Calculator)
 		ReasoningTokens:  log.ReasoningTokens,
 	}
 
-	priced, entry, ok := lookupPricedUsage(calc, log.ProviderName, log.ModelUpstream, tokenUsage{
+	priced, entry, ok := LookupPricedUsage(calc, log.ProviderName, log.ModelUpstream, TokenUsage{
 		InputTokens:      log.InputTokens,
 		CacheWriteTokens: log.CacheCreationInputTokens,
 		CacheReadTokens:  log.CacheReadInputTokens,
@@ -225,17 +249,17 @@ func computeCostBreakdown(log *store.RequestLogDetail, calc *pricing.Calculator)
 	return cb
 }
 
-// buildBreakdownCosts returns a map from breakdown group key to estimated cost USD.
+// BuildBreakdownCosts returns a map from breakdown group key to estimated cost USD.
 // The key dimension depends on groupBy: "model" uses model_requested, "provider" uses the
 // display provider name (via providerNames), "key" uses proxy_key_prefix.
 // Models/providers/keys without pricing data are omitted.
-func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculator, groupBy string, providerNames map[string]string) map[string]float64 {
+func BuildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculator, groupBy string, providerNames map[string]string) map[string]float64 {
 	if calc == nil || len(groups) == 0 {
 		return nil
 	}
 	costs := make(map[string]float64)
 	for _, group := range groups {
-		priced, _, ok := lookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+		priced, _, ok := LookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, TokenUsage{
 			InputTokens:      group.InputTokens,
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
@@ -251,7 +275,7 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 		case "provider":
 			key = group.ProviderName
 			if providerNames != nil {
-				if name, ok := providerDisplayName(group.ProviderName, providerNames); ok {
+				if name, ok := ProviderDisplayName(group.ProviderName, providerNames); ok {
 					key = name
 				}
 			}
@@ -274,14 +298,16 @@ func buildBreakdownCosts(groups []store.CostPricingGroup, calc *pricing.Calculat
 	return costs
 }
 
-// computeAggregateCostBreakdown computes per-category costs across many logs by
+// ComputeAggregateCostBreakdown computes per-category costs across many logs by
 // grouping token totals by exact provider/model pair before applying pricing.
 // If any non-zero usage group lacks pricing, PricingKnown is false.
-func computeAggregateCostBreakdown(groups []store.CostPricingGroup, calc *pricing.Calculator) *AggregateCostBreakdown {
-	return computeAggregateCostBreakdownWithAliases(groups, calc, nil)
+func ComputeAggregateCostBreakdown(groups []store.CostPricingGroup, calc *pricing.Calculator) *AggregateCostBreakdown {
+	return ComputeAggregateCostBreakdownWithAliases(groups, calc, nil)
 }
 
-func computeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, calc *pricing.Calculator, providerNames map[string]string) *AggregateCostBreakdown {
+// ComputeAggregateCostBreakdownWithAliases is like ComputeAggregateCostBreakdown
+// but uses providerNames for alias-based pricing lookup.
+func ComputeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, calc *pricing.Calculator, providerNames map[string]string) *AggregateCostBreakdown {
 	cb := &AggregateCostBreakdown{}
 	if calc == nil {
 		return cb
@@ -289,7 +315,7 @@ func computeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, c
 
 	hasUnknownUsage := false
 	for _, group := range groups {
-		priced, _, ok := lookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, tokenUsage{
+		priced, _, ok := LookupPricedUsageWithAliases(calc, group.ProviderName, group.ModelUpstream, TokenUsage{
 			InputTokens:      group.InputTokens,
 			CacheWriteTokens: group.CacheCreationTokens,
 			CacheReadTokens:  group.CacheReadTokens,
@@ -317,9 +343,9 @@ func computeAggregateCostBreakdownWithAliases(groups []store.CostPricingGroup, c
 	return cb
 }
 
-// deriveSummaryFromPricingGroups computes CostSummary by summing token counts
+// DeriveSummaryFromPricingGroups computes CostSummary by summing token counts
 // and request counts across all pricing groups. This avoids a separate SQL query.
-func deriveSummaryFromPricingGroups(groups []store.CostPricingGroup) *store.CostSummary {
+func DeriveSummaryFromPricingGroups(groups []store.CostPricingGroup) *store.CostSummary {
 	var s store.CostSummary
 	for _, g := range groups {
 		s.TotalInputTokens += g.InputTokens
@@ -331,10 +357,10 @@ func deriveSummaryFromPricingGroups(groups []store.CostPricingGroup) *store.Cost
 	return &s
 }
 
-// deriveBreakdownFromPricingGroups aggregates pricing groups into breakdown
+// DeriveBreakdownFromPricingGroups aggregates pricing groups into breakdown
 // entries by the given dimension (model, provider, or key). This avoids a
 // separate SQL query since pricing groups are strictly finer-grained.
-func deriveBreakdownFromPricingGroups(groups []store.CostPricingGroup, groupBy string, providerNames map[string]string) []store.CostBreakdownEntry {
+func DeriveBreakdownFromPricingGroups(groups []store.CostPricingGroup, groupBy string, providerNames map[string]string) []store.CostBreakdownEntry {
 	type accumulator struct {
 		entry store.CostBreakdownEntry
 		order int // preserve first-seen order for stable sorting
@@ -351,7 +377,7 @@ func deriveBreakdownFromPricingGroups(groups []store.CostPricingGroup, groupBy s
 				key = g.ProxyKeyPrefix
 			}
 		case "provider":
-			key, _ = providerDisplayName(g.ProviderName, providerNames)
+			key, _ = ProviderDisplayName(g.ProviderName, providerNames)
 			if key == "" {
 				key = g.ProviderName
 			}
@@ -400,7 +426,9 @@ func deriveBreakdownFromPricingGroups(groups []store.CostPricingGroup, groupBy s
 	return entries
 }
 
-func buildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdownCosts map[string]float64, subscriptions map[string]float64) (map[string]*ProviderSpendComparison, ProviderSpendComparisonSummary) {
+// BuildProviderSpendComparisons computes per-provider spend comparisons against
+// configured monthly subscriptions.
+func BuildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdownCosts map[string]float64, subscriptions map[string]float64) (map[string]*ProviderSpendComparison, ProviderSpendComparisonSummary) {
 	if len(breakdown) == 0 || len(subscriptions) == 0 {
 		return nil, ProviderSpendComparisonSummary{}
 	}
@@ -425,13 +453,13 @@ func buildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdo
 			TokenMinusSubscriptionUSD: tokenCost - subscription,
 			TotalTokens:               totalTokens,
 		}
-		comparison.TokenVsSubscriptionPct = percentDelta(comparison.TokenMinusSubscriptionUSD, subscription)
-		comparison.EffectiveTokenCostPerMTok = pricePerMillionTokens(subscription, totalTokens)
-		comparison.AverageRealTokenCostPerMTok = pricePerMillionTokens(tokenCost, totalTokens)
+		comparison.TokenVsSubscriptionPct = PercentDelta(comparison.TokenMinusSubscriptionUSD, subscription)
+		comparison.EffectiveTokenCostPerMTok = PricePerMillionTokens(subscription, totalTokens)
+		comparison.AverageRealTokenCostPerMTok = PricePerMillionTokens(tokenCost, totalTokens)
 		if comparison.EffectiveTokenCostPerMTok != nil && comparison.AverageRealTokenCostPerMTok != nil {
 			delta := *comparison.EffectiveTokenCostPerMTok - *comparison.AverageRealTokenCostPerMTok
 			comparison.EffectiveMinusRealCostPerMTok = &delta
-			comparison.EffectiveVsRealPct = percentDelta(delta, *comparison.AverageRealTokenCostPerMTok)
+			comparison.EffectiveVsRealPct = PercentDelta(delta, *comparison.AverageRealTokenCostPerMTok)
 		}
 		comparisons[entry.Group] = comparison
 
@@ -446,13 +474,13 @@ func buildProviderSpendComparisons(breakdown []store.CostBreakdownEntry, breakdo
 	if len(comparisons) == 0 {
 		return nil, ProviderSpendComparisonSummary{}
 	}
-	summary.EffectiveTokenCostPerMTok = pricePerMillionTokens(summary.TotalSubscriptionCost, summary.TotalTokens)
-	summary.AverageRealTokenCostPerMTok = pricePerMillionTokens(summary.TotalTokenCostUSD, summary.TotalTokens)
-	summary.TokenVsSubscriptionPct = percentDelta(summary.TokenMinusSubscription, summary.TotalSubscriptionCost)
+	summary.EffectiveTokenCostPerMTok = PricePerMillionTokens(summary.TotalSubscriptionCost, summary.TotalTokens)
+	summary.AverageRealTokenCostPerMTok = PricePerMillionTokens(summary.TotalTokenCostUSD, summary.TotalTokens)
+	summary.TokenVsSubscriptionPct = PercentDelta(summary.TokenMinusSubscription, summary.TotalSubscriptionCost)
 	if summary.EffectiveTokenCostPerMTok != nil && summary.AverageRealTokenCostPerMTok != nil {
 		delta := *summary.EffectiveTokenCostPerMTok - *summary.AverageRealTokenCostPerMTok
 		summary.EffectiveMinusRealCostPerMTok = &delta
-		summary.EffectiveVsRealPct = percentDelta(delta, *summary.AverageRealTokenCostPerMTok)
+		summary.EffectiveVsRealPct = PercentDelta(delta, *summary.AverageRealTokenCostPerMTok)
 	}
 
 	return comparisons, summary
@@ -479,10 +507,10 @@ type MonthlyProjection struct {
 	EstMonthlySubsidyUSD *float64
 }
 
-// buildMonthlyProjection computes a MonthlyProjection from month-to-date cost.
+// BuildMonthlyProjection computes a MonthlyProjection from month-to-date cost.
 // subscriptionCostUSD is the total fixed monthly subscription cost across all
 // configured providers; pass 0 when no subscriptions are configured.
-func buildMonthlyProjection(mtdCost float64, tz *time.Location, subscriptionCostUSD float64) *MonthlyProjection {
+func BuildMonthlyProjection(mtdCost float64, tz *time.Location, subscriptionCostUSD float64) *MonthlyProjection {
 	now := time.Now().In(tz)
 	y, m := now.Year(), now.Month()
 	daysInMonth := time.Date(y, m+1, 1, 0, 0, 0, 0, tz).AddDate(0, 0, -1).Day()
@@ -556,10 +584,10 @@ type SubsidyCumulativeEntry struct {
 	CumulativeSubsidy  float64 // cumulative(API - Sub), positive = provider losing
 }
 
-// buildSubsidyAnalysis constructs the subsidy analysis from existing pricing
+// BuildSubsidyAnalysis constructs the subsidy analysis from existing pricing
 // groups and timeseries data. Returns nil if no subscriptions are configured
 // or no matching usage data exists.
-func buildSubsidyAnalysis(
+func BuildSubsidyAnalysis(
 	pricingGroups []store.CostPricingGroup,
 	timeseriesPricingGroups []store.CostTimeseriesPricingGroup,
 	calc *pricing.Calculator,
@@ -583,10 +611,10 @@ func buildSubsidyAnalysis(
 		"Output":      {},
 	}
 	var totalAPICost float64
-	matchedSubscriptions := make(map[string]float64) // display name → monthly cost
+	matchedSubscriptions := make(map[string]float64) // display name -> monthly cost
 
 	for _, g := range pricingGroups {
-		displayName, _ := providerDisplayName(g.ProviderName, providerNames)
+		displayName, _ := ProviderDisplayName(g.ProviderName, providerNames)
 		if displayName == "" {
 			displayName = g.ProviderName
 		}
@@ -596,7 +624,7 @@ func buildSubsidyAnalysis(
 		}
 		matchedSubscriptions[displayName] = subscriptions[displayName]
 
-		priced, _, ok := lookupPricedUsageWithAliases(calc, g.ProviderName, g.ModelUpstream, tokenUsage{
+		priced, _, ok := LookupPricedUsageWithAliases(calc, g.ProviderName, g.ModelUpstream, TokenUsage{
 			InputTokens:      g.InputTokens,
 			CacheWriteTokens: g.CacheCreationTokens,
 			CacheReadTokens:  g.CacheReadTokens,
@@ -633,7 +661,7 @@ func buildSubsidyAnalysis(
 		ProviderSubsidyUSD:  subsidy,
 		TrueCostUSD:         totalAPICost,
 		SubscriptionCostUSD: totalSubscriptionCost,
-		SubsidyPct:          percentDelta(subsidy, totalAPICost),
+		SubsidyPct:          PercentDelta(subsidy, totalAPICost),
 	}
 
 	// Build per-category rates with proportional subscription allocation.
@@ -688,7 +716,7 @@ func buildSubsidyAnalysis(
 		sa.TotalInputRate.SavingsPct = &pct
 	}
 
-	sa.CumulativeData = buildSubsidyTimeseries(
+	sa.CumulativeData = BuildSubsidyTimeseries(
 		timeseriesPricingGroups, calc, providerNames,
 		matchedSubscriptions, totalSubscriptionCost, numDaysInRange,
 	)
@@ -701,9 +729,9 @@ func buildSubsidyAnalysis(
 	return sa
 }
 
-// buildSubsidyTimeseries produces daily cumulative subsidy entries from
+// BuildSubsidyTimeseries produces daily cumulative subsidy entries from
 // timeseries pricing groups, filtering to only subscription providers.
-func buildSubsidyTimeseries(
+func BuildSubsidyTimeseries(
 	groups []store.CostTimeseriesPricingGroup,
 	calc *pricing.Calculator,
 	providerNames map[string]string,
@@ -720,7 +748,7 @@ func buildSubsidyTimeseries(
 	// Aggregate daily API costs for subscription providers.
 	dailyCosts := make(map[string]float64)
 	for _, g := range groups {
-		displayName, _ := providerDisplayName(g.ProviderName, providerNames)
+		displayName, _ := ProviderDisplayName(g.ProviderName, providerNames)
 		if displayName == "" {
 			displayName = g.ProviderName
 		}
@@ -728,7 +756,7 @@ func buildSubsidyTimeseries(
 			continue
 		}
 
-		priced, _, ok := lookupPricedUsageWithAliases(calc, g.ProviderName, g.ModelUpstream, tokenUsage{
+		priced, _, ok := LookupPricedUsageWithAliases(calc, g.ProviderName, g.ModelUpstream, TokenUsage{
 			InputTokens:      g.InputTokens,
 			CacheWriteTokens: g.CacheCreationTokens,
 			CacheReadTokens:  g.CacheReadTokens,

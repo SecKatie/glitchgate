@@ -15,9 +15,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/seckatie/glitchgate/internal/auth"
+	"github.com/seckatie/glitchgate/internal/circuitbreaker"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 )
 
 // ProviderHandlers groups the HTTP handlers for the providers page.
@@ -31,6 +33,7 @@ type ProviderHandlers struct {
 	providerMonthlySubscriptions map[string]float64
 	cfg                          *config.Config
 	providerMap                  map[string]config.ProviderConfig
+	cbRegistry                   *circuitbreaker.Registry
 }
 
 // NewProviderHandlers creates a new ProviderHandlers.
@@ -43,6 +46,7 @@ func NewProviderHandlers(
 	providerNames map[string]string,
 	providerMonthlySubscriptions map[string]float64,
 	cfg *config.Config,
+	cbRegistry *circuitbreaker.Registry,
 ) *ProviderHandlers {
 	if tz == nil {
 		tz = time.UTC
@@ -61,6 +65,7 @@ func NewProviderHandlers(
 		providerMonthlySubscriptions: providerMonthlySubscriptions,
 		cfg:                          cfg,
 		providerMap:                  pm,
+		cbRegistry:                   cbRegistry,
 	}
 }
 
@@ -75,6 +80,8 @@ type ProviderRow struct {
 	HasSubscription        bool
 	SavingsPct             *float64
 	EncodedName            string
+	HealthStatus           string // "healthy", "degraded", "down"
+	ConsecutiveFailures    int
 }
 
 // ProvidersPageHandler renders the providers list page with subsidy analysis.
@@ -113,21 +120,21 @@ func (h *ProviderHandlers) ProvidersPageHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	breakdown := deriveBreakdownFromPricingGroups(pricingGroups, "provider", h.providerNames)
-	breakdownCosts := buildBreakdownCosts(pricingGroups, h.calc, "provider", h.providerNames)
-	providerComparisons, providerComparisonSummary := buildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
+	breakdown := billing.DeriveBreakdownFromPricingGroups(pricingGroups, "provider", h.providerNames)
+	breakdownCosts := billing.BuildBreakdownCosts(pricingGroups, h.calc, "provider", h.providerNames)
+	providerComparisons, providerComparisonSummary := billing.BuildProviderSpendComparisons(breakdown, breakdownCosts, h.providerMonthlySubscriptions)
 
-	subsidyAnalysis := buildSubsidyAnalysis(
+	subsidyAnalysis := billing.BuildSubsidyAnalysis(
 		pricingGroups, timeseriesPricingGroups,
 		h.calc, h.providerNames, h.providerMonthlySubscriptions, 30,
 	)
 
-	mtdCosts := computeAggregateCostBreakdownWithAliases(mtdPricingGroups, h.calc, h.providerNames)
+	mtdCosts := billing.ComputeAggregateCostBreakdownWithAliases(mtdPricingGroups, h.calc, h.providerNames)
 	var subscriptionCostUSD float64
 	if subsidyAnalysis != nil {
 		subscriptionCostUSD = subsidyAnalysis.SubscriptionCostUSD
 	}
-	monthlyProjection := buildMonthlyProjection(mtdCosts.TotalCostUSD, h.tz, subscriptionCostUSD)
+	monthlyProjection := billing.BuildMonthlyProjection(mtdCosts.TotalCostUSD, h.tz, subscriptionCostUSD)
 
 	// Build provider rows from breakdown.
 	var rows []ProviderRow
@@ -183,6 +190,26 @@ func (h *ProviderHandlers) ProvidersPageHandler(w http.ResponseWriter, r *http.R
 			row.HasSubscription = true
 		}
 		rows = append(rows, row)
+	}
+
+	// Populate circuit breaker health status for all rows.
+	if h.cbRegistry != nil {
+		cbStats := h.cbRegistry.AllStats()
+		for i := range rows {
+			if s, ok := cbStats[rows[i].Name]; ok {
+				rows[i].ConsecutiveFailures = s.ConsecutiveFailures
+				switch s.State {
+				case circuitbreaker.StateOpen:
+					rows[i].HealthStatus = "down"
+				case circuitbreaker.StateHalfOpen:
+					rows[i].HealthStatus = "degraded"
+				default:
+					rows[i].HealthStatus = "healthy"
+				}
+			} else {
+				rows[i].HealthStatus = "healthy"
+			}
+		}
 	}
 
 	data := map[string]any{
@@ -285,7 +312,7 @@ func (h *ProviderHandlers) ProviderDetailPageHandler(w http.ResponseWriter, r *h
 				if strings.HasPrefix(modelName, prefix+"/") {
 					child := modelRow{ModelName: modelName, EncodedName: url.PathEscape(modelName)}
 					if m.HasPricing && m.Pricing != nil {
-						child.TotalSpendUSD = priceUsage(*m.Pricing, tokenUsage{
+						child.TotalSpendUSD = billing.PriceUsage(*m.Pricing, billing.TokenUsage{
 							InputTokens:      u.InputTokens,
 							CacheWriteTokens: u.CacheCreationInputTokens,
 							CacheReadTokens:  u.CacheReadInputTokens,
@@ -300,7 +327,7 @@ func (h *ProviderHandlers) ProviderDetailPageHandler(w http.ResponseWriter, r *h
 			}
 		} else if u, ok := usageMap[m.ModelName]; ok {
 			if m.HasPricing && m.Pricing != nil {
-				row.TotalSpendUSD = priceUsage(*m.Pricing, tokenUsage{
+				row.TotalSpendUSD = billing.PriceUsage(*m.Pricing, billing.TokenUsage{
 					InputTokens:      u.InputTokens,
 					CacheWriteTokens: u.CacheCreationInputTokens,
 					CacheReadTokens:  u.CacheReadInputTokens,

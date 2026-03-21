@@ -10,6 +10,7 @@ import (
 
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/store"
+	"github.com/seckatie/glitchgate/internal/web/billing"
 )
 
 func makeCalc(providerKey, model string, entry pricing.Entry) *pricing.Calculator {
@@ -44,7 +45,7 @@ func TestComputeCostBreakdown(t *testing.T) {
 		calc := makeCalc(provKey, "known-model", entry)
 		log := makeLog(provKey, "unknown-model", 1000, 500, 0, 0, 50)
 
-		cb := computeCostBreakdown(log, calc)
+		cb := billing.ComputeCostBreakdown(log, calc)
 
 		require.False(t, cb.PricingKnown)
 		require.Nil(t, cb.InputCostUSD)
@@ -64,7 +65,7 @@ func TestComputeCostBreakdown(t *testing.T) {
 		// 1M input @$3/M = $3.00; 500K output @$15/M = $7.50; total = $10.50
 		log := makeLog(provKey, "claude-test", 1_000_000, 500_000, 0, 0, 100_000)
 
-		cb := computeCostBreakdown(log, calc)
+		cb := billing.ComputeCostBreakdown(log, calc)
 
 		require.True(t, cb.PricingKnown)
 		require.NotNil(t, cb.TotalInputCostUSD)
@@ -83,7 +84,7 @@ func TestComputeCostBreakdown(t *testing.T) {
 		// 1M cache write @$3.75/M = $3.75
 		log := makeLog(provKey, "claude-test", 0, 0, 1_000_000, 0, 0)
 
-		cb := computeCostBreakdown(log, calc)
+		cb := billing.ComputeCostBreakdown(log, calc)
 
 		require.True(t, cb.PricingKnown)
 		require.Equal(t, int64(1_000_000), cb.TotalInputTokens)
@@ -97,7 +98,7 @@ func TestComputeCostBreakdown(t *testing.T) {
 		// 1M cache read @$0.30/M = $0.30
 		log := makeLog(provKey, "claude-test", 0, 0, 0, 1_000_000, 0)
 
-		cb := computeCostBreakdown(log, calc)
+		cb := billing.ComputeCostBreakdown(log, calc)
 
 		require.True(t, cb.PricingKnown)
 		require.Equal(t, int64(1_000_000), cb.TotalInputTokens)
@@ -111,7 +112,7 @@ func TestComputeCostBreakdown(t *testing.T) {
 		// 1M input $3.00 + 500K output $7.50 + 200K cache write $0.75 + 100K cache read $0.03 = $11.28
 		log := makeLog(provKey, "claude-test", 1_000_000, 500_000, 200_000, 100_000, 50_000)
 
-		cb := computeCostBreakdown(log, calc)
+		cb := billing.ComputeCostBreakdown(log, calc)
 
 		require.True(t, cb.PricingKnown)
 		require.Equal(t, int64(1_300_000), cb.TotalInputTokens)
@@ -129,7 +130,7 @@ func TestComputeCostBreakdown(t *testing.T) {
 		calc := makeCalc(provKey, "claude-test", entry)
 		log := makeLog(provKey, "claude-test", 0, 0, 0, 0, 0)
 
-		cb := computeCostBreakdown(log, calc)
+		cb := billing.ComputeCostBreakdown(log, calc)
 
 		require.True(t, cb.PricingKnown)
 		require.NotNil(t, cb.TotalInputCostUSD)
@@ -162,7 +163,7 @@ func TestComputeAggregateCostBreakdown(t *testing.T) {
 			},
 		}
 
-		cb := computeAggregateCostBreakdown(groups, calc)
+		cb := billing.ComputeAggregateCostBreakdown(groups, calc)
 
 		require.True(t, cb.PricingKnown)
 		require.True(t, cb.HasAnyPricing)
@@ -189,7 +190,7 @@ func TestComputeAggregateCostBreakdown(t *testing.T) {
 			},
 		}
 
-		cb := computeAggregateCostBreakdown(groups, calc)
+		cb := billing.ComputeAggregateCostBreakdown(groups, calc)
 
 		require.False(t, cb.PricingKnown)
 		require.True(t, cb.HasAnyPricing)
