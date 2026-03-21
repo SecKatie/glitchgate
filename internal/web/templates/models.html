@@ -66,6 +66,15 @@
   }
 
   /* ── Sortable headers ───────────────────────────────────── */
+  #models-table thead th {
+    font-size: 0.7em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pico-muted-color);
+    border-bottom: 2px solid var(--pico-muted-border-color);
+    padding-bottom: 0.5rem;
+  }
   th[data-col] {
     cursor: pointer;
     user-select: none;
@@ -73,22 +82,31 @@
   }
   th[data-col]:hover { color: var(--pico-primary); }
   th[data-col]::after {
-    content: " ⇅";
-    font-size: 0.75em;
+    content: " \2195";
+    font-size: 0.85em;
     color: var(--pico-muted-color);
   }
-  th[data-col][aria-sort="ascending"]::after  { content: " ↑"; color: var(--pico-primary); }
-  th[data-col][aria-sort="descending"]::after { content: " ↓"; color: var(--pico-primary); }
+  th[data-col][aria-sort="ascending"]::after  { content: " \2191"; color: var(--pico-primary); }
+  th[data-col][aria-sort="descending"]::after { content: " \2193"; color: var(--pico-primary); }
+
+  /* ── Table layout ───────────────────────────────────────── */
+  #models-table { border-collapse: collapse; }
+  #models-table td {
+    vertical-align: middle;
+    border-bottom: 1px solid color-mix(in srgb, var(--pico-muted-border-color) 50%, transparent);
+  }
 
   /* ── Badges ─────────────────────────────────────────────── */
   .model-kind-badge {
     display: inline-block;
     padding: 0.1em 0.45em;
     border-radius: 4px;
-    font-size: 0.7em;
+    font-size: 0.65em;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
     vertical-align: middle;
-    margin-left: 0.3em;
+    margin-left: 0.4em;
   }
   .badge-virtual {
     background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
@@ -110,8 +128,8 @@
     display: inline-block;
     padding: 0.08em 0.45em;
     border-radius: 10px;
-    font-size: 0.7em;
-    font-weight: 600;
+    font-size: 0.65em;
+    font-weight: 500;
     background: color-mix(in srgb, var(--pico-muted-color) 10%, transparent);
     color: var(--pico-muted-color);
     vertical-align: middle;
@@ -119,11 +137,15 @@
   }
 
   /* ── Provider cell ──────────────────────────────────────── */
+  .prov-cell {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+  }
   .prov-name { font-weight: 500; }
   .prov-type {
-    font-size: 0.8em;
+    font-size: 0.75em;
     color: var(--pico-muted-color);
-    margin-left: 0.2em;
   }
 
   /* ── Upstream & pricing cells ────────────────────────────── */
@@ -139,19 +161,37 @@
   .pricing-cell {
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-    font-size: 0.88em;
+    font-size: 0.85em;
+    text-align: right;
   }
   .pricing-sep {
     color: var(--pico-muted-color);
     margin: 0 0.1em;
   }
-  .muted-dash { color: var(--pico-muted-color); }
+  .muted-dash { color: color-mix(in srgb, var(--pico-muted-color) 40%, transparent); }
+
+  /* ── Model name cell ───────────────────────────────────── */
+  .model-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+  }
+  .model-name-cell .copy-btn {
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  #models-table tbody tr:hover .model-name-cell .copy-btn {
+    opacity: 1;
+  }
 
   /* ── Group header rows ──────────────────────────────────── */
   tr.group-header {
     cursor: pointer;
   }
-  tr.group-header:hover {
+  tr.group-header td {
+    border-bottom: 1px solid var(--pico-muted-border-color);
+  }
+  tr.group-header:hover td {
     background: var(--pico-card-sectioning-background-color);
   }
   tr.group-header td:first-child {
@@ -161,10 +201,10 @@
     display: inline-block;
     width: 1.2em;
     text-align: center;
-    font-size: 0.75em;
+    font-size: 0.7em;
     color: var(--pico-muted-color);
     transition: transform 0.15s;
-    margin-right: 0.2em;
+    margin-right: 0.15em;
   }
   tr.group-header.expanded .expand-icon {
     transform: rotate(90deg);
@@ -177,12 +217,22 @@
   tr.child-row td {
     background: color-mix(in srgb, var(--pico-card-sectioning-background-color) 50%, transparent);
     font-size: 0.9em;
+    border-bottom-color: color-mix(in srgb, var(--pico-muted-border-color) 30%, transparent);
   }
 
   /* ── Table row hover ────────────────────────────────────── */
   #models-table tbody tr[data-href]:hover {
     cursor: pointer;
-    box-shadow: inset 2px 0 0 var(--pico-primary);
+  }
+  #models-table tbody tr[data-href]:hover td {
+    background: var(--pico-card-sectioning-background-color);
+    box-shadow: inset 3px 0 0 var(--pico-primary);
+  }
+  #models-table tbody tr[data-href]:hover td:first-child {
+    box-shadow: inset 3px 0 0 var(--pico-primary);
+  }
+  #models-table tbody tr[data-href]:hover td:not(:first-child) {
+    box-shadow: none;
   }
 </style>
 {{end}}
@@ -269,7 +319,7 @@
         {{if .IsDiscoveryGroup}}<span class="model-kind-badge badge-discovered">Discovered</span>{{end}}
         {{if gt .ChildCount 0}}<span class="child-count">{{.ChildCount}} {{if .IsVirtual}}fallback{{if gt .ChildCount 1}}s{{end}}{{else}}model{{if gt .ChildCount 1}}s{{end}}{{end}}</span>{{end}}
       </td>
-      <td>{{if .IsVirtual}}<span class="muted-dash">&mdash;</span>{{else if .ProviderName}}<span class="prov-name">{{.ProviderName}}</span> <span class="prov-type">{{.ProviderType}}</span>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td>{{if .IsVirtual}}<span class="muted-dash">&mdash;</span>{{else if .ProviderName}}<div class="prov-cell"><span class="prov-name">{{.ProviderName}}</span><span class="prov-type">{{.ProviderType}}</span></div>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
       <td class="upstream-cell"><span class="muted-dash">&mdash;</span></td>
       <td class="pricing-cell"><span class="muted-dash">&mdash;</span></td>
       <td class="cost">{{if gt .TotalSpendUSD 0.0}}${{printf "%.2f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
@@ -287,10 +337,12 @@
       data-spend="{{if .HasPricing}}{{.TotalSpendUSD}}{{else}}-1{{end}}"
     >
       <td>
-        <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{.ModelName}}</a>
-        {{if not (eq .ModelName "")}} <button class="copy-btn" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+        <span class="model-name-cell">
+          <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{.ModelName}}</a>
+          {{if not (eq .ModelName "")}} <button class="copy-btn" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+        </span>
       </td>
-      <td>{{if .ProviderName}}<span class="prov-name">{{.ProviderName}}</span> <span class="prov-type">{{.ProviderType}}</span>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td>{{if .ProviderName}}<div class="prov-cell"><span class="prov-name">{{.ProviderName}}</span><span class="prov-type">{{.ProviderType}}</span></div>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
       <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
       <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
       <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
@@ -309,11 +361,13 @@
       {{if .IsUnconfigured}}style="color:var(--pico-muted-color)"{{end}}
     >
       <td>
-        <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{if .ModelName}}{{.ModelName}}{{else}}<em style="color:var(--pico-muted-color)">(empty)</em>{{end}}</a>
-        {{if .IsUnconfigured}}<span class="model-kind-badge badge-log">seen in logs</span>{{end}}
-        {{if .ModelName}} <button class="copy-btn" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+        <span class="model-name-cell">
+          <a href="/ui/models/{{.EncodedName}}" class="row-link" onclick="event.stopPropagation()">{{if .ModelName}}{{.ModelName}}{{else}}<em style="color:var(--pico-muted-color)">(empty)</em>{{end}}</a>
+          {{if .IsUnconfigured}}<span class="model-kind-badge badge-log">seen in logs</span>{{end}}
+          {{if .ModelName}} <button class="copy-btn" onclick="event.stopPropagation();copyText(this, '{{.ModelName}}')">Copy</button>{{end}}
+        </span>
       </td>
-      <td>{{if .ProviderName}}<span class="prov-name">{{.ProviderName}}</span> <span class="prov-type">{{.ProviderType}}</span>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
+      <td>{{if .ProviderName}}<div class="prov-cell"><span class="prov-name">{{.ProviderName}}</span><span class="prov-type">{{.ProviderType}}</span></div>{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
       <td class="upstream-cell">{{if .UpstreamModel}}{{.UpstreamModel}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
       <td class="pricing-cell">{{if .HasPricing}}${{printf "%.2f" .Pricing.InputPerMillion}} <span class="pricing-sep">/</span> ${{printf "%.2f" .Pricing.OutputPerMillion}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
       <td class="cost">{{if .HasPricing}}${{printf "%.2f" .TotalSpendUSD}}{{else}}<span class="muted-dash">&mdash;</span>{{end}}</td>
