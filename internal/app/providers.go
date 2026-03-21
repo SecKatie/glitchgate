@@ -189,7 +189,10 @@ func defaultPricingForProvider(pc config.ProviderConfig) map[string]pricing.Entr
 	case "github_copilot":
 		return pricing.CopilotDefaults
 	case "anthropic":
-		if pc.AuthMode == "vertex" || pricing.IsOfficialAnthropicURL(baseURL) {
+		switch {
+		case pricing.IsMiniMaxURL(baseURL):
+			return pricing.MiniMaxDefaults
+		case pc.AuthMode == "vertex" || pricing.IsOfficialAnthropicURL(baseURL):
 			return pricing.AnthropicDefaults
 		}
 	case "openai", "openai_responses":

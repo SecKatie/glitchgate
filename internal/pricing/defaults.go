@@ -37,6 +37,44 @@ var AnthropicDefaults = map[string]Entry{
 		CacheWritePerMillion: 1.25,
 		CacheReadPerMillion:  0.10,
 	},
+	// Claude 4.5
+	"claude-opus-4-5-20251101": {
+		InputPerMillion:      5.00,
+		OutputPerMillion:     25.00,
+		CacheWritePerMillion: 6.25,
+		CacheReadPerMillion:  0.50,
+	},
+	"claude-opus-4-5": {
+		InputPerMillion:      5.00,
+		OutputPerMillion:     25.00,
+		CacheWritePerMillion: 6.25,
+		CacheReadPerMillion:  0.50,
+	},
+	"claude-sonnet-4-5-20250929": {
+		InputPerMillion:      3.00,
+		OutputPerMillion:     15.00,
+		CacheWritePerMillion: 3.75,
+		CacheReadPerMillion:  0.30,
+	},
+	"claude-sonnet-4-5": {
+		InputPerMillion:      3.00,
+		OutputPerMillion:     15.00,
+		CacheWritePerMillion: 3.75,
+		CacheReadPerMillion:  0.30,
+	},
+	// Claude 4.1 (legacy)
+	"claude-opus-4-1-20250805": {
+		InputPerMillion:      15.00,
+		OutputPerMillion:     75.00,
+		CacheWritePerMillion: 18.75,
+		CacheReadPerMillion:  1.50,
+	},
+	"claude-opus-4-1": {
+		InputPerMillion:      15.00,
+		OutputPerMillion:     75.00,
+		CacheWritePerMillion: 18.75,
+		CacheReadPerMillion:  1.50,
+	},
 	// Claude 4 (legacy)
 	"claude-sonnet-4-20250514": {
 		InputPerMillion:      3.00,
@@ -55,6 +93,20 @@ var AnthropicDefaults = map[string]Entry{
 		OutputPerMillion:     4.00,
 		CacheWritePerMillion: 1.00,
 		CacheReadPerMillion:  0.08,
+	},
+	// Claude 3.5 Haiku (legacy)
+	"claude-3-5-haiku-20241022": {
+		InputPerMillion:      0.80,
+		OutputPerMillion:     4.00,
+		CacheWritePerMillion: 1.00,
+		CacheReadPerMillion:  0.08,
+	},
+	// Claude 3 Haiku (legacy)
+	"claude-3-haiku-20240307": {
+		InputPerMillion:      0.25,
+		OutputPerMillion:     1.25,
+		CacheWritePerMillion: 0.30,
+		CacheReadPerMillion:  0.03,
 	},
 }
 
@@ -348,12 +400,43 @@ var GeminiDefaults = map[string]Entry{
 	},
 }
 
+// MiniMaxDefaults holds pricing for MiniMax models accessed via the MiniMax Anthropic-compatible API.
+// Applied for providers with type "anthropic" whose base_url targets api.minimax.io.
+// Values are USD per million tokens (standard tier) as of 2026-03-21.
+var MiniMaxDefaults = map[string]Entry{
+	"MiniMax-M2.7": {
+		InputPerMillion:      0.30,
+		OutputPerMillion:     1.20,
+		CacheWritePerMillion: 0.375,
+		CacheReadPerMillion:  0.06,
+	},
+	"MiniMax-M2.5": {
+		InputPerMillion:      0.30,
+		OutputPerMillion:     1.20,
+		CacheWritePerMillion: 0.375,
+		CacheReadPerMillion:  0.03,
+	},
+	"MiniMax-M2.1": {
+		InputPerMillion:      0.30,
+		OutputPerMillion:     1.20,
+		CacheWritePerMillion: 0.375,
+		CacheReadPerMillion:  0.03,
+	},
+	"MiniMax-M2": {
+		InputPerMillion:      0.30,
+		OutputPerMillion:     1.20,
+		CacheWritePerMillion: 0.375,
+		CacheReadPerMillion:  0.03,
+	},
+}
+
 const (
 	officialOpenAIHost      = "api.openai.com"
 	officialChatGPTHost     = "chatgpt.com"
 	officialCodexPathPrefix = "/backend-api/codex"
 	chutesHost              = "llm.chutes.ai"
 	syntheticHost           = "api.synthetic.new"
+	minimaxHost             = "api.minimax.io"
 )
 
 // IsOfficialOpenAIURL reports whether baseURL targets an official OpenAI-priced endpoint.
@@ -392,6 +475,11 @@ func IsChutesURL(baseURL string) bool {
 // IsSyntheticURL reports whether baseURL targets the Synthetic.new platform.
 func IsSyntheticURL(baseURL string) bool {
 	return hostnameOf(baseURL) == syntheticHost
+}
+
+// IsMiniMaxURL reports whether baseURL targets the MiniMax API platform.
+func IsMiniMaxURL(baseURL string) bool {
+	return hostnameOf(baseURL) == minimaxHost
 }
 
 // ProviderKey returns the canonical provider identifier used as the key prefix

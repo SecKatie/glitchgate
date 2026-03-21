@@ -151,3 +151,21 @@ Check `specs/ROADMAP.md` for planned features.
 
 ## Recent Changes
 - 001-model-discovery: Added Go (latest stable, currently 1.24) + `cobra`+`viper` (CLI/config), `chi/v5` (router), `golang.org/x/oauth2` (Vertex auth)
+
+## Release Procedure
+
+To create and push a new version:
+
+```bash
+# 1. Create an annotated tag (use next sequential version)
+git tag -a v0.0.16 -m "v0.0.16 - <brief description>"
+
+# 2. Build multi-arch image and push with version tag
+make image-push-version
+```
+
+This builds a multi-arch manifest (linux/amd64, linux/arm64) and pushes:
+- `ghcr.io/seckatie/glitchgate:latest`
+- `ghcr.io/seckatie/glitchgate:v0.0.16`
+
+The VERSION is automatically derived from the tag via `git describe --tags --always`.
