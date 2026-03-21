@@ -28,7 +28,7 @@ import (
 type testHarness struct {
 	store     *store.SQLiteStore
 	logger    *proxy.AsyncLogger
-	handler   *proxy.Handler
+	handler   *proxy.AnthropicHandler
 	cfg       *config.Config
 	providers map[string]provider.Provider
 	apiKey    string // plaintext proxy key for auth
@@ -78,7 +78,7 @@ func newTestHarness(t *testing.T, upstreamURL string) *testHarness {
 		},
 	}
 
-	anthropicClient, err := anthropic.NewClient("anthropic", upstreamURL, "proxy_key", "test-upstream-key", "2023-06-01")
+	anthropicClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "anthropic", BaseURL: upstreamURL, AuthMode: "proxy_key", APIKey: "test-upstream-key", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -88,7 +88,7 @@ func newTestHarness(t *testing.T, upstreamURL string) *testHarness {
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 
-	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
 
 	h := &testHarness{
 		store:     st,
@@ -455,9 +455,9 @@ model_list:
 	logger := proxy.NewAsyncLogger(st, 100)
 	// No defer — we close explicitly below to flush before reading logs.
 
-	primaryClient, err := anthropic.NewClient("primary", primary.URL, "proxy_key", "key1", "2023-06-01")
+	primaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primary.URL, AuthMode: "proxy_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
-	secondaryClient, err := anthropic.NewClient("secondary", secondary.URL, "proxy_key", "key2", "2023-06-01")
+	secondaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondary.URL, AuthMode: "proxy_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -465,7 +465,7 @@ model_list:
 		"secondary": secondaryClient,
 	}
 
-	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
 	req := buildFallbackRequest(t, st, "virtual", `{"model":"virtual","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -653,7 +653,7 @@ func setupFallbackStore(t *testing.T) (*store.SQLiteStore, string) {
 }
 
 // buildVirtualFallbackHandler builds a handler with a two-entry virtual model "virtual".
-func buildVirtualFallbackHandler(t *testing.T, primaryURL, secondaryURL string) (*proxy.Handler, *store.SQLiteStore, *proxy.AsyncLogger) {
+func buildVirtualFallbackHandler(t *testing.T, primaryURL, secondaryURL string) (*proxy.AnthropicHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
 	st, _ := setupFallbackStore(t)
 
@@ -686,9 +686,9 @@ model_list:
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	primaryClient, err := anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01")
+	primaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primaryURL, AuthMode: "proxy_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
-	secondaryClient, err := anthropic.NewClient("secondary", secondaryURL, "proxy_key", "key2", "2023-06-01")
+	secondaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondaryURL, AuthMode: "proxy_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -698,7 +698,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
 	return handler, st, logger
 }
 
@@ -745,7 +745,7 @@ func responsesSuccessResponse() map[string]interface{} {
 
 // buildCrossFormatFallbackHandler creates an Anthropic handler with a virtual model
 // where primary is Anthropic and secondary is a different format (OpenAI CC or Responses).
-func buildCrossFormatFallbackHandler(t *testing.T, primaryURL, secondaryURL, secondaryType string) (*proxy.Handler, *store.SQLiteStore, *proxy.AsyncLogger) {
+func buildCrossFormatFallbackHandler(t *testing.T, primaryURL, secondaryURL, secondaryType string) (*proxy.AnthropicHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
 	st, _ := setupFallbackStore(t)
 
@@ -795,7 +795,7 @@ model_list:
 
 	providers := map[string]provider.Provider{}
 
-	primaryClient, err2 := anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01")
+	primaryClient, err2 := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primaryURL, AuthMode: "proxy_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err2)
 	providers["primary"] = primaryClient
 
@@ -805,7 +805,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
 	return handler, st, logger
 }
 
@@ -910,7 +910,7 @@ func TestFallback_AnthropicPrimary_OpenAICC_BothFail(t *testing.T) {
 	logger.Close()
 }
 
-func buildAnthropicCrossFormatMiddleFallbackHandler(t *testing.T, primaryURL, secondaryURL, tertiaryURL, secondaryType string) (*proxy.Handler, *store.SQLiteStore, *proxy.AsyncLogger) {
+func buildAnthropicCrossFormatMiddleFallbackHandler(t *testing.T, primaryURL, secondaryURL, tertiaryURL, secondaryType string) (*proxy.AnthropicHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
 	st, _ := setupFallbackStore(t)
 
@@ -968,7 +968,7 @@ model_list:
 
 	providers := map[string]provider.Provider{}
 
-	primaryClient, err2 := anthropic.NewClient("primary", primaryURL, "proxy_key", "key1", "2023-06-01")
+	primaryClient, err2 := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primaryURL, AuthMode: "proxy_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err2)
 	providers["primary"] = primaryClient
 
@@ -976,13 +976,13 @@ model_list:
 	require.NoError(t, err2)
 	providers["secondary"] = secondaryClient
 
-	tertiaryClient, err2 := anthropic.NewClient("tertiary", tertiaryURL, "proxy_key", "key3", "2023-06-01")
+	tertiaryClient, err2 := anthropic.NewClient(anthropic.ClientConfig{Name: "tertiary", BaseURL: tertiaryURL, AuthMode: "proxy_key", APIKey: "key3", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err2)
 	providers["tertiary"] = tertiaryClient
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
 	return handler, st, logger
 }
 
@@ -1313,7 +1313,7 @@ model_list:
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 	defer logger.Close()
-	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
 
 	reqBody := `{"model":"chatgpt-model","messages":[{"role":"user","content":"hi"}],"max_tokens":10,"stream":true}`
 	req := buildFallbackRequest(t, st, "", reqBody)
@@ -1386,7 +1386,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewAnthropicHandler(cfg, providers, calc, logger, nil, nil, nil)
 
 	reqBody := `{"model":"chatgpt-model","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`
 	req := buildFallbackRequest(t, st, "", reqBody)

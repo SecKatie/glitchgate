@@ -80,7 +80,7 @@ func newResponsesTestHarness(t *testing.T, upstreamURL string) *responsesTestHar
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
 
-	handler := proxy.NewResponsesHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewResponsesHandler(cfg, providers, calc, logger, nil, nil, nil)
 
 	h := &responsesTestHarness{
 		store:     st,
@@ -491,7 +491,7 @@ model_list:
 
 	calc := pricing.NewCalculator(map[string]pricing.Entry{})
 	logger := proxy.NewAsyncLogger(st, 100)
-	handler := proxy.NewResponsesHandler(cfg, providers, calc, logger, nil)
+	handler := proxy.NewResponsesHandler(cfg, providers, calc, logger, nil, nil, nil)
 
 	h := &responsesTestHarness{
 		store:     st,

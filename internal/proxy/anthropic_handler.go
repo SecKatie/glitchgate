@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/seckatie/glitchgate/internal/circuitbreaker"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/metrics"
 	"github.com/seckatie/glitchgate/internal/pricing"
@@ -19,24 +20,22 @@ import (
 	"github.com/seckatie/glitchgate/internal/translate"
 )
 
-// Handler is the core proxy HTTP handler for Anthropic-compatible requests.
-type Handler struct {
-	cfg           *config.Config
-	providers     map[string]provider.Provider
-	calculator    *pricing.Calculator
-	logger        *AsyncLogger
-	budgetChecker *BudgetChecker
+// AnthropicHandler is the core proxy HTTP handler for Anthropic-compatible requests.
+type AnthropicHandler struct {
+	baseHandler
 }
 
-// NewHandler creates a new proxy handler.
-func NewHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker) *Handler {
-	return &Handler{
+// NewAnthropicHandler creates a new proxy handler for Anthropic-compatible requests.
+func NewAnthropicHandler(cfg *config.Config, providers map[string]provider.Provider, calc *pricing.Calculator, logger *AsyncLogger, bc *BudgetChecker, breakers *circuitbreaker.Registry, mc *ModelChecker) *AnthropicHandler {
+	return &AnthropicHandler{baseHandler{
 		cfg:           cfg,
 		providers:     providers,
 		calculator:    calc,
 		logger:        logger,
 		budgetChecker: bc,
-	}
+		breakers:      breakers,
+		modelChecker:  mc,
+	}}
 }
 
 // isFallbackStatus reports whether an HTTP status code should trigger a fallback
@@ -46,7 +45,7 @@ func isFallbackStatus(code int) bool {
 }
 
 // ServeHTTP handles POST /v1/messages requests.
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *AnthropicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAnthropicError(w, http.StatusMethodNotAllowed, "invalid_request_error", "Method not allowed")
 		return
@@ -93,6 +92,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	metrics.RecordActiveRequest("anthropic")
 	defer metrics.FinishActiveRequest("anthropic")
 
+	if h.modelChecker != nil && proxyKeyID != "" {
+		if allowed, err := h.modelChecker.IsModelAllowed(r.Context(), proxyKeyID, reqBody.Model); err != nil {
+			slog.Warn("model allowlist check error", "error", err)
+		} else if !allowed {
+			writeAnthropicError(w, http.StatusForbidden, "permission_error",
+				fmt.Sprintf("Model %q is not allowed for this API key", reqBody.Model))
+			return
+		}
+	}
+
 	if h.budgetChecker != nil && proxyKeyID != "" {
 		if violation, err := h.budgetChecker.Check(r.Context(), proxyKeyID); err != nil {
 			slog.Warn("budget check error", "error", err)
@@ -105,7 +114,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	executeProxyPipeline(w, r, h.logger, chain, h.providers, pipelineSpec{
+	executeProxyPipeline(w, r, h.logger, chain, h.providers, h.breakers, pipelineSpec{
 		SourceFormat: "anthropic",
 		ProxyKeyID:   proxyKeyID,
 		KeyPrefix:    keyPrefix,
@@ -117,7 +126,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		newPipelineCallbacks(w, writeAnthropicError, "api_error"))
 }
 
-func (h *Handler) handleNonStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
+func (h *AnthropicHandler) handleNonStreaming(w http.ResponseWriter, resp *provider.Response) handlerResult {
 	var errDetails *string
 	if resp.StatusCode >= 400 {
 		s := string(resp.Body)
@@ -144,7 +153,7 @@ func (h *Handler) handleNonStreaming(w http.ResponseWriter, resp *provider.Respo
 	}
 }
 
-func (h *Handler) handleStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
+func (h *AnthropicHandler) handleStreaming(ctx context.Context, w http.ResponseWriter, resp *provider.Response) handlerResult {
 	// Forward upstream response headers (e.g. anthropic-beta) before the SSE
 	// relay sets Content-Type and calls WriteHeader. Claude Code validates these
 	// headers before rendering thinking blocks.
@@ -156,11 +165,11 @@ func (h *Handler) handleStreaming(ctx context.Context, w http.ResponseWriter, re
 			}
 		}
 	}
-	result, err := RelaySSEStream(ctx, w, resp.Stream)
+	result, err := RelaySSEStream(ctx, w, resp.Stream, extractAnthropicTokens)
 	return streamingResult(resp, result, err)
 }
 
-func (h *Handler) routeBuilders(w http.ResponseWriter, r *http.Request,
+func (h *AnthropicHandler) routeBuilders(w http.ResponseWriter, r *http.Request,
 	body []byte, reqBody *struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -214,7 +223,7 @@ func (h *Handler) routeBuilders(w http.ResponseWriter, r *http.Request,
 // buildOpenAIProviderRoute handles Anthropic-format requests that need to be
 // sent to an OpenAI-native provider. It translates Anthropic→OpenAI on request
 // and OpenAI→Anthropic on response.
-func (h *Handler) buildOpenAIProviderRoute(w http.ResponseWriter, r *http.Request,
+func (h *AnthropicHandler) buildOpenAIProviderRoute(w http.ResponseWriter, r *http.Request,
 	body []byte, reqBody *struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -271,7 +280,7 @@ func (h *Handler) buildOpenAIProviderRoute(w http.ResponseWriter, r *http.Reques
 	}, false
 }
 
-func (h *Handler) handleOpenAIProviderNonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleOpenAIProviderNonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
 	if resp.StatusCode >= 400 {
 		s := string(resp.Body)
 		writeAnthropicError(w, resp.StatusCode, "api_error", s)
@@ -321,7 +330,7 @@ func (h *Handler) handleOpenAIProviderNonStreaming(w http.ResponseWriter, resp *
 	}
 }
 
-func (h *Handler) handleOpenAIProviderStreaming(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleOpenAIProviderStreaming(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
 	result, err := translate.ReverseSSEStream(r.Context(), w, resp.Stream, modelRequested)
 	return streamingResult(resp, result, err)
 }
@@ -329,7 +338,7 @@ func (h *Handler) handleOpenAIProviderStreaming(w http.ResponseWriter, r *http.R
 // handleOpenAIProviderForcedStream handles the case where the client requested
 // streaming but the provider config has stream:false. It fetches a non-streaming
 // OpenAI response and synthesizes Anthropic SSE events for the client.
-func (h *Handler) handleOpenAIProviderForcedStream(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleOpenAIProviderForcedStream(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
 	if resp.StatusCode >= 400 {
 		s := string(resp.Body)
 		writeAnthropicError(w, resp.StatusCode, "api_error", s)
@@ -383,7 +392,7 @@ func (h *Handler) handleOpenAIProviderForcedStream(w http.ResponseWriter, resp *
 // buildResponsesProviderRoute handles Anthropic-format requests that need to be
 // sent to a Responses API upstream. It translates Anthropic→Responses on
 // request and Responses→Anthropic on response.
-func (h *Handler) buildResponsesProviderRoute(w http.ResponseWriter, r *http.Request,
+func (h *AnthropicHandler) buildResponsesProviderRoute(w http.ResponseWriter, r *http.Request,
 	body []byte, reqBody *struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -430,7 +439,7 @@ func (h *Handler) buildResponsesProviderRoute(w http.ResponseWriter, r *http.Req
 	}, false
 }
 
-func (h *Handler) handleResponsesProviderNonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleResponsesProviderNonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
 	if resp.StatusCode >= 400 {
 		s := string(resp.Body)
 		writeAnthropicError(w, resp.StatusCode, "api_error", s)
@@ -468,7 +477,7 @@ func (h *Handler) handleResponsesProviderNonStreaming(w http.ResponseWriter, res
 	}
 }
 
-func (h *Handler) handleResponsesProviderStreaming(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleResponsesProviderStreaming(w http.ResponseWriter, r *http.Request, resp *provider.Response, modelRequested string) handlerResult {
 	// The upstream (Responses API) doesn't send anthropic-beta, but the
 	// translator can produce thinking content blocks. Inject the header so
 	// Claude Code knows to process and render them.
@@ -480,7 +489,7 @@ func (h *Handler) handleResponsesProviderStreaming(w http.ResponseWriter, r *htt
 // buildGeminiProviderRoute handles Anthropic-format requests that need to be
 // sent to a native Gemini (Vertex AI) provider. It translates Anthropic→Gemini
 // on request and Gemini→Anthropic on response.
-func (h *Handler) buildGeminiProviderRoute(w http.ResponseWriter, r *http.Request,
+func (h *AnthropicHandler) buildGeminiProviderRoute(w http.ResponseWriter, r *http.Request,
 	body []byte, reqBody *struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -532,7 +541,7 @@ func (h *Handler) buildGeminiProviderRoute(w http.ResponseWriter, r *http.Reques
 	}, false
 }
 
-func (h *Handler) handleGeminiProviderNonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleGeminiProviderNonStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
 	if resp.StatusCode >= 400 {
 		s := string(resp.Body)
 		writeAnthropicError(w, resp.StatusCode, "api_error", s)
@@ -570,7 +579,7 @@ func (h *Handler) handleGeminiProviderNonStreaming(w http.ResponseWriter, resp *
 	}
 }
 
-func (h *Handler) handleGeminiProviderStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleGeminiProviderStreaming(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
 	if resp.Stream == nil {
 		return h.handleGeminiProviderForcedStream(w, resp, modelRequested)
 	}
@@ -582,7 +591,7 @@ func (h *Handler) handleGeminiProviderStreaming(w http.ResponseWriter, resp *pro
 // handleGeminiProviderForcedStream handles client streaming requests when the
 // provider config has stream:false. It fetches a non-streaming Gemini response
 // and synthesizes Anthropic SSE events for the client.
-func (h *Handler) handleGeminiProviderForcedStream(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
+func (h *AnthropicHandler) handleGeminiProviderForcedStream(w http.ResponseWriter, resp *provider.Response, modelRequested string) handlerResult {
 	if resp.StatusCode >= 400 {
 		s := string(resp.Body)
 		writeAnthropicError(w, resp.StatusCode, "api_error", s)

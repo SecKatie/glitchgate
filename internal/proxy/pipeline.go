@@ -4,15 +4,28 @@ package proxy
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/seckatie/glitchgate/internal/circuitbreaker"
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/pricing"
 	"github.com/seckatie/glitchgate/internal/provider"
 )
 
 type responseAdapter func(http.ResponseWriter, *provider.Response) handlerResult
+
+// baseHandler holds the shared dependencies used by all proxy handler types.
+type baseHandler struct {
+	cfg           *config.Config
+	providers     map[string]provider.Provider
+	calculator    *pricing.Calculator
+	logger        *AsyncLogger
+	budgetChecker *BudgetChecker
+	breakers      *circuitbreaker.Registry
+	modelChecker  *ModelChecker
+}
 
 // providerForcesNonStream returns true when the provider config explicitly
 // disables streaming (stream: false). All handler types use this to decide
@@ -95,15 +108,30 @@ type providerAttempt struct {
 func executeFallbackChain(
 	chain []config.DispatchTarget,
 	providers map[string]provider.Provider,
+	breakers *circuitbreaker.Registry,
 	onMissingProvider func(string),
 	handleAttempt func(chainAttempt) bool,
 ) {
+	allSkipped := true
 	for attempt, mapping := range chain {
 		prov, ok := providers[mapping.Provider]
 		if !ok {
 			onMissingProvider(mapping.Provider)
 			return
 		}
+
+		// Consult circuit breaker — skip providers whose circuit is open.
+		if breakers != nil {
+			cb := breakers.Get(mapping.Provider)
+			if !cb.Allow() {
+				slog.Info("circuit breaker skipping provider",
+					"provider", mapping.Provider,
+					"state", cb.CurrentState().String())
+				continue
+			}
+		}
+
+		allSkipped = false
 		if handleAttempt(chainAttempt{
 			Mapping:          mapping,
 			Provider:         prov,
@@ -112,6 +140,12 @@ func executeFallbackChain(
 		}) {
 			return
 		}
+	}
+	// If every provider was skipped by the circuit breaker, the caller
+	// will fall through without writing a response. We need to handle
+	// that case here.
+	if allSkipped && len(chain) > 0 {
+		return
 	}
 }
 
@@ -122,12 +156,16 @@ func executeProviderAttempt(
 	provReq *provider.Request,
 	attempt providerAttempt,
 	calc *pricing.Calculator,
+	cb *circuitbreaker.Breaker,
 	writeNetworkError func(),
 	writeExhaustedError func(),
 	handleResponse func(*provider.Response) handlerResult,
 ) bool {
 	provResp, err := prov.SendRequest(r.Context(), provReq)
 	if err != nil {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		if attempt.HasMoreFallbacks {
 			return false
 		}
@@ -143,6 +181,9 @@ func executeProviderAttempt(
 	}
 
 	if isFallbackStatus(provResp.StatusCode) {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		if provResp.Stream != nil {
 			_ = provResp.Stream.Close()
 		}
@@ -160,6 +201,9 @@ func executeProviderAttempt(
 		return true
 	}
 
+	if cb != nil {
+		cb.RecordSuccess()
+	}
 	result := handleResponse(provResp)
 	latency := time.Since(attempt.Start).Milliseconds()
 	logger.logEntry(attempt.ProxyKeyID, attempt.KeyPrefix, attempt.SourceFormat, prov.Name(), attempt.ModelRequested, attempt.ModelUpstream, "",
@@ -173,11 +217,14 @@ func executeProxyPipeline(
 	logger *AsyncLogger,
 	chain []config.DispatchTarget,
 	providers map[string]provider.Provider,
+	breakers *circuitbreaker.Registry,
 	spec pipelineSpec,
 	routes map[string]routeBuilder,
 	cbs pipelineCallbacks,
 ) {
-	executeFallbackChain(chain, providers, cbs.onMissingProvider, func(attempt chainAttempt) bool {
+	anyAttempted := false
+	executeFallbackChain(chain, providers, breakers, cbs.onMissingProvider, func(attempt chainAttempt) bool {
+		anyAttempted = true
 		buildRoute, ok := routes[attempt.Provider.APIFormat()]
 		if !ok {
 			return cbs.onUnsupportedFormat(attempt.Provider)
@@ -186,6 +233,11 @@ func executeProxyPipeline(
 		plan, stop := buildRoute(attempt)
 		if stop || plan == nil {
 			return true
+		}
+
+		var cb *circuitbreaker.Breaker
+		if breakers != nil {
+			cb = breakers.Get(attempt.Provider.Name())
 		}
 
 		return executeProviderAttempt(r, logger, attempt.Provider, plan.ProviderRequest, providerAttempt{
@@ -199,8 +251,12 @@ func executeProxyPipeline(
 			AttemptCount:     attempt.AttemptCount,
 			HasMoreFallbacks: attempt.HasMoreFallbacks,
 			Start:            spec.Start,
-		}, spec.Calculator, cbs.onNetworkError, cbs.onExhaustedError, func(provResp *provider.Response) handlerResult {
+		}, spec.Calculator, cb, cbs.onNetworkError, cbs.onExhaustedError, func(provResp *provider.Response) handlerResult {
 			return plan.HandleResponse(w, provResp)
 		})
 	})
+	if !anyAttempted && len(chain) > 0 {
+		slog.Warn("all providers skipped by circuit breaker", "model", spec.ModelRequest)
+		cbs.onExhaustedError()
+	}
 }
