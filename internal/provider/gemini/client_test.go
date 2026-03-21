@@ -7,19 +7,53 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 
 	"github.com/seckatie/glitchgate/internal/provider"
 )
 
-func TestClient_Interface(t *testing.T) {
-	client := &Client{authMode: "proxy_key"}
-	require.Equal(t, "proxy_key", client.AuthMode())
+// --- test helpers ---
+
+// staticTokenSource returns a fixed token for testing.
+type staticTokenSource struct {
+	token string
+}
+
+func (s *staticTokenSource) Token() (*oauth2.Token, error) {
+	return &oauth2.Token{
+		AccessToken: s.token,
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(time.Hour),
+	}, nil
+}
+
+// rewriteTransport rewrites Vertex AI URLs to point at a test server.
+type rewriteTransport struct {
+	base   http.RoundTripper
+	target string
+}
+
+func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.URL.Scheme = "http"
+	req.URL.Host = strings.TrimPrefix(rt.target, "http://")
+	if rt.base != nil {
+		return rt.base.RoundTrip(req)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// --- api_key mode tests ---
+
+func TestClient_Interface_APIKey(t *testing.T) {
+	client := &Client{authMode: "api_key"}
+	require.Equal(t, "api_key", client.AuthMode())
 	require.Equal(t, "gemini", client.APIFormat())
 }
 
-func TestSendRequest_ProxyKeyAuthHeader(t *testing.T) {
+func TestSendRequest_APIKeyAuthHeader(t *testing.T) {
 	var gotAPIKey string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAPIKey = r.Header.Get("X-Goog-Api-Key")
@@ -28,8 +62,8 @@ func TestSendRequest_ProxyKeyAuthHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := NewClient("test", srv.URL, "proxy_key", "gemini-secret-key")
-	require.NoError(t, err)
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "gemini-secret-key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
 
 	req := &provider.Request{
 		Body:        []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`),
@@ -44,32 +78,6 @@ func TestSendRequest_ProxyKeyAuthHeader(t *testing.T) {
 	require.Equal(t, "gemini-secret-key", gotAPIKey)
 }
 
-func TestSendRequest_ForwardedAPIKey(t *testing.T) {
-	var gotAPIKey string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAPIKey = r.Header.Get("X-Goog-Api-Key")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"candidates":[],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`))
-	}))
-	defer srv.Close()
-
-	client, err := NewClient("test", srv.URL, "forward", "")
-	require.NoError(t, err)
-
-	req := &provider.Request{
-		Body: []byte(`{"contents":[]}`),
-		Headers: http.Header{
-			"X-Goog-Api-Key": []string{"forwarded-key"},
-		},
-		Model:       "gemini-2.5-flash",
-		IsStreaming: false,
-	}
-
-	_, err = client.SendRequest(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, "forwarded-key", gotAPIKey)
-}
-
 func TestSendRequest_URLConstructionStripsGooglePrefix(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,8 +87,8 @@ func TestSendRequest_URLConstructionStripsGooglePrefix(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := NewClient("test", srv.URL, "proxy_key", "key")
-	require.NoError(t, err)
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
 
 	req := &provider.Request{
 		Body:        []byte(`{"contents":[]}`),
@@ -89,20 +97,20 @@ func TestSendRequest_URLConstructionStripsGooglePrefix(t *testing.T) {
 		IsStreaming: false,
 	}
 
-	_, err = client.SendRequest(t.Context(), req)
+	_, err := client.SendRequest(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, "/v1beta/models/gemini-2.5-flash:generateContent", gotPath)
 }
 
-func TestSendRequest_TokenExtraction(t *testing.T) {
+func TestSendRequest_TokenExtraction_APIKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"hi"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":42,"cachedContentTokenCount":10,"candidatesTokenCount":17,"thoughtsTokenCount":4,"totalTokenCount":59}}`))
 	}))
 	defer srv.Close()
 
-	client, err := NewClient("test", srv.URL, "proxy_key", "key")
-	require.NoError(t, err)
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
 
 	req := &provider.Request{
 		Body:        []byte(`{"contents":[]}`),
@@ -119,7 +127,7 @@ func TestSendRequest_TokenExtraction(t *testing.T) {
 	require.Equal(t, int64(4), resp.ReasoningTokens)
 }
 
-func TestSendRequest_Streaming(t *testing.T) {
+func TestSendRequest_Streaming_APIKey(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
@@ -128,8 +136,8 @@ func TestSendRequest_Streaming(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := NewClient("test", srv.URL, "proxy_key", "key")
-	require.NoError(t, err)
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
 
 	req := &provider.Request{
 		Body:        []byte(`{"contents":[]}`),
@@ -165,8 +173,8 @@ func TestSendRequest_StreamingFallbacksToNonStreamingOnBadRequest(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	client, err := NewClient("test", srv.URL, "proxy_key", "key")
-	require.NoError(t, err)
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
 
 	resp, err := client.SendRequest(t.Context(), &provider.Request{
 		Body:        []byte(`{"contents":[]}`),
@@ -184,10 +192,185 @@ func TestSendRequest_StreamingFallbacksToNonStreamingOnBadRequest(t *testing.T) 
 	require.NotEmpty(t, resp.Body)
 }
 
-func TestEndpointURL_DefaultBaseURL(t *testing.T) {
-	client := &Client{baseURL: DefaultBaseURL}
+func TestEndpointURL_APIKey(t *testing.T) {
+	client := &Client{authMode: "api_key"}
 	require.Equal(t,
 		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
 		client.endpointURL("gemini-2.5-flash", false),
 	)
+}
+
+// --- vertex mode tests ---
+
+func TestClient_Interface_Vertex(t *testing.T) {
+	client := &Client{authMode: "vertex"}
+	require.Equal(t, "internal", client.AuthMode())
+	require.Equal(t, "gemini", client.APIFormat())
+}
+
+func TestSendRequest_VertexAuthHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"hi"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "global"},
+		&staticTokenSource{token: "gemini-secret-token"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	req := &provider.Request{
+		Body:        []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`),
+		Headers:     http.Header{},
+		Model:       "google/gemini-2.5-flash",
+		IsStreaming: false,
+	}
+
+	resp, err := client.SendRequest(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "Bearer gemini-secret-token", gotAuth)
+}
+
+func TestSendRequest_VertexURLConstruction(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-central1"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	req := &provider.Request{
+		Body:        []byte(`{"contents":[]}`),
+		Headers:     http.Header{},
+		Model:       "google/gemini-2.5-flash",
+		IsStreaming: false,
+	}
+
+	_, err := client.SendRequest(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", gotPath)
+}
+
+func TestSendRequest_VertexTokenExtraction(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"hi"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":42,"cachedContentTokenCount":10,"candidatesTokenCount":17,"thoughtsTokenCount":4,"totalTokenCount":59}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "global"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	req := &provider.Request{
+		Body:        []byte(`{"contents":[]}`),
+		Headers:     http.Header{},
+		Model:       "google/gemini-2.5-flash",
+		IsStreaming: false,
+	}
+
+	resp, err := client.SendRequest(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, int64(32), resp.InputTokens)
+	require.Equal(t, int64(21), resp.OutputTokens)
+	require.Equal(t, int64(10), resp.CacheReadInputTokens)
+	require.Equal(t, int64(4), resp.ReasoningTokens)
+}
+
+func TestSendRequest_VertexStreaming(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.True(t, strings.HasSuffix(r.URL.String(), "streamGenerateContent?alt=sse"),
+			"streaming URL should use streamGenerateContent?alt=sse, got: %s", r.URL.String())
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}],\"role\":\"model\"}}]}\n\n"))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "global"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	req := &provider.Request{
+		Body:        []byte(`{"contents":[]}`),
+		Headers:     http.Header{},
+		Model:       "google/gemini-2.5-flash",
+		IsStreaming: true,
+	}
+
+	resp, err := client.SendRequest(t.Context(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Stream, "streaming response should have Stream set")
+	require.NoError(t, resp.Stream.Close())
+}
+
+func TestSendRequest_VertexDefaultRegion(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`))
+	}))
+	defer srv.Close()
+
+	// Empty region should default to "us-central1".
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	req := &provider.Request{
+		Body:        []byte(`{"contents":[]}`),
+		Headers:     http.Header{},
+		Model:       "google/gemini-2.5-flash",
+		IsStreaming: false,
+	}
+
+	_, err := client.SendRequest(t.Context(), req)
+	require.NoError(t, err)
+	require.True(t, strings.Contains(gotPath, "/locations/us-central1/"), "empty region should default to us-central1, got: %s", gotPath)
+}
+
+func TestSendRequest_VertexNoStreamingFallback(t *testing.T) {
+	// Vertex mode should NOT retry on 400 (the streaming fallback is api_key only).
+	var requestCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-central1"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	resp, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:        []byte(`{"contents":[]}`),
+		Headers:     http.Header{},
+		Model:       "gemini-2.5-flash",
+		IsStreaming: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Equal(t, 1, requestCount, "vertex mode should not retry on 400")
 }

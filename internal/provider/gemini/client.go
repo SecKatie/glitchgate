@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package gemini implements the provider.Provider interface for the Google
-// Gemini Developer API authenticated with API keys.
+// Gemini API, supporting both the Developer API (API key auth) and Vertex AI
+// (OAuth2 auth).
 package gemini
 
 import (
@@ -11,45 +12,89 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"path"
+	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 
 	"github.com/seckatie/glitchgate/internal/config"
 	"github.com/seckatie/glitchgate/internal/provider"
 )
 
-// DefaultBaseURL is the base URL for the Gemini Developer API.
-const DefaultBaseURL = "https://generativelanguage.googleapis.com"
+const (
+	developerAPIBaseURL = "https://generativelanguage.googleapis.com"
+	cloudPlatformScope  = "https://www.googleapis.com/auth/cloud-platform"
+	defaultVertexRegion = "us-central1"
+)
 
-// Client implements provider.Provider for the Gemini Developer API.
+// ClientConfig holds the parameters needed to construct a Gemini [Client].
+type ClientConfig struct {
+	Name            string
+	AuthMode        string // "api_key" or "vertex"
+	APIKey          string // required when AuthMode == "api_key"
+	Project         string // required when AuthMode == "vertex"
+	Region          string // optional for vertex; defaults to us-central1
+	CredentialsFile string // optional for vertex; uses ADC when empty
+}
+
+// Client implements provider.Provider for the Google Gemini API.
 type Client struct {
 	name           string
-	baseURL        string
-	authMode       string // "proxy_key" or "forward"
-	apiKey         string // used when authMode == "proxy_key"
+	authMode       string             // "api_key" or "vertex"
+	apiKey         string             // api_key mode
+	tokenSource    oauth2.TokenSource // vertex mode
+	project        string             // vertex mode
+	region         string             // vertex mode
 	httpClient     *http.Client
 	requestTimeout time.Duration
 }
 
-// NewClient creates a Gemini provider client. Returns an error if baseURL is
-// not a valid HTTP(S) URL.
-func NewClient(name, baseURL, authMode, apiKey string) (*Client, error) {
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
-	}
-	if err := provider.ValidateBaseURL(baseURL); err != nil {
-		return nil, fmt.Errorf("gemini provider %q: %w", name, err)
-	}
-	return &Client{
-		name:           name,
-		baseURL:        strings.TrimRight(baseURL, "/"),
-		authMode:       authMode,
-		apiKey:         apiKey,
+// NewClient creates a Gemini provider client configured for either API key or
+// Vertex AI authentication.
+func NewClient(cfg ClientConfig) (*Client, error) {
+	c := &Client{
+		name:           cfg.Name,
+		authMode:       cfg.AuthMode,
+		apiKey:         cfg.APIKey,
+		project:        cfg.Project,
+		region:         cfg.Region,
 		httpClient:     provider.BuildHTTPClient(),
 		requestTimeout: config.DefaultUpstreamRequestTimeout,
-	}, nil
+	}
+
+	if c.authMode == "vertex" {
+		if c.region == "" {
+			c.region = defaultVertexRegion
+		}
+		ts, err := newTokenSource(cfg.Name, cfg.CredentialsFile)
+		if err != nil {
+			return nil, err
+		}
+		c.tokenSource = ts
+	}
+
+	return c, nil
+}
+
+// newTestClient creates a Client with a custom token source and HTTP client,
+// for use in unit tests only.
+func newTestClient(cfg ClientConfig, ts oauth2.TokenSource, httpClient *http.Client) *Client {
+	region := cfg.Region
+	if cfg.AuthMode == "vertex" && region == "" {
+		region = defaultVertexRegion
+	}
+	return &Client{
+		name:           cfg.Name,
+		authMode:       cfg.AuthMode,
+		apiKey:         cfg.APIKey,
+		tokenSource:    ts,
+		project:        cfg.Project,
+		region:         region,
+		httpClient:     httpClient,
+		requestTimeout: config.DefaultUpstreamRequestTimeout,
+	}
 }
 
 // SetTimeouts overrides the default upstream request deadline.
@@ -60,8 +105,13 @@ func (c *Client) SetTimeouts(requestTimeout time.Duration) {
 // Name returns the provider's short identifier.
 func (c *Client) Name() string { return c.name }
 
-// AuthMode returns "proxy_key" or "forward".
-func (c *Client) AuthMode() string { return c.authMode }
+// AuthMode returns "api_key" or "internal" (vertex manages its own OAuth2 auth).
+func (c *Client) AuthMode() string {
+	if c.authMode == "vertex" {
+		return "internal"
+	}
+	return c.authMode
+}
 
 // APIFormat returns "gemini" because this provider speaks the native Gemini API.
 func (c *Client) APIFormat() string { return "gemini" }
@@ -79,17 +129,18 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusBadRequest {
-		return resp, nil
-	}
 
 	// Some Gemini Developer API setups reject streamGenerateContent with 400
 	// while accepting the equivalent non-streaming request body. Retry once
 	// against generateContent so the proxy can synthesize SSE for the client.
-	nonStreamResp, retryErr := c.send(ctx, req, false)
-	if retryErr == nil && nonStreamResp.StatusCode < http.StatusBadRequest {
-		return nonStreamResp, nil
+	// This quirk does not apply to Vertex AI.
+	if c.authMode == "api_key" && resp.StatusCode == http.StatusBadRequest {
+		nonStreamResp, retryErr := c.send(ctx, req, false)
+		if retryErr == nil && nonStreamResp.StatusCode < http.StatusBadRequest {
+			return nonStreamResp, nil
+		}
 	}
+
 	return resp, nil
 }
 
@@ -102,28 +153,17 @@ func (c *Client) send(ctx context.Context, req *provider.Request, streaming bool
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	switch c.authMode {
-	case "proxy_key":
+	case "api_key":
 		httpReq.Header.Set("X-Goog-Api-Key", c.apiKey)
-	case "forward":
-		if apiKey := req.Headers.Get("X-Goog-Api-Key"); apiKey != "" {
-			httpReq.Header.Set("X-Goog-Api-Key", apiKey)
+	case "vertex":
+		token, tokenErr := c.tokenSource.Token()
+		if tokenErr != nil {
+			return nil, fmt.Errorf("gemini provider %q: obtaining access token: %w", c.name, tokenErr)
 		}
+		httpReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	}
 
-	for hdr, values := range req.Headers {
-		if !shouldForwardHeader(hdr) {
-			continue
-		}
-		if strings.EqualFold(hdr, "Content-Type") ||
-			strings.EqualFold(hdr, "X-Goog-Api-Key") {
-			continue
-		}
-		for _, v := range values {
-			httpReq.Header.Add(hdr, v)
-		}
-	}
-
-	resp, err := c.httpClient.Do(httpReq) //nolint:gosec // URL from validated provider config, not user input
+	resp, err := c.httpClient.Do(httpReq) //nolint:gosec // URL from operator-controlled provider config, not user input
 	if err != nil {
 		return nil, fmt.Errorf("sending request to %s: %w", c.name, err)
 	}
@@ -157,48 +197,28 @@ func (c *Client) send(ctx context.Context, req *provider.Request, streaming bool
 }
 
 func (c *Client) endpointURL(model string, streaming bool) string {
-	op := "generateContent"
-	if streaming {
-		op = "streamGenerateContent"
-	}
-
 	model = strings.TrimPrefix(model, "google/")
 
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return c.baseURL + "/v1beta/models/" + model + ":" + op
-	}
-
-	basePath := strings.TrimSuffix(u.Path, "/")
-	switch {
-	case basePath == "":
-		u.Path = path.Join("/", "v1beta", "models", model) + ":" + op
-	case strings.HasSuffix(basePath, "/v1beta"):
-		u.Path = path.Join(basePath, "models", model) + ":" + op
-	default:
-		u.Path = path.Join(basePath, "v1beta", "models", model) + ":" + op
-	}
-
-	if streaming {
-		query := u.Query()
-		query.Set("alt", "sse")
-		u.RawQuery = query.Encode()
-	}
-
-	return u.String()
-}
-
-func shouldForwardHeader(hdr string) bool {
-	switch {
-	case strings.EqualFold(hdr, "Accept"),
-		strings.EqualFold(hdr, "Accept-Language"),
-		strings.EqualFold(hdr, "User-Agent"),
-		strings.EqualFold(hdr, "X-App"):
-		return true
-	case strings.HasPrefix(strings.ToLower(hdr), "x-goog-"):
-		return true
-	default:
-		return false
+	switch c.authMode {
+	case "vertex":
+		method := "generateContent"
+		if streaming {
+			method = "streamGenerateContent?alt=sse"
+		}
+		return fmt.Sprintf(
+			"https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/google/models/%s:%s",
+			c.region, c.project, c.region, model, method,
+		)
+	default: // api_key
+		op := "generateContent"
+		if streaming {
+			op = "streamGenerateContent"
+		}
+		u := developerAPIBaseURL + "/v1beta/models/" + model + ":" + op
+		if streaming {
+			u += "?alt=sse"
+		}
+		return u
 	}
 }
 
@@ -207,4 +227,32 @@ func extractGeminiTokens(body []byte, resp *provider.Response) {
 	if err := json.Unmarshal(body, &gr); err == nil && gr.UsageMetadata != nil {
 		resp.InputTokens, resp.OutputTokens, resp.CacheReadInputTokens, resp.ReasoningTokens = UsageTotals(gr.UsageMetadata)
 	}
+}
+
+// newTokenSource creates an OAuth2 token source from either an explicit
+// credentials file or Application Default Credentials (ADC). The returned
+// token source handles automatic refresh.
+func newTokenSource(providerName, credentialsFile string) (oauth2.TokenSource, error) {
+	ctx := context.Background()
+
+	var ts oauth2.TokenSource
+	if credentialsFile != "" {
+		data, err := os.ReadFile(credentialsFile) // #nosec G304 -- path comes from operator-controlled config
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: reading credentials file: %w", providerName, err)
+		}
+		creds, err := google.CredentialsFromJSON(ctx, data, cloudPlatformScope) //nolint:staticcheck // SA1019: credentials_file path is operator-controlled config, not untrusted input
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: parsing credentials: %w", providerName, err)
+		}
+		ts = creds.TokenSource
+	} else {
+		creds, err := google.FindDefaultCredentials(ctx, cloudPlatformScope)
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider %q: finding default credentials: %w", providerName, err)
+		}
+		ts = creds.TokenSource
+	}
+
+	return oauth2.ReuseTokenSource(nil, ts), nil
 }
