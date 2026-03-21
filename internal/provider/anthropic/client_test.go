@@ -335,3 +335,181 @@ func TestPrepareBody_PreservesExistingAnthropicVersion(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result, &bodyMap))
 	require.Equal(t, "2024-01-01", bodyMap["anthropic_version"], "should not overwrite existing anthropic_version")
 }
+
+// --- ListModels tests ---
+
+func TestListModels(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T) (*Client, *httptest.Server)
+		wantModels []provider.DiscoveredModel
+		wantErr    string
+	}{
+		{
+			name: "direct_success_two_models",
+			setup: func(t *testing.T) (*Client, *httptest.Server) {
+				t.Helper()
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					resp := modelsListResponse{
+						Data: []modelInfo{
+							{ID: "claude-sonnet-4-6-20250514", DisplayName: "Claude Sonnet 4.6"},
+							{ID: "claude-haiku-3-5-20241022", DisplayName: "Claude 3.5 Haiku"},
+						},
+						HasMore: false,
+					}
+					b, _ := json.Marshal(resp)
+					_, _ = w.Write(b)
+				}))
+				client, err := NewClient(ClientConfig{
+					Name:           "test",
+					BaseURL:        srv.URL,
+					AuthMode:       "proxy_key",
+					APIKey:         "sk-test-key",
+					DefaultVersion: "2023-06-01",
+				})
+				require.NoError(t, err)
+				return client, srv
+			},
+			wantModels: []provider.DiscoveredModel{
+				{ID: "claude-sonnet-4-6-20250514", DisplayName: "Claude Sonnet 4.6"},
+				{ID: "claude-haiku-3-5-20241022", DisplayName: "Claude 3.5 Haiku"},
+			},
+		},
+		{
+			name: "direct_pagination",
+			setup: func(t *testing.T) (*Client, *httptest.Server) {
+				t.Helper()
+				callCount := 0
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					callCount++
+					w.Header().Set("Content-Type", "application/json")
+					var resp modelsListResponse
+					if callCount == 1 {
+						require.Empty(t, r.URL.Query().Get("after_id"), "first request should not have after_id")
+						resp = modelsListResponse{
+							Data:    []modelInfo{{ID: "model-a", DisplayName: "Model A"}},
+							HasMore: true,
+							LastID:  "model-a",
+						}
+					} else {
+						require.Equal(t, "model-a", r.URL.Query().Get("after_id"), "second request should paginate with after_id")
+						resp = modelsListResponse{
+							Data:    []modelInfo{{ID: "model-b", DisplayName: "Model B"}},
+							HasMore: false,
+						}
+					}
+					b, _ := json.Marshal(resp)
+					_, _ = w.Write(b)
+				}))
+				client, err := NewClient(ClientConfig{
+					Name:           "test",
+					BaseURL:        srv.URL,
+					AuthMode:       "proxy_key",
+					APIKey:         "sk-test-key",
+					DefaultVersion: "2023-06-01",
+				})
+				require.NoError(t, err)
+				return client, srv
+			},
+			wantModels: []provider.DiscoveredModel{
+				{ID: "model-a", DisplayName: "Model A"},
+				{ID: "model-b", DisplayName: "Model B"},
+			},
+		},
+		{
+			name: "direct_api_error",
+			setup: func(t *testing.T) (*Client, *httptest.Server) {
+				t.Helper()
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
+				}))
+				client, err := NewClient(ClientConfig{ //nolint:gosec // test credential
+					Name:           "test",
+					BaseURL:        srv.URL,
+					AuthMode:       "proxy_key",
+					APIKey:         "sk-bad-key", //nolint:gosec // test credential
+					DefaultVersion: "2023-06-01",
+				})
+				require.NoError(t, err)
+				return client, srv
+			},
+			wantErr: "models endpoint returned 403",
+		},
+		{
+			name: "direct_headers",
+			setup: func(t *testing.T) (*Client, *httptest.Server) {
+				t.Helper()
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					require.Equal(t, "sk-verify-header", r.Header.Get("X-Api-Key"), "should send X-Api-Key header")
+					require.Equal(t, "2023-06-01", r.Header.Get("Anthropic-Version"), "should send Anthropic-Version header")
+					w.Header().Set("Content-Type", "application/json")
+					resp := modelsListResponse{Data: []modelInfo{{ID: "claude-sonnet-4-6-20250514"}}, HasMore: false}
+					b, _ := json.Marshal(resp)
+					_, _ = w.Write(b)
+				}))
+				client, err := NewClient(ClientConfig{ //nolint:gosec // test credential
+					Name:           "test",
+					BaseURL:        srv.URL,
+					AuthMode:       "proxy_key",
+					APIKey:         "sk-verify-header", //nolint:gosec // test credential
+					DefaultVersion: "2023-06-01",
+				})
+				require.NoError(t, err)
+				return client, srv
+			},
+			wantModels: []provider.DiscoveredModel{
+				{ID: "claude-sonnet-4-6-20250514"},
+			},
+		},
+		{
+			name: "vertex_success",
+			setup: func(t *testing.T) (*Client, *httptest.Server) {
+				t.Helper()
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					require.Equal(t, "Bearer vertex-token", r.Header.Get("Authorization"))
+					w.Header().Set("Content-Type", "application/json")
+					resp := vertexModelsListResponse{
+						PublisherModels: []vertexPublisherModel{
+							{Name: "publishers/anthropic/models/claude-sonnet-4-6"},
+							{Name: "publishers/anthropic/models/claude-haiku-3-5"},
+						},
+					}
+					b, _ := json.Marshal(resp)
+					_, _ = w.Write(b)
+				}))
+				client := newTestClient(
+					ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-east5"},
+					&staticTokenSource{token: "vertex-token"}, srv.Client(), //nolint:gosec // test credential
+				)
+				client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+				return client, srv
+			},
+			wantModels: []provider.DiscoveredModel{
+				{ID: "claude-sonnet-4-6"},
+				{ID: "claude-haiku-3-5"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			client, srv := tt.setup(t)
+			defer srv.Close()
+
+			models, err := client.ListModels(t.Context())
+
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantModels, models)
+		})
+	}
+}

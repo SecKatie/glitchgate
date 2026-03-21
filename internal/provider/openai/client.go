@@ -257,3 +257,44 @@ func (c *Client) extractTokens(body []byte, resp *provider.Response) {
 		}
 	}
 }
+
+// ListModels queries the OpenAI-compatible /v1/models endpoint and returns
+// all available models. The OpenAI API does not paginate this endpoint.
+func (c *Client) ListModels(ctx context.Context) ([]provider.DiscoveredModel, error) {
+	u := c.baseURL + "/v1/models"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("openai provider %q: creating list request: %w", c.name, err)
+	}
+
+	switch c.authMode {
+	case "proxy_key":
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+	if err != nil {
+		return nil, fmt.Errorf("openai provider %q: listing models: %w", c.name, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, provider.MaxUpstreamResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("openai provider %q: reading models response: %w", c.name, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("openai provider %q: models endpoint returned %d: %s", c.name, resp.StatusCode, string(body))
+	}
+
+	var listResp modelsListResponse
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		return nil, fmt.Errorf("openai provider %q: decoding models response: %w", c.name, err)
+	}
+
+	models := make([]provider.DiscoveredModel, 0, len(listResp.Data))
+	for _, m := range listResp.Data {
+		models = append(models, provider.DiscoveredModel{ID: m.ID})
+	}
+	return models, nil
+}

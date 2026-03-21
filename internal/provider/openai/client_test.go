@@ -406,3 +406,81 @@ func TestClient(t *testing.T) {
 		t.Run(tc.name, tc.run)
 	}
 }
+
+func TestListModels(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "Success_ThreeModels",
+			run: func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					require.Equal(t, http.MethodGet, r.Method)
+					require.Equal(t, "/v1/models", r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					resp := map[string]any{
+						"data": []map[string]any{
+							{"id": "gpt-4", "owned_by": "openai"},
+							{"id": "gpt-4o", "owned_by": "openai"},
+							{"id": "gpt-3.5-turbo", "owned_by": "openai-internal"},
+						},
+					}
+					_ = json.NewEncoder(w).Encode(resp)
+				}))
+				defer srv.Close()
+
+				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-test", "")
+				require.NoError(t, err)
+
+				models, err := c.ListModels(context.Background())
+				require.NoError(t, err)
+				require.Len(t, models, 3)
+				require.Equal(t, provider.DiscoveredModel{ID: "gpt-4"}, models[0])
+				require.Equal(t, provider.DiscoveredModel{ID: "gpt-4o"}, models[1])
+				require.Equal(t, provider.DiscoveredModel{ID: "gpt-3.5-turbo"}, models[2])
+			},
+		},
+		{
+			name: "APIError_Non200",
+			run: func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusUnauthorized)
+					_, _ = w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
+				}))
+				defer srv.Close()
+
+				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-bad", "")
+				require.NoError(t, err)
+
+				models, err := c.ListModels(context.Background())
+				require.Error(t, err)
+				require.Nil(t, models)
+				require.Contains(t, err.Error(), "401")
+			},
+		},
+		{
+			name: "AuthorizationBearerHeader_ProxyKey",
+			run: func(t *testing.T) {
+				var gotAuth string
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					gotAuth = r.Header.Get("Authorization")
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"data":[]}`))
+				}))
+				defer srv.Close()
+
+				c, err := NewClient("oai", srv.URL, "proxy_key", "sk-verify-auth", "")
+				require.NoError(t, err)
+
+				_, err = c.ListModels(context.Background())
+				require.NoError(t, err)
+				require.Equal(t, "Bearer sk-verify-auth", gotAuth)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, tc.run)
+	}
+}

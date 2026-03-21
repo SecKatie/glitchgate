@@ -76,6 +76,11 @@ func NewProviderRegistry(cfg *config.Config, requestTimeout time.Duration) (*Pro
 		}
 	}
 
+	// Discover models for providers with discover_models: true.
+	if err := cfg.InjectDiscoveredModels(providers); err != nil {
+		return nil, fmt.Errorf("model discovery: %w", err)
+	}
+
 	return &ProviderRegistry{
 		providers:                    providers,
 		calculator:                   pricing.NewCalculator(pricingMap),

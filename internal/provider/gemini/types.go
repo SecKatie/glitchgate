@@ -230,3 +230,27 @@ func SanitizeSchemaForGemini(schema any) any {
 		return schema
 	}
 }
+
+// geminiModelsListResponse is the response from GET /v1beta/models (direct API).
+type geminiModelsListResponse struct {
+	Models        []geminiModelInfo `json:"models"`
+	NextPageToken string            `json:"nextPageToken"`
+}
+
+// geminiModelInfo is a single model entry in the Gemini listing response.
+type geminiModelInfo struct {
+	Name                       string   `json:"name"`        // e.g. "models/gemini-1.5-flash"
+	DisplayName                string   `json:"displayName"` // e.g. "Gemini 1.5 Flash"
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+}
+
+// vertexGeminiModelsListResponse is the response from Vertex AI publisher models endpoint.
+type vertexGeminiModelsListResponse struct {
+	PublisherModels []vertexGeminiPublisherModel `json:"publisherModels"`
+	NextPageToken   string                       `json:"nextPageToken"`
+}
+
+// vertexGeminiPublisherModel is a model entry from the Vertex AI listing.
+type vertexGeminiPublisherModel struct {
+	Name string `json:"name"` // e.g. "publishers/google/models/gemini-1.5-flash"
+}

@@ -51,3 +51,17 @@ type Provider interface {
 	// SendRequest forwards a translated request to the upstream provider.
 	SendRequest(ctx context.Context, req *Request) (*Response, error)
 }
+
+// DiscoveredModel represents a single model returned by a provider's listing
+// endpoint during automatic model discovery at startup.
+type DiscoveredModel struct {
+	ID          string // upstream model identifier (e.g., "claude-sonnet-4-6")
+	DisplayName string // optional human-readable name
+}
+
+// ModelDiscoverer is an optional interface that providers can implement to
+// support automatic model discovery at startup. Providers that implement this
+// interface can be queried for their available models via ListModels.
+type ModelDiscoverer interface {
+	ListModels(ctx context.Context) ([]DiscoveredModel, error)
+}

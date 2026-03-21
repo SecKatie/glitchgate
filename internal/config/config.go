@@ -109,6 +109,9 @@ type ProviderConfig struct {
 	Region                  string   `mapstructure:"region"                    yaml:"region"`                              // anthropic/gemini (vertex mode): GCP region (e.g. "us-east5")
 	Stream                  *bool    `mapstructure:"stream"                    yaml:"stream,omitempty"`                    // nil = follow client; false = force non-streaming upstream
 	MonthlySubscriptionCost *float64 `mapstructure:"monthly_subscription_cost" yaml:"monthly_subscription_cost,omitempty"` // optional provider-level monthly spend baseline in USD
+	DiscoverModels          bool     `mapstructure:"discover_models"           yaml:"discover_models"`                     // enable automatic model discovery at startup
+	ModelPrefix             *string  `mapstructure:"model_prefix"              yaml:"model_prefix,omitempty"`              // nil = "{name}/"; empty = no prefix
+	DiscoverFilter          []string `mapstructure:"discover_filter"           yaml:"discover_filter,omitempty"`           // glob include/exclude patterns (! prefix = exclude)
 }
 
 // ModelMetadata holds optional per-request pricing rates for a model entry.
@@ -291,6 +294,10 @@ func Load(configFile string) (*Config, error) {
 	}
 
 	if err := validateVertexAuthProviders(cfg.Providers); err != nil {
+		return nil, err
+	}
+
+	if err := validateDiscoveryProviders(cfg.Providers); err != nil {
 		return nil, err
 	}
 

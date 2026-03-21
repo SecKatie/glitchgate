@@ -33,7 +33,7 @@ TAG   ?= latest
 
 image:
 	-podman manifest rm $(IMAGE):$(TAG) 2>/dev/null
-	podman build --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_DATE=$(DATE) --manifest $(IMAGE):$(TAG) .
+	podman build --no-cache --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_DATE=$(DATE) --manifest $(IMAGE):$(TAG) .
 
 image-push:
 	$(MAKE) image TAG=$(TAG)

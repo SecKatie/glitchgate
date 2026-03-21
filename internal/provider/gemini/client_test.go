@@ -347,6 +347,143 @@ func TestSendRequest_VertexDefaultRegion(t *testing.T) {
 	require.True(t, strings.Contains(gotPath, "/locations/us-central1/"), "empty region should default to us-central1, got: %s", gotPath)
 }
 
+// --- ListModels tests ---
+
+func TestListModels_Direct_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Contains(t, r.URL.Path, "/v1beta/models")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"models": [
+				{"name": "models/gemini-2.5-flash", "displayName": "Gemini 2.5 Flash", "supportedGenerationMethods": ["generateContent", "countTokens"]},
+				{"name": "models/gemini-2.0-pro", "displayName": "Gemini 2.0 Pro", "supportedGenerationMethods": ["generateContent"]}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "test-key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	models, err := client.ListModels(t.Context())
+	require.NoError(t, err)
+	require.Len(t, models, 2)
+
+	// Verify "models/" prefix is stripped from the ID.
+	require.Equal(t, "gemini-2.5-flash", models[0].ID)
+	require.Equal(t, "Gemini 2.5 Flash", models[0].DisplayName)
+	require.Equal(t, "gemini-2.0-pro", models[1].ID)
+	require.Equal(t, "Gemini 2.0 Pro", models[1].DisplayName)
+}
+
+func TestListModels_Direct_FiltersEmbeddingModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"models": [
+				{"name": "models/gemini-2.5-flash", "displayName": "Gemini 2.5 Flash", "supportedGenerationMethods": ["generateContent"]},
+				{"name": "models/text-embedding-004", "displayName": "Text Embedding 004", "supportedGenerationMethods": ["embedContent"]},
+				{"name": "models/embedding-001", "displayName": "Embedding 001", "supportedGenerationMethods": ["embedContent", "countTextTokens"]}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "test-key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	models, err := client.ListModels(t.Context())
+	require.NoError(t, err)
+	require.Len(t, models, 1, "embedding-only models should be filtered out")
+	require.Equal(t, "gemini-2.5-flash", models[0].ID)
+}
+
+func TestListModels_Direct_Pagination(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		pageToken := r.URL.Query().Get("pageToken")
+		if pageToken == "" {
+			_, _ = w.Write([]byte(`{
+				"models": [
+					{"name": "models/gemini-2.5-flash", "displayName": "Gemini 2.5 Flash", "supportedGenerationMethods": ["generateContent"]}
+				],
+				"nextPageToken": "page2"
+			}`))
+		} else {
+			require.Equal(t, "page2", pageToken)
+			_, _ = w.Write([]byte(`{
+				"models": [
+					{"name": "models/gemini-2.0-pro", "displayName": "Gemini 2.0 Pro", "supportedGenerationMethods": ["generateContent"]}
+				]
+			}`))
+		}
+	}))
+	defer srv.Close()
+
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "test-key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	models, err := client.ListModels(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 2, callCount, "should have made two requests for two pages")
+	require.Len(t, models, 2)
+	require.Equal(t, "gemini-2.5-flash", models[0].ID)
+	require.Equal(t, "gemini-2.0-pro", models[1].ID)
+}
+
+func TestListModels_Direct_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"message":"API key not valid"}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(ClientConfig{Name: "test", AuthMode: "api_key", APIKey: "bad-key"}, nil, srv.Client())
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	models, err := client.ListModels(t.Context())
+	require.Error(t, err)
+	require.Nil(t, models)
+	require.Contains(t, err.Error(), "403")
+	require.Contains(t, err.Error(), "API key not valid")
+}
+
+func TestListModels_Vertex_Success(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"publisherModels": [
+				{"name": "publishers/google/models/gemini-2.0-flash"},
+				{"name": "publishers/google/models/gemini-2.5-pro"}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-central1"},
+		&staticTokenSource{token: "vertex-token"}, srv.Client(), //nolint:gosec // test credential
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	models, err := client.ListModels(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "Bearer vertex-token", gotAuth)
+	require.Len(t, models, 2)
+
+	// Verify publisher model names are parsed to extract just the model ID.
+	require.Equal(t, "gemini-2.0-flash", models[0].ID)
+	require.Equal(t, "gemini-2.5-pro", models[1].ID)
+}
+
 func TestSendRequest_VertexNoStreamingFallback(t *testing.T) {
 	// Vertex mode should NOT retry on 400 (the streaming fallback is api_key only).
 	var requestCount int

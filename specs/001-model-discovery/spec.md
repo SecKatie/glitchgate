@@ -59,9 +59,7 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** a `github_copilot` provider (which has no model listing API) with `discover_models: true`, **When** the server starts, **Then** a clear error is returned indicating the provider doesn't support model discovery.
-
-2. **Given** a provider type that doesn't support discovery, **When** `discover_models: true` is set, **Then** the system logs a warning and treats `discover_models: false`.
+1. **Given** a provider type that doesn't support discovery (e.g., `github_copilot`) with `discover_models: true`, **When** the server starts, **Then** a config validation error is returned indicating the provider doesn't support model discovery, and the server refuses to start.
 
 ---
 
@@ -71,16 +69,18 @@
 
 - **FR-001**: System MUST support `discover_models: true|false` in `ProviderConfig` (defaults to `false`)
 - **FR-002**: System MUST support `model_prefix` string in `ProviderConfig` (defaults to `{provider-name}/`)
-- **FR-003**: When `discover_models: true`, system MUST call provider's model listing endpoint at startup
+- **FR-002a**: System MUST support `discover_filter` glob patterns in `ProviderConfig` to include/exclude discovered models (e.g., `claude-*`, `!*-preview`)
+- **FR-003**: When `discover_models: true`, system MUST call provider's model listing endpoint at startup; if the call fails, system MUST log a warning and continue without discovered models for that provider
 - **FR-004**: Discovered models MUST be added to `resolvedChains` with format `{model_prefix}{upstream_model}`
 - **FR-005**: Explicit `model_list` entries MUST take precedence over discovered entries
-- **FR-006**: Providers that don't support model discovery MUST either fail with clear error OR log warning and disable discovery
-- **FR-007**: Discovery MUST support `anthropic`, `openai`, `openai_responses`, `gemini` provider types
+- **FR-006**: Providers that don't support model discovery MUST fail startup with a config validation error when `discover_models: true` is set
+- **FR-007**: Discovery MUST support `anthropic`, `openai`, `openai_responses`, `gemini` provider types, including when using `auth_mode: "vertex"`
 - **FR-008**: Discovery MUST NOT be supported for `github_copilot` provider type
 
 ### Key Entities
 
 - **DiscoveredModel**: Represents a single model from a provider's listing endpoint - contains `upstream_model` (the ID the provider uses), `display_name` (optional), and `supported_modes` (chat, vision, etc.)
+- **DiscoverFilter**: Glob pattern list on `ProviderConfig` — patterns without `!` prefix are include patterns; patterns with `!` prefix are exclude patterns. If no include patterns specified, all models are included by default. Exclude patterns take precedence.
 - **ProviderDiscoveryResult**: Collection of `DiscoveredModel` plus provider metadata
 - **ModelMapping (existing)**: Extended to support discovery-sourced entries with `source: "discovered"|"explicit"`
 
@@ -89,6 +89,15 @@
 This feature does not add new public HTTP endpoints. Model discovery is an internal configuration-time operation.
 
 ---
+
+## Clarifications
+
+### Session 2026-03-20
+
+- Q: When `discover_models: true` is set on a provider that doesn't support discovery (e.g., `github_copilot`), should the server fail startup or degrade gracefully? → A: Fail startup with a config validation error (fail-fast).
+- Q: When a discovery-capable provider's listing API fails at startup (network error, timeout, 5xx), should the server start without those models? → A: Log warning and start without discovered models (best-effort). Prevents one provider's outage from cascading to total server unavailability.
+- Q: Should providers using `auth_mode: "vertex"` support model discovery? → A: Yes — discovery works for vertex auth mode using Vertex-appropriate listing endpoints.
+- Q: Should there be a mechanism to filter which discovered models are exposed? → A: Yes — add `discover_filter` glob patterns (include/exclude) to ProviderConfig.
 
 ## Success Criteria
 
