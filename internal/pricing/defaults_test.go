@@ -101,9 +101,9 @@ func TestProviderKey(t *testing.T) {
 		},
 		{
 			name:         "returns provider type when base url empty",
-			providerType: "vertex_gemini",
+			providerType: "gemini",
 			baseURL:      "",
-			want:         "vertex_gemini",
+			want:         "gemini",
 		},
 	}
 

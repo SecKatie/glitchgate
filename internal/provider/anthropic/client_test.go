@@ -1,15 +1,52 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 
 	"github.com/seckatie/glitchgate/internal/provider"
-	"github.com/stretchr/testify/require"
 )
+
+// --- test helpers ---
+
+type staticTokenSource struct {
+	token string
+}
+
+func (s *staticTokenSource) Token() (*oauth2.Token, error) {
+	return &oauth2.Token{
+		AccessToken: s.token,
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(time.Hour),
+	}, nil
+}
+
+type rewriteTransport struct {
+	base   http.RoundTripper
+	target string
+}
+
+func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.URL.Scheme = "http"
+	req.URL.Host = strings.TrimPrefix(rt.target, "http://")
+	if rt.base != nil {
+		return rt.base.RoundTrip(req)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// --- proxy_key / forward mode tests ---
 
 func TestSendRequest_ForwardsAnthropicAllowlistHeaders(t *testing.T) {
 	t.Parallel()
@@ -22,7 +59,7 @@ func TestSendRequest_ForwardsAnthropicAllowlistHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := NewClient("claude-max", srv.URL, "forward", "", "2023-06-01")
+	client, err := NewClient(ClientConfig{Name: "claude-max", BaseURL: srv.URL, AuthMode: "forward", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 	req := &provider.Request{
 		Body:  []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`),
@@ -59,4 +96,242 @@ func TestSendRequest_ForwardsAnthropicAllowlistHeaders(t *testing.T) {
 	require.Empty(t, gotHeaders.Get("X-Request-Id"))
 	require.Empty(t, gotHeaders.Get("X-Proxy-Api-Key"))
 	require.Empty(t, gotHeaders.Get("Connection"))
+}
+
+func TestClient_Interface_Direct(t *testing.T) {
+	client := &Client{authMode: "proxy_key"}
+	require.Equal(t, "proxy_key", client.AuthMode())
+	require.Equal(t, "anthropic", client.APIFormat())
+}
+
+func TestSendRequest_TokenExtraction_Direct(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude-sonnet-4-6","stop_reason":"end_turn","usage":{"input_tokens":42,"output_tokens":17,"cache_creation_input_tokens":5,"cache_read_input_tokens":3}}`))
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL, AuthMode: "proxy_key", APIKey: "key"})
+	require.NoError(t, err)
+
+	resp, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:    []byte(`{"model":"claude-sonnet-4-6","messages":[],"max_tokens":10}`),
+		Model:   "claude-sonnet-4-6",
+		Headers: http.Header{},
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(42), resp.InputTokens)
+	require.Equal(t, int64(17), resp.OutputTokens)
+	require.Equal(t, int64(5), resp.CacheCreationInputTokens)
+	require.Equal(t, int64(3), resp.CacheReadInputTokens)
+}
+
+// --- vertex mode tests ---
+
+func TestClient_Interface_Vertex(t *testing.T) {
+	client := &Client{authMode: "vertex"}
+	require.Equal(t, "internal", client.AuthMode())
+	require.Equal(t, "anthropic", client.APIFormat())
+}
+
+func TestSendRequest_VertexAuthHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6-20250514","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-east5"},
+		&staticTokenSource{token: "my-secret-token"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	resp, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:        []byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[]}`),
+		Headers:     http.Header{},
+		Model:       "claude-sonnet-4-6-20250514",
+		IsStreaming: false,
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "Bearer my-secret-token", gotAuth)
+}
+
+func TestSendRequest_VertexURLConstruction(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6-20250514","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-east5"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	_, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:        []byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[]}`),
+		Headers:     http.Header{},
+		Model:       "claude-sonnet-4-6-20250514",
+		IsStreaming: false,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "/v1/projects/my-project/locations/us-east5/publishers/anthropic/models/claude-sonnet-4-6-20250514:rawPredict", gotPath)
+}
+
+func TestSendRequest_VertexStreaming(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.True(t, strings.HasSuffix(r.URL.Path, ":streamRawPredict"), "streaming should use streamRawPredict, got %s", r.URL.Path)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\ndata: {}\n\n"))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-east5"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	resp, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:        []byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[],"stream":true}`),
+		Headers:     http.Header{},
+		Model:       "claude-sonnet-4-6-20250514",
+		IsStreaming: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.Stream)
+	require.NoError(t, resp.Stream.Close())
+}
+
+func TestSendRequest_VertexTokenExtraction(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude-sonnet-4-6-20250514","stop_reason":"end_turn","usage":{"input_tokens":42,"output_tokens":17,"cache_creation_input_tokens":5,"cache_read_input_tokens":3}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-east5"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	resp, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:        []byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[]}`),
+		Headers:     http.Header{},
+		Model:       "claude-sonnet-4-6-20250514",
+		IsStreaming: false,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(42), resp.InputTokens)
+	require.Equal(t, int64(17), resp.OutputTokens)
+	require.Equal(t, int64(5), resp.CacheCreationInputTokens)
+	require.Equal(t, int64(3), resp.CacheReadInputTokens)
+}
+
+func TestSendRequest_VertexBodyPreparation(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6-20250514","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project", Region: "us-east5"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	_, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:        []byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`),
+		Headers:     http.Header{},
+		Model:       "claude-sonnet-4-6-20250514",
+		IsStreaming: false,
+	})
+	require.NoError(t, err)
+
+	var bodyMap map[string]any
+	err = json.Unmarshal(gotBody, &bodyMap)
+	require.NoError(t, err)
+
+	_, hasModel := bodyMap["model"]
+	require.False(t, hasModel, "model should be stripped from upstream body")
+	require.Equal(t, defaultVertexVersion, bodyMap["anthropic_version"])
+	require.Equal(t, float64(100), bodyMap["max_tokens"])
+}
+
+func TestSendRequest_VertexDefaultRegion(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6-20250514","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	// Empty region should default to "us-central1".
+	client := newTestClient(
+		ClientConfig{Name: "test", AuthMode: "vertex", Project: "my-project"},
+		&staticTokenSource{token: "tok"}, srv.Client(),
+	)
+	client.httpClient.Transport = &rewriteTransport{base: srv.Client().Transport, target: srv.URL}
+
+	_, err := client.SendRequest(t.Context(), &provider.Request{
+		Body:        []byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[]}`),
+		Headers:     http.Header{},
+		Model:       "claude-sonnet-4-6-20250514",
+		IsStreaming: false,
+	})
+	require.NoError(t, err)
+	require.True(t, strings.Contains(gotPath, "/locations/us-central1/"), "empty region should default to us-central1, got: %s", gotPath)
+}
+
+// --- prepareBody unit tests ---
+
+func TestPrepareBody_StripsModel(t *testing.T) {
+	result, err := prepareBody([]byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}`), "2023-06-01")
+	require.NoError(t, err)
+
+	var bodyMap map[string]any
+	require.NoError(t, json.Unmarshal(result, &bodyMap))
+	_, hasModel := bodyMap["model"]
+	require.False(t, hasModel, "model field should be stripped")
+	require.Equal(t, float64(100), bodyMap["max_tokens"])
+}
+
+func TestPrepareBody_StripsUnsupportedFields(t *testing.T) {
+	result, err := prepareBody([]byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[],"context_management":{"type":"ephemeral"}}`), "2023-06-01")
+	require.NoError(t, err)
+
+	var bodyMap map[string]any
+	require.NoError(t, json.Unmarshal(result, &bodyMap))
+	_, hasCtx := bodyMap["context_management"]
+	require.False(t, hasCtx, "context_management should be stripped")
+}
+
+func TestPrepareBody_InjectsAnthropicVersion(t *testing.T) {
+	result, err := prepareBody([]byte(`{"model":"claude-sonnet-4-6-20250514","max_tokens":100,"messages":[]}`), "2023-06-01")
+	require.NoError(t, err)
+
+	var bodyMap map[string]any
+	require.NoError(t, json.Unmarshal(result, &bodyMap))
+	require.Equal(t, "2023-06-01", bodyMap["anthropic_version"])
+}
+
+func TestPrepareBody_PreservesExistingAnthropicVersion(t *testing.T) {
+	result, err := prepareBody([]byte(`{"model":"claude-sonnet-4-6-20250514","anthropic_version":"2024-01-01","max_tokens":100,"messages":[]}`), "2023-06-01")
+	require.NoError(t, err)
+
+	var bodyMap map[string]any
+	require.NoError(t, json.Unmarshal(result, &bodyMap))
+	require.Equal(t, "2024-01-01", bodyMap["anthropic_version"], "should not overwrite existing anthropic_version")
 }

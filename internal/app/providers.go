@@ -12,12 +12,10 @@ import (
 	"github.com/seckatie/glitchgate/internal/provider/copilot"
 	"github.com/seckatie/glitchgate/internal/provider/gemini"
 	openaiprov "github.com/seckatie/glitchgate/internal/provider/openai"
-	"github.com/seckatie/glitchgate/internal/provider/vertex"
 )
 
 const (
 	defaultOpenAIBaseURL = "https://api.openai.com"
-	defaultGeminiBaseURL = gemini.DefaultBaseURL
 )
 
 // ProviderRegistry compiles configured provider clients, pricing tables, and
@@ -123,7 +121,16 @@ func (r *ProviderRegistry) ProviderMonthlySubscriptions() map[string]float64 {
 func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (provider.Provider, error) {
 	switch pc.Type {
 	case "anthropic":
-		client, err := anthropic.NewClient(pc.Name, pc.BaseURL, pc.AuthMode, pc.APIKey, pc.DefaultVersion)
+		client, err := anthropic.NewClient(anthropic.ClientConfig{
+			Name:            pc.Name,
+			BaseURL:         pc.BaseURL,
+			AuthMode:        pc.AuthMode,
+			APIKey:          pc.APIKey,
+			DefaultVersion:  pc.DefaultVersion,
+			Project:         pc.Project,
+			Region:          pc.Region,
+			CredentialsFile: pc.CredentialsFile,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("anthropic provider %q: %w", pc.Name, err)
 		}
@@ -152,23 +159,16 @@ func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (prov
 		client.SetTimeouts(requestTimeout)
 		return client, nil
 	case "gemini":
-		client, err := gemini.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey)
+		client, err := gemini.NewClient(gemini.ClientConfig{
+			Name:            pc.Name,
+			AuthMode:        pc.AuthMode,
+			APIKey:          pc.APIKey,
+			Project:         pc.Project,
+			Region:          pc.Region,
+			CredentialsFile: pc.CredentialsFile,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("gemini provider %q: %w", pc.Name, err)
-		}
-		client.SetTimeouts(requestTimeout)
-		return client, nil
-	case "vertex_claude":
-		client, err := vertex.NewClient(pc.Name, pc.Project, pc.Region, pc.CredentialsFile, pc.DefaultVersion)
-		if err != nil {
-			return nil, fmt.Errorf("vertex_claude provider %q: %w", pc.Name, err)
-		}
-		client.SetTimeouts(requestTimeout)
-		return client, nil
-	case "vertex_gemini":
-		client, err := vertex.NewGeminiClient(pc.Name, pc.Project, pc.Region, pc.CredentialsFile)
-		if err != nil {
-			return nil, fmt.Errorf("vertex_gemini provider %q: %w", pc.Name, err)
 		}
 		client.SetTimeouts(requestTimeout)
 		return client, nil
@@ -184,7 +184,7 @@ func defaultPricingForProvider(pc config.ProviderConfig) map[string]pricing.Entr
 	case "github_copilot":
 		return pricing.CopilotDefaults
 	case "anthropic":
-		if pricing.IsOfficialAnthropicURL(baseURL) {
+		if pc.AuthMode == "vertex" || pricing.IsOfficialAnthropicURL(baseURL) {
 			return pricing.AnthropicDefaults
 		}
 	case "openai", "openai_responses":
@@ -197,10 +197,6 @@ func defaultPricingForProvider(pc config.ProviderConfig) map[string]pricing.Entr
 			return pricing.SegmentDefaults
 		}
 	case "gemini":
-		return pricing.GeminiDefaults
-	case "vertex_claude":
-		return pricing.AnthropicDefaults
-	case "vertex_gemini":
 		return pricing.GeminiDefaults
 	}
 
@@ -229,10 +225,6 @@ func effectiveBaseURL(pc config.ProviderConfig) string {
 	case "openai", "openai_responses":
 		if pc.BaseURL == "" {
 			return defaultOpenAIBaseURL
-		}
-	case "gemini":
-		if pc.BaseURL == "" {
-			return defaultGeminiBaseURL
 		}
 	}
 	return pc.BaseURL
