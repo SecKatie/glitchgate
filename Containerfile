@@ -15,10 +15,10 @@ RUN apk add --no-cache git ca-certificates
 
 # Download dependencies first (better layer caching)
 COPY go.mod go.sum ./
-RUN go mod download && go mod verify
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download && go mod verify
 
 # Copy source (only what's needed for build)
-COPY go.mod go.sum ./
 COPY main.go ./
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
@@ -26,11 +26,12 @@ COPY internal/ ./internal/
 ARG COMMIT
 ARG BUILD_DATE
 
-# Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
+# Build with persistent module + build caches
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -trimpath \
     -ldflags="-s -w -extldflags '-static' -X github.com/seckatie/glitchgate/cmd.version=${VERSION} -X github.com/seckatie/glitchgate/cmd.commit=${COMMIT} -X github.com/seckatie/glitchgate/cmd.date=${BUILD_DATE}" \
-    -a -installsuffix cgo \
     -o /glitchgate .
 
 # Final stage - minimal alpine image
