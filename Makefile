@@ -19,7 +19,6 @@ lint:
 	golangci-lint run
 
 audit: test lint
-	gosec ./...
 	govulncheck ./...
 
 generate:

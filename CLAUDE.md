@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 make build              # Build binary to ./glitchgate
 make test               # Run all tests with race detection
 make lint               # Run golangci-lint (staticcheck, gosec, errcheck, revive)
-make audit              # Run gosec + govulncheck for security
+make audit              # Run govulncheck for security (gosec runs via golangci-lint)
 
 # Run specific tests
 go test -race ./internal/proxy/...                    # Run proxy tests only
@@ -107,9 +107,8 @@ The project uses raw `database/sql` with inline SQL in `sqlite_*.go` and `postgr
 ### Security Requirements
 
 Security tools run in CI and pre-commit:
-- `gosec` - SAST (static application security testing)
+- `golangci-lint` with `gosec` linter enabled - SAST (static application security testing)
 - `govulncheck` - SCA (software composition analysis)
-- `golangci-lint` with gosec linter enabled
 
 If a finding is a false positive, justify the exclusion in a comment and raise it to the user.
 
