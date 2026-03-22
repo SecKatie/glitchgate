@@ -77,8 +77,8 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 
 	copilot, ok := calc.Lookup("copilot", "gpt-5.4")
 	require.True(t, ok)
-	require.Zero(t, copilot.InputPerMillion)
-	require.Zero(t, copilot.OutputPerMillion)
+	require.Equal(t, 2.50, copilot.InputPerMillion)
+	require.Equal(t, 15.00, copilot.OutputPerMillion)
 }
 
 func TestNewProviderRegistryDropsAmbiguousLegacyAlias(t *testing.T) {

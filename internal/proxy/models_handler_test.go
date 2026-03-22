@@ -72,10 +72,17 @@ func newModelsTestHarness(t *testing.T) *modelsTestHarness {
 		"anthropic/claude-sonnet-4-6-20251001": {
 			InputPerMillion:  3.0,
 			OutputPerMillion: 15.0,
+			ContextWindow:    200000,
+			MaxTokens:        8192,
+			Reasoning:        true,
+			Vision:           true,
 		},
 		"openai/gpt-4o": {
 			InputPerMillion:  2.5,
 			OutputPerMillion: 10.0,
+			ContextWindow:    128000,
+			MaxTokens:        16384,
+			Vision:           true,
 		},
 	})
 	logger := proxy.NewAsyncLogger(st, 100)
@@ -128,6 +135,10 @@ func TestModelsHandler_ReturnsList(t *testing.T) {
 	require.Equal(t, "model", claudeModel.Object)
 	require.Equal(t, "anthropic", claudeModel.OwnedBy)
 	require.True(t, claudeModel.Capabilities.Streaming)
+	require.True(t, claudeModel.Capabilities.Vision)
+	require.True(t, claudeModel.Capabilities.Reasoning)
+	require.Equal(t, 200000, claudeModel.Capabilities.ContextWindow)
+	require.Equal(t, 8192, claudeModel.Capabilities.MaxTokens)
 	require.Nil(t, claudeModel.Capabilities.Fallbacks)
 	require.NotNil(t, claudeModel.Pricing)
 	require.Equal(t, 3.0, claudeModel.Pricing.InputTokenCost)
@@ -137,6 +148,10 @@ func TestModelsHandler_ReturnsList(t *testing.T) {
 	gptModel := resp.Data[1]
 	require.Equal(t, "gpt-4o", gptModel.ID)
 	require.Equal(t, "openai", gptModel.OwnedBy)
+	require.True(t, gptModel.Capabilities.Vision)
+	require.False(t, gptModel.Capabilities.Reasoning)
+	require.Equal(t, 128000, gptModel.Capabilities.ContextWindow)
+	require.Equal(t, 16384, gptModel.Capabilities.MaxTokens)
 	require.NotNil(t, gptModel.Pricing)
 	require.Equal(t, 2.5, gptModel.Pricing.InputTokenCost)
 	require.Equal(t, 10.0, gptModel.Pricing.OutputTokenCost)

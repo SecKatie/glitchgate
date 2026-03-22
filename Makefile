@@ -1,4 +1,4 @@
-.PHONY: build test lint audit clean generate image image-push image-push-version
+.PHONY: build test lint audit clean generate image image-push image-push-version update-litellm
 
 BINARY  := glitchgate
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -42,3 +42,8 @@ image-push-version:
 	$(MAKE) image-push TAG=latest
 	podman manifest push $(IMAGE):latest docker://$(IMAGE):$(VERSION)
 	@echo "Pushed $(IMAGE):$(VERSION)"
+
+update-litellm:
+	curl -sSL -o /tmp/model_prices_and_context_window.json \
+		https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/main/model_prices_and_context_window.json
+	@echo "Downloaded to /tmp/model_prices_and_context_window.json"

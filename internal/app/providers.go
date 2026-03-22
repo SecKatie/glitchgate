@@ -68,12 +68,15 @@ func NewProviderRegistry(cfg *config.Config, requestTimeout time.Duration) (*Pro
 			continue
 		}
 
-		pricingMap[pc.Name+"/"+mm.UpstreamModel] = pricing.Entry{
-			InputPerMillion:      mm.Metadata.InputTokenCost,
-			OutputPerMillion:     mm.Metadata.OutputTokenCost,
-			CacheReadPerMillion:  mm.Metadata.CacheReadCost,
-			CacheWritePerMillion: mm.Metadata.CacheWriteCost,
-		}
+		// Merge metadata pricing into existing entry (preserving capabilities
+		// from defaults) rather than replacing the entire entry.
+		key := pc.Name + "/" + mm.UpstreamModel
+		entry := pricingMap[key] // zero-value if no default exists
+		entry.InputPerMillion = mm.Metadata.InputTokenCost
+		entry.OutputPerMillion = mm.Metadata.OutputTokenCost
+		entry.CacheReadPerMillion = mm.Metadata.CacheReadCost
+		entry.CacheWritePerMillion = mm.Metadata.CacheWriteCost
+		pricingMap[key] = entry
 	}
 
 	// Discover models for providers with discover_models: true.
