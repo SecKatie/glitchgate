@@ -22,6 +22,16 @@ var AnthropicDefaults = map[string]Entry{
 		Reasoning:            true,
 		Vision:               true,
 	},
+	"claude-opus-4-6-20260205": {
+		InputPerMillion:      5.00,
+		OutputPerMillion:     25.00,
+		CacheWritePerMillion: 6.25,
+		CacheReadPerMillion:  0.50,
+		ContextWindow:        1000000, // 1M tokens
+		MaxTokens:            128000,
+		Reasoning:            true,
+		Vision:               true,
+	},
 	"claude-sonnet-4-6": {
 		InputPerMillion:      3.00,
 		OutputPerMillion:     15.00,
@@ -158,21 +168,52 @@ var AnthropicDefaults = map[string]Entry{
 		Reasoning:            false,
 		Vision:               true,
 	},
+	// Claude 3 Opus (legacy)
+	"claude-3-opus-20240229": {
+		InputPerMillion:      15.00,
+		OutputPerMillion:     75.00,
+		CacheWritePerMillion: 18.75,
+		CacheReadPerMillion:  1.50,
+		ContextWindow:        200000,
+		MaxTokens:            4096,
+		Reasoning:            false,
+		Vision:               true,
+	},
 }
 
-// CopilotDefaults holds $0 pricing for GitHub Copilot models.
+// CopilotDefaults holds notional API-equivalent pricing for GitHub Copilot models.
 // Applied for all providers with type "github_copilot".
-// Copilot is subscription-billed; entries exist so requests are tracked without inflating costs.
+// Copilot is subscription-billed; these entries track what the equivalent API
+// cost would be. Context windows and max output tokens reflect Copilot's own
+// limits (from api.githubcopilot.com/models), not the upstream model maximums.
+// Model list: https://docs.github.com/copilot/reference/ai-models/supported-models
 var CopilotDefaults = map[string]Entry{
-	"claude-opus-4.6":   {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 1000000, MaxTokens: 128000, Reasoning: true, Vision: true},
-	"claude-sonnet-4.6": {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 1000000, MaxTokens: 64000, Reasoning: true, Vision: true},
-	"gpt-5.2":           {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
-	"gpt-5.4":           {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 1050000, MaxTokens: 128000, Reasoning: true, Vision: true},
-	"gpt-5.4-pro":       {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 1050000, MaxTokens: 128000, Reasoning: true, Vision: true},
-	"gpt-5-mini":        {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
-	"o4-mini":           {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 200000, MaxTokens: 100000, Reasoning: true, Vision: true},
-	"o3":                {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 200000, MaxTokens: 100000, Reasoning: true, Vision: true},
-	"gemini-3-flash":    {InputPerMillion: 0, OutputPerMillion: 0, ContextWindow: 1000000, MaxTokens: 65536, Reasoning: true, Vision: true},
+	// ── Anthropic (Copilot uses dot-notation names) ──────────────────────
+	"claude-opus-4.6":   {InputPerMillion: 5.00, OutputPerMillion: 25.00, CacheWritePerMillion: 6.25, CacheReadPerMillion: 0.50, ContextWindow: 144000, MaxTokens: 64000, Reasoning: true, Vision: true},
+	"claude-opus-4.5":   {InputPerMillion: 5.00, OutputPerMillion: 25.00, CacheWritePerMillion: 6.25, CacheReadPerMillion: 0.50, ContextWindow: 160000, MaxTokens: 32000, Reasoning: true, Vision: true},
+	"claude-sonnet-4.6": {InputPerMillion: 3.00, OutputPerMillion: 15.00, CacheWritePerMillion: 3.75, CacheReadPerMillion: 0.30, ContextWindow: 200000, MaxTokens: 32000, Reasoning: true, Vision: true},
+	"claude-sonnet-4.5": {InputPerMillion: 3.00, OutputPerMillion: 15.00, CacheWritePerMillion: 3.75, CacheReadPerMillion: 0.30, ContextWindow: 144000, MaxTokens: 32000, Reasoning: true, Vision: true},
+	"claude-sonnet-4.0": {InputPerMillion: 3.00, OutputPerMillion: 15.00, CacheWritePerMillion: 3.75, CacheReadPerMillion: 0.30, ContextWindow: 216000, MaxTokens: 16000, Reasoning: true, Vision: true},
+	"claude-haiku-4.5":  {InputPerMillion: 1.00, OutputPerMillion: 5.00, CacheWritePerMillion: 1.25, CacheReadPerMillion: 0.10, ContextWindow: 144000, MaxTokens: 32000, Reasoning: true, Vision: true},
+	// ── OpenAI ───────────────────────────────────────────────────────────
+	"gpt-4.1":      {InputPerMillion: 2.00, OutputPerMillion: 8.00, CacheReadPerMillion: 0.50, ContextWindow: 128000, MaxTokens: 16384, Vision: true},
+	"gpt-5":        {InputPerMillion: 1.25, OutputPerMillion: 10.00, CacheReadPerMillion: 0.125, ContextWindow: 128000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	"gpt-5-mini":   {InputPerMillion: 0.25, OutputPerMillion: 2.00, CacheReadPerMillion: 0.025, ContextWindow: 264000, MaxTokens: 64000, Reasoning: true, Vision: true},
+	"gpt-5.1":      {InputPerMillion: 1.25, OutputPerMillion: 10.00, CacheReadPerMillion: 0.125, ContextWindow: 264000, MaxTokens: 64000, Reasoning: true, Vision: true},
+	"gpt-5.2":      {InputPerMillion: 1.25, OutputPerMillion: 10.00, CacheReadPerMillion: 0.125, ContextWindow: 264000, MaxTokens: 64000, Reasoning: true, Vision: true},
+	"gpt-5.4":      {InputPerMillion: 2.50, OutputPerMillion: 15.00, CacheReadPerMillion: 0.25, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	"gpt-5.4-mini": {InputPerMillion: 0.75, OutputPerMillion: 4.50, CacheReadPerMillion: 0.075, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	// ── OpenAI Codex ─────────────────────────────────────────────────────
+	"gpt-5.1-codex":      {InputPerMillion: 1.25, OutputPerMillion: 10.00, CacheReadPerMillion: 0.125, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	"gpt-5.1-codex-mini": {InputPerMillion: 0.50, OutputPerMillion: 2.00, CacheReadPerMillion: 0.05, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	"gpt-5.1-codex-max":  {InputPerMillion: 1.25, OutputPerMillion: 10.00, CacheReadPerMillion: 0.125, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	"gpt-5.2-codex":      {InputPerMillion: 1.75, OutputPerMillion: 14.00, CacheReadPerMillion: 0.175, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	"gpt-5.3-codex":      {InputPerMillion: 1.75, OutputPerMillion: 14.00, CacheReadPerMillion: 0.175, ContextWindow: 400000, MaxTokens: 128000, Reasoning: true, Vision: true},
+	// ── Google ────────────────────────────────────────────────────────────
+	"gemini-2.5-pro": {InputPerMillion: 1.25, OutputPerMillion: 10.00, CacheReadPerMillion: 0.125, ContextWindow: 128000, MaxTokens: 64000, Reasoning: true, Vision: true},
+	"gemini-3-flash": {InputPerMillion: 0.50, OutputPerMillion: 3.00, CacheReadPerMillion: 0.05, ContextWindow: 128000, MaxTokens: 64000, Reasoning: true, Vision: true},
+	"gemini-3-pro":   {InputPerMillion: 2.00, OutputPerMillion: 12.00, CacheReadPerMillion: 0.20, ContextWindow: 128000, MaxTokens: 64000, Reasoning: true, Vision: true},
+	"gemini-3.1-pro": {InputPerMillion: 2.00, OutputPerMillion: 12.00, CacheReadPerMillion: 0.20, ContextWindow: 128000, MaxTokens: 64000, Reasoning: true, Vision: true},
 }
 
 // OpenAIDefaults holds pricing for OpenAI models billed at official API-equivalent rates.
@@ -204,7 +245,23 @@ var OpenAIDefaults = map[string]Entry{
 		MaxTokens:           32768,
 		Vision:              true,
 	},
+	"gpt-4.1-2025-04-14": {
+		InputPerMillion:     2.00,
+		OutputPerMillion:    8.00,
+		CacheReadPerMillion: 0.50,
+		ContextWindow:       1047576,
+		MaxTokens:           32768,
+		Vision:              true,
+	},
 	"gpt-4.1-mini": {
+		InputPerMillion:     0.40,
+		OutputPerMillion:    1.60,
+		CacheReadPerMillion: 0.10,
+		ContextWindow:       1047576,
+		MaxTokens:           32768,
+		Vision:              true,
+	},
+	"gpt-4.1-mini-2025-04-14": {
 		InputPerMillion:     0.40,
 		OutputPerMillion:    1.60,
 		CacheReadPerMillion: 0.10,
@@ -220,15 +277,22 @@ var OpenAIDefaults = map[string]Entry{
 		MaxTokens:           32768,
 		Vision:              true,
 	},
-	"gpt-5.4": {
-		InputPerMillion:       2.50,
-		OutputPerMillion:      15.00,
-		CacheReadPerMillion:   0.25,
-		ContextWindow:         1050000,
-		StandardContextWindow: 272000, // >272K input: 2× input, 1.5× output
-		MaxTokens:             128000,
-		Reasoning:             true,
-		Vision:                true,
+	"gpt-4.1-nano-2025-04-14": {
+		InputPerMillion:     0.10,
+		OutputPerMillion:    0.40,
+		CacheReadPerMillion: 0.025,
+		ContextWindow:       1047576,
+		MaxTokens:           32768,
+		Vision:              true,
+	},
+	"gpt-5": {
+		InputPerMillion:     1.25,
+		OutputPerMillion:    10.00,
+		CacheReadPerMillion: 0.125,
+		ContextWindow:       400000,
+		MaxTokens:           128000,
+		Reasoning:           true,
+		Vision:              true,
 	},
 	"gpt-5-mini": {
 		InputPerMillion:     0.25,
@@ -239,7 +303,88 @@ var OpenAIDefaults = map[string]Entry{
 		Reasoning:           true,
 		Vision:              true,
 	},
+	"gpt-5-nano": {
+		InputPerMillion:     0.05,
+		OutputPerMillion:    0.40,
+		CacheReadPerMillion: 0.005,
+		ContextWindow:       400000,
+		MaxTokens:           128000,
+		Reasoning:           true,
+		Vision:              true,
+	},
+	"gpt-5.1": {
+		InputPerMillion:     1.25,
+		OutputPerMillion:    10.00,
+		CacheReadPerMillion: 0.125,
+		ContextWindow:       400000,
+		MaxTokens:           128000,
+		Reasoning:           true,
+		Vision:              true,
+	},
+	"gpt-5.2": {
+		InputPerMillion:     1.75,
+		OutputPerMillion:    14.00,
+		CacheReadPerMillion: 0.175,
+		ContextWindow:       400000,
+		MaxTokens:           128000,
+		Reasoning:           true,
+		Vision:              true,
+	},
+	"gpt-5.4": {
+		InputPerMillion:       2.50,
+		OutputPerMillion:      15.00,
+		CacheReadPerMillion:   0.25,
+		ContextWindow:         1050000,
+		StandardContextWindow: 272000, // >272K input: 2× input, 1.5× output
+		MaxTokens:             128000,
+		Reasoning:             true,
+		Vision:                true,
+	},
+	"gpt-5.4-2026-03-05": {
+		InputPerMillion:       2.50,
+		OutputPerMillion:      15.00,
+		CacheReadPerMillion:   0.25,
+		ContextWindow:         1050000,
+		StandardContextWindow: 272000,
+		MaxTokens:             128000,
+		Reasoning:             true,
+		Vision:                true,
+	},
+	"gpt-5.4-mini": {
+		InputPerMillion:     0.75,
+		OutputPerMillion:    4.50,
+		CacheReadPerMillion: 0.075,
+		ContextWindow:       400000,
+		MaxTokens:           128000,
+		Reasoning:           true,
+		Vision:              true,
+	},
+	"gpt-5.4-nano": {
+		InputPerMillion:     0.20,
+		OutputPerMillion:    1.25,
+		CacheReadPerMillion: 0.020,
+		ContextWindow:       400000,
+		MaxTokens:           128000,
+		Reasoning:           true,
+		Vision:              true,
+	},
+	"o1": {
+		InputPerMillion:  15.00,
+		OutputPerMillion: 60.00,
+		ContextWindow:    200000,
+		MaxTokens:        100000,
+		Reasoning:        true,
+		Vision:           true,
+	},
 	"o3": {
+		InputPerMillion:  2.00,
+		OutputPerMillion: 8.00,
+		ContextWindow:    200000,
+		MaxTokens:        100000,
+		Reasoning:        true,
+		Vision:           true,
+	},
+	"o3-2025-04-16": {
 		InputPerMillion:  2.00,
 		OutputPerMillion: 8.00,
 		ContextWindow:    200000,
@@ -255,6 +400,14 @@ var OpenAIDefaults = map[string]Entry{
 		Reasoning:        true,
 	},
 	"o4-mini": {
+		InputPerMillion:  1.10,
+		OutputPerMillion: 4.40,
+		ContextWindow:    200000,
+		MaxTokens:        100000,
+		Reasoning:        true,
+		Vision:           true,
+	},
+	"o4-mini-2025-04-16": {
 		InputPerMillion:  1.10,
 		OutputPerMillion: 4.40,
 		ContextWindow:    200000,
@@ -362,13 +515,13 @@ var SyntheticDefaults = map[string]Entry{
 	"hf:moonshotai/Kimi-K2-Instruct-0905": {
 		InputPerMillion:  1.20,
 		OutputPerMillion: 1.20,
-		ContextWindow:    131000,
+		ContextWindow:    256000,
 		MaxTokens:        131000,
 	},
 	"hf:moonshotai/Kimi-K2-Thinking": {
 		InputPerMillion:  0.60,
 		OutputPerMillion: 2.50,
-		ContextWindow:    131000,
+		ContextWindow:    256000,
 		MaxTokens:        262000,
 		Reasoning:        true,
 	},
@@ -428,7 +581,7 @@ var SyntheticDefaults = map[string]Entry{
 	"hf:zai-org/GLM-4.7": {
 		InputPerMillion:  0.55,
 		OutputPerMillion: 2.19,
-		ContextWindow:    200000,
+		ContextWindow:    198000,
 		MaxTokens:        128000,
 		Reasoning:        true,
 	},
@@ -465,12 +618,13 @@ var GeminiDefaults = map[string]Entry{
 		Vision:              true,
 	},
 	"google/gemini-3.1-flash-lite-preview": {
-		InputPerMillion:  0.50,
-		OutputPerMillion: 3.00,
-		ContextWindow:    1048576,
-		MaxTokens:        65536,
-		Reasoning:        true,
-		Vision:           true,
+		InputPerMillion:     0.25,
+		OutputPerMillion:    1.50,
+		CacheReadPerMillion: 0.025,
+		ContextWindow:       1048576,
+		MaxTokens:           65536,
+		Reasoning:           true,
+		Vision:              true,
 	},
 	// Gemini 3
 	"google/gemini-3-pro-preview": {
@@ -555,12 +709,13 @@ var GeminiDefaults = map[string]Entry{
 		Vision:              true,
 	},
 	"gemini-3.1-flash-lite-preview": {
-		InputPerMillion:  0.50,
-		OutputPerMillion: 3.00,
-		ContextWindow:    1048576,
-		MaxTokens:        65536,
-		Reasoning:        true,
-		Vision:           true,
+		InputPerMillion:     0.25,
+		OutputPerMillion:    1.50,
+		CacheReadPerMillion: 0.025,
+		ContextWindow:       1048576,
+		MaxTokens:           65536,
+		Reasoning:           true,
+		Vision:              true,
 	},
 	"gemini-3-pro-preview": {
 		InputPerMillion:       2.00,

@@ -72,6 +72,7 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				capabilities.StandardContextWindow = entry.StandardContextWindow
 				capabilities.MaxTokens = entry.MaxTokens
 				capabilities.Reasoning = entry.Reasoning
+				capabilities.Vision = entry.Vision
 				pricingInfo = &ModelPricing{
 					InputTokenCost:  entry.InputPerMillion,
 					OutputTokenCost: entry.OutputPerMillion,
@@ -95,9 +96,12 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if m.Metadata.MaxTokens > 0 {
 				capabilities.MaxTokens = m.Metadata.MaxTokens
 			}
-			// reasoning only overrides if explicitly set to true in config
+			// reasoning/vision only override if explicitly set to true in config
 			if m.Metadata.Reasoning {
 				capabilities.Reasoning = true
+			}
+			if m.Metadata.Vision {
+				capabilities.Vision = true
 			}
 			if pricingInfo == nil {
 				pricingInfo = &ModelPricing{
