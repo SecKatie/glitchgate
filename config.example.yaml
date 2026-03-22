@@ -86,6 +86,17 @@ model_list:
   - model_name: claude-sonnet-4-6
     provider: anthropic
     upstream_model: claude-sonnet-4-6-20251001
+    # Optional per-model capabilities (override built-in defaults)
+    # metadata:
+    #   input_token_cost: 3.00       # USD per million input tokens
+    #   output_token_cost: 15.00      # USD per million output tokens
+    #   cache_read_cost: 0.30         # USD per million cache read tokens
+    #   cache_write_cost: 3.75        # USD per million cache write tokens
+    #   context_window: 200000        # maximum context window in tokens
+    #   standard_context_window: 0    # context limit at standard pricing (0 = same as context_window)
+    #   max_tokens: 8192              # maximum output tokens
+    #   reasoning: true               # supports extended thinking/reasoning
+    #   vision: true                 # supports image input
 
   # Virtual model with fallback chain
   # - model_name: smart-model
