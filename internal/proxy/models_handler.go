@@ -64,10 +64,14 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			capabilities.Fallbacks = m.Fallbacks
 		}
 
-		// Get pricing from calculator if we have provider and upstream model.
+		// Get capabilities and pricing from calculator if we have provider and upstream model.
 		var pricingInfo *ModelPricing
 		if m.Provider != "" && m.UpstreamModel != "" {
 			if entry, ok := h.calculator.Lookup(m.Provider, m.UpstreamModel); ok {
+				capabilities.ContextWindow = entry.ContextWindow
+				capabilities.StandardContextWindow = entry.StandardContextWindow
+				capabilities.MaxTokens = entry.MaxTokens
+				capabilities.Reasoning = entry.Reasoning
 				pricingInfo = &ModelPricing{
 					InputTokenCost:  entry.InputPerMillion,
 					OutputTokenCost: entry.OutputPerMillion,
@@ -81,16 +85,31 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Override with config metadata if present.
-		if m.Metadata != nil && pricingInfo == nil {
-			pricingInfo = &ModelPricing{
-				InputTokenCost:  m.Metadata.InputTokenCost,
-				OutputTokenCost: m.Metadata.OutputTokenCost,
+		if m.Metadata != nil {
+			if m.Metadata.ContextWindow > 0 {
+				capabilities.ContextWindow = m.Metadata.ContextWindow
 			}
-			if m.Metadata.CacheWriteCost > 0 {
-				pricingInfo.CacheWriteTokenCost = m.Metadata.CacheWriteCost
+			if m.Metadata.StandardContextWindow > 0 {
+				capabilities.StandardContextWindow = m.Metadata.StandardContextWindow
 			}
-			if m.Metadata.CacheReadCost > 0 {
-				pricingInfo.CacheReadTokenCost = m.Metadata.CacheReadCost
+			if m.Metadata.MaxTokens > 0 {
+				capabilities.MaxTokens = m.Metadata.MaxTokens
+			}
+			// reasoning only overrides if explicitly set to true in config
+			if m.Metadata.Reasoning {
+				capabilities.Reasoning = true
+			}
+			if pricingInfo == nil {
+				pricingInfo = &ModelPricing{
+					InputTokenCost:  m.Metadata.InputTokenCost,
+					OutputTokenCost: m.Metadata.OutputTokenCost,
+				}
+				if m.Metadata.CacheWriteCost > 0 {
+					pricingInfo.CacheWriteTokenCost = m.Metadata.CacheWriteCost
+				}
+				if m.Metadata.CacheReadCost > 0 {
+					pricingInfo.CacheReadTokenCost = m.Metadata.CacheReadCost
+				}
 			}
 		}
 
@@ -132,8 +151,13 @@ type ModelResponse struct {
 
 // ModelCapabilities describes what a model can do.
 type ModelCapabilities struct {
-	Streaming bool     `json:"streaming"`
-	Fallbacks []string `json:"fallbacks,omitempty"`
+	Streaming             bool     `json:"streaming"`
+	Fallbacks             []string `json:"fallbacks,omitempty"`
+	ContextWindow         int      `json:"context_window,omitempty"`
+	StandardContextWindow int      `json:"standard_context_window,omitempty"`
+	MaxTokens             int      `json:"max_tokens,omitempty"`
+	Reasoning             bool     `json:"reasoning,omitempty"`
+	Vision                bool     `json:"vision,omitempty"`
 }
 
 // ModelPricing contains pricing information for a model.

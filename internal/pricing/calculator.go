@@ -3,12 +3,17 @@ package pricing
 
 import "log/slog"
 
-// Entry holds the per-million-token cost for a single model.
+// Entry holds the per-million-token cost and capabilities for a single model.
 type Entry struct {
-	InputPerMillion      float64
-	OutputPerMillion     float64
-	CacheWritePerMillion float64
-	CacheReadPerMillion  float64
+	InputPerMillion       float64
+	OutputPerMillion      float64
+	CacheWritePerMillion  float64
+	CacheReadPerMillion   float64
+	ContextWindow         int  // maximum context window in tokens (0 = unknown)
+	StandardContextWindow int  // context limit at standard pricing (0 = same as ContextWindow)
+	MaxTokens             int  // maximum output tokens (0 = unknown)
+	Reasoning             bool // whether the model supports extended thinking/reasoning
+	Vision                bool // whether the model supports vision/image input
 }
 
 // Calculator computes request costs based on a model pricing table.

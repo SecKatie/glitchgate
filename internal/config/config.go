@@ -114,14 +114,19 @@ type ProviderConfig struct {
 	DiscoverFilter          []string `mapstructure:"discover_filter"           yaml:"discover_filter,omitempty"`           // glob include/exclude patterns (! prefix = exclude)
 }
 
-// ModelMetadata holds optional per-request pricing rates for a model entry.
+// ModelMetadata holds optional per-request pricing rates and capabilities for a model entry.
 // Rates are in USD per million tokens. When present, these override any
 // built-in defaults.
 type ModelMetadata struct {
-	InputTokenCost  float64 `mapstructure:"input_token_cost"  yaml:"input_token_cost"`
-	OutputTokenCost float64 `mapstructure:"output_token_cost" yaml:"output_token_cost"`
-	CacheReadCost   float64 `mapstructure:"cache_read_cost"   yaml:"cache_read_cost"`
-	CacheWriteCost  float64 `mapstructure:"cache_write_cost"  yaml:"cache_write_cost"`
+	InputTokenCost        float64 `mapstructure:"input_token_cost"        yaml:"input_token_cost"`
+	OutputTokenCost       float64 `mapstructure:"output_token_cost"       yaml:"output_token_cost"`
+	CacheReadCost         float64 `mapstructure:"cache_read_cost"         yaml:"cache_read_cost"`
+	CacheWriteCost        float64 `mapstructure:"cache_write_cost"        yaml:"cache_write_cost"`
+	ContextWindow         int     `mapstructure:"context_window"          yaml:"context_window"`
+	StandardContextWindow int     `mapstructure:"standard_context_window" yaml:"standard_context_window"`
+	MaxTokens             int     `mapstructure:"max_tokens"              yaml:"max_tokens"`
+	Reasoning             bool    `mapstructure:"reasoning"               yaml:"reasoning"`
+	Vision                bool    `mapstructure:"vision"                  yaml:"vision"`
 }
 
 // ModelMapping maps a client-facing model name to an upstream provider and model.
