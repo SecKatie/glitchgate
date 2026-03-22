@@ -38,3 +38,4 @@ dist/
 
 # Rodney browser automation tool
 .rodney/
+*.local.*
