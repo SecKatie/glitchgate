@@ -26,9 +26,9 @@ COPY internal/ ./internal/
 ARG COMMIT
 ARG BUILD_DATE
 
-# Build with persistent module + build caches
+# Build with persistent module + build caches (build cache scoped per arch)
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.cache/go-build,id=go-build-${TARGETARCH} \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -trimpath \
     -ldflags="-s -w -extldflags '-static' -X github.com/seckatie/glitchgate/cmd.version=${VERSION} -X github.com/seckatie/glitchgate/cmd.commit=${COMMIT} -X github.com/seckatie/glitchgate/cmd.date=${BUILD_DATE}" \
