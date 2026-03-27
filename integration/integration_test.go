@@ -136,7 +136,7 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 		Listen:    ":0",
 		Providers: []config.ProviderConfig{{ //nolint:gosec // #nosec G101 -- fake test credential
 			Name:           "anthropic",
-			BaseURL:        upstream.URL,
+			BaseURL:        upstream.URL + "/v1",
 			AuthMode:       "proxy_key",
 			APIKey:         "fake-upstream-key", //nolint:gosec // test credential, not real
 			DefaultVersion: "2023-06-01",
@@ -148,7 +148,7 @@ func newIntegrationHarness(t *testing.T, upstreamHandler http.Handler) *integrat
 			{ModelName: "gpt-4", Provider: "anthropic", UpstreamModel: "claude-sonnet-4-20250514"},
 		},
 	}
-	anthropicClient, err := llmanthropic.NewClient(llmanthropic.ClientConfig{Name: "anthropic", BaseURL: upstream.URL, AuthMode: "proxy_key", APIKey: "fake-upstream-key", DefaultVersion: "2023-06-01"}) // #nosec G101 -- test credentials, not real secrets
+	anthropicClient, err := llmanthropic.NewClient(llmanthropic.ClientConfig{Name: "anthropic", BaseURL: upstream.URL + "/v1", AuthMode: "proxy_key", APIKey: "fake-upstream-key", DefaultVersion: "2023-06-01"}) // #nosec G101 -- test credentials, not real secrets
 	require.NoError(t, err)
 	providers := map[string]provider.Provider{
 		"anthropic": anthropicClient,

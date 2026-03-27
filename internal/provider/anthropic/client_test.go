@@ -59,7 +59,7 @@ func TestSendRequest_ForwardsAnthropicAllowlistHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := NewClient(ClientConfig{Name: "claude-max", BaseURL: srv.URL, AuthMode: "forward", DefaultVersion: "2023-06-01"})
+	client, err := NewClient(ClientConfig{Name: "claude-max", BaseURL: srv.URL + "/v1", AuthMode: "forward", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 	req := &provider.Request{
 		Body:  []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`),
@@ -111,7 +111,7 @@ func TestSendRequest_TokenExtraction_Direct(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL, AuthMode: "api_key", APIKey: "key"})
+	client, err := NewClient(ClientConfig{Name: "test", BaseURL: srv.URL + "/v1", AuthMode: "api_key", APIKey: "key"})
 	require.NoError(t, err)
 
 	resp, err := client.SendRequest(t.Context(), &provider.Request{
@@ -365,7 +365,7 @@ func TestListModels(t *testing.T) {
 				}))
 				client, err := NewClient(ClientConfig{
 					Name:           "test",
-					BaseURL:        srv.URL,
+					BaseURL:        srv.URL + "/v1",
 					AuthMode:       "api_key",
 					APIKey:         "sk-test-key",
 					DefaultVersion: "2023-06-01",
@@ -406,7 +406,7 @@ func TestListModels(t *testing.T) {
 				}))
 				client, err := NewClient(ClientConfig{
 					Name:           "test",
-					BaseURL:        srv.URL,
+					BaseURL:        srv.URL + "/v1",
 					AuthMode:       "api_key",
 					APIKey:         "sk-test-key",
 					DefaultVersion: "2023-06-01",
@@ -429,7 +429,7 @@ func TestListModels(t *testing.T) {
 				}))
 				client, err := NewClient(ClientConfig{ //nolint:gosec // test credential
 					Name:           "test",
-					BaseURL:        srv.URL,
+					BaseURL:        srv.URL + "/v1",
 					AuthMode:       "api_key",
 					APIKey:         "sk-bad-key", //nolint:gosec // test credential
 					DefaultVersion: "2023-06-01",
@@ -453,7 +453,7 @@ func TestListModels(t *testing.T) {
 				}))
 				client, err := NewClient(ClientConfig{ //nolint:gosec // test credential
 					Name:           "test",
-					BaseURL:        srv.URL,
+					BaseURL:        srv.URL + "/v1",
 					AuthMode:       "api_key",
 					APIKey:         "sk-verify-header", //nolint:gosec // test credential
 					DefaultVersion: "2023-06-01",
@@ -478,7 +478,7 @@ func TestListModels(t *testing.T) {
 				}))
 				client, err := NewClient(ClientConfig{
 					Name:     "test",
-					BaseURL:  srv.URL,
+					BaseURL:  srv.URL + "/v1",
 					AuthMode: "api_key",
 					APIKey:   "sk-test-key",
 					// DefaultVersion intentionally empty

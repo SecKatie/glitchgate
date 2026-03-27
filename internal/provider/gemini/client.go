@@ -33,7 +33,7 @@ const (
 type ClientConfig struct {
 	Name            string
 	AuthMode        string // "api_key" or "vertex"
-	APIKey          string // required when AuthMode == "api_key"
+	APIKey          string `json:"-"` // required when AuthMode == "api_key"
 	Project         string // required when AuthMode == "vertex"
 	Region          string // optional for vertex; defaults to us-central1
 	CredentialsFile string // optional for vertex; uses ADC when empty
@@ -282,7 +282,7 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 			return nil, fmt.Errorf("gemini provider %q: creating list request: %w", c.name, err)
 		}
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) //nolint:gosec // G704 — URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("gemini provider %q: listing models: %w", c.name, err)
 		}
@@ -345,7 +345,7 @@ func (c *Client) listModelsVertex(ctx context.Context) ([]provider.DiscoveredMod
 		}
 		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) //nolint:gosec // G704 — URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("gemini provider %q: listing vertex models: %w", c.name, err)
 		}

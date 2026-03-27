@@ -4,12 +4,12 @@ This guide explains how to route OpenAI Codex CLI requests through glitchgate us
 
 ## How It Works
 
-When you sign into Codex with your ChatGPT account, it authenticates via OAuth and sends requests to `chatgpt.com/backend-api/codex/responses` (not `api.openai.com`). glitchgate sits between Codex and this backend, forwarding your OAuth credentials while logging every request.
+When you sign into Codex with your ChatGPT account, it authenticates via OAuth and sends requests to `chatgpt.com/backend-api/codex/v1/responses` (not `api.openai.com`). glitchgate sits between Codex and this backend, forwarding your OAuth credentials while logging every request.
 
 ```
 Codex CLI
   → glitchgate (localhost:4000)
-    → chatgpt.com/backend-api/codex/responses
+    → chatgpt.com/backend-api/codex/v1/responses
 ```
 
 The proxy authenticates Codex using a proxy API key (via the `X-Proxy-Api-Key` header), then forwards your ChatGPT OAuth token in the `Authorization` header to the upstream.
@@ -28,14 +28,14 @@ Add a `chatgpt-pro` provider to your glitchgate config (`~/.config/glitchgate/co
 providers:
   - name: "chatgpt-pro"
     type: "openai_responses"
-    base_url: "https://chatgpt.com/backend-api/codex"
+    base_url: "https://chatgpt.com/backend-api/codex/v1"
     auth_mode: "forward"
 ```
 
 Key details:
 
 - **`type: "openai_responses"`** — Codex uses the OpenAI Responses API format.
-- **`base_url`** — Points at the ChatGPT backend, not `api.openai.com`. glitchgate automatically skips the `/v1` path prefix for non-`api.openai.com` base URLs.
+- **`base_url`** — Points at the ChatGPT backend including `/v1`, not `api.openai.com`. glitchgate appends only the resource path (e.g. `/responses`), never `/v1`.
 - **`auth_mode: "forward"`** — Forwards Codex's OAuth `Authorization` header to the upstream as-is. No `api_key` is needed on the provider.
 
 ### Model Mappings
@@ -68,7 +68,7 @@ database_path: "~/.local/share/glitchgate/glitchgate.db"
 providers:
   - name: "chatgpt-pro"
     type: "openai_responses"
-    base_url: "https://chatgpt.com/backend-api/codex"
+    base_url: "https://chatgpt.com/backend-api/codex/v1"
     auth_mode: "forward"
 
 model_list:
@@ -151,7 +151,7 @@ This is Codex client-side validation rejecting the model name. Use bare model na
 
 ### Stream disconnects before completion
 
-Check that `base_url` in the glitchgate provider points to `https://chatgpt.com/backend-api/codex` (not `https://api.openai.com`). ChatGPT OAuth tokens are only valid for the ChatGPT backend.
+Check that `base_url` in the glitchgate provider points to `https://chatgpt.com/backend-api/codex/v1` (not `https://api.openai.com`). ChatGPT OAuth tokens are only valid for the ChatGPT backend.
 
 ### No logs appearing in glitchgate
 

@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	defaultOpenAIBaseURL = "https://api.openai.com"
+	defaultOpenAIBaseURL    = "https://api.openai.com/v1"
+	defaultAnthropicBaseURL = "https://api.anthropic.com/v1"
 )
 
 // ProviderRegistry compiles configured provider clients, pricing tables, and
@@ -131,7 +132,7 @@ func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (prov
 	case "anthropic":
 		client, err := anthropic.NewClient(anthropic.ClientConfig{
 			Name:            pc.Name,
-			BaseURL:         pc.BaseURL,
+			BaseURL:         effectiveBaseURL(pc),
 			AuthMode:        pc.AuthMode,
 			APIKey:          pc.APIKey,
 			DefaultVersion:  pc.DefaultVersion,
@@ -229,6 +230,10 @@ func addLegacyProviderAlias(providerNames, legacyProviderNames map[string]string
 
 func effectiveBaseURL(pc config.ProviderConfig) string {
 	switch pc.Type {
+	case "anthropic":
+		if pc.BaseURL == "" {
+			return defaultAnthropicBaseURL
+		}
 	case "github_copilot":
 		if pc.BaseURL == "" {
 			return copilot.DefaultAPIURL

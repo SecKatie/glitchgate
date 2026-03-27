@@ -46,6 +46,7 @@ func (h *openAITestHarness) closeLogger() {
 func newOpenAITestHarness(t *testing.T, upstreamURL string) *openAITestHarness {
 	t.Helper()
 
+	upstreamURL = upstreamURL + "/v1"
 	st := cloneTestDB(t)
 	plaintext := templateKey.Plaintext
 	keyID := templateKey.ID
@@ -365,6 +366,10 @@ func TestOpenAIProxy_UnknownModel(t *testing.T) {
 // Requests to "virtual" go to primary first, then secondary.
 func buildOpenAIVirtualFallbackHandler(t *testing.T, primaryURL, secondaryURL string) (*proxy.OpenAIHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
+
+	primaryURL = primaryURL + "/v1"
+	secondaryURL = secondaryURL + "/v1"
+
 	st, _ := setupFallbackStore(t)
 
 	dir := t.TempDir()
@@ -541,6 +546,10 @@ func TestOpenAIFallback_FallbackAttempts_Count(t *testing.T) {
 
 func buildOpenAICrossFormatFallbackHandler(t *testing.T, primaryURL, secondaryURL, primaryType string) (*proxy.OpenAIHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
+
+	primaryURL = primaryURL + "/v1"
+	secondaryURL = secondaryURL + "/v1"
+
 	st, _ := setupFallbackStore(t)
 
 	dir := t.TempDir()

@@ -144,7 +144,7 @@ timezone: "America/Los_Angeles"
 providers:
   - name: anthropic
     type: anthropic
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: proxy_key
 
 model_list:

@@ -20,7 +20,7 @@ master_key: "change-me-to-something-secure"
 
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
@@ -36,7 +36,7 @@ model_list:
 ```yaml
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
   - name: "openai"
@@ -94,7 +94,7 @@ master_key: "secure-password"
 
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
@@ -137,7 +137,7 @@ glitchgate auth copilot --name copilot-personal
 |-------------------|----------|-------------|
 | `name`            | Yes      | Unique identifier, referenced by `model_list` |
 | `type`            | No       | `anthropic` (default), `github_copilot`, `openai`, `openai_responses`, `gemini` |
-| `base_url`        | Depends  | Required for `anthropic` (non-vertex). Defaults to `https://api.openai.com` for `openai`/`openai_responses`. Not used by `github_copilot` or `gemini` |
+| `base_url`        | No       | Full base URL including path prefix (e.g. `https://api.openai.com/v1`). glitchgate appends only the resource path (e.g. `/chat/completions`), never `/v1`. Defaults to `https://api.anthropic.com/v1` for `anthropic`, `https://api.openai.com/v1` for `openai`/`openai_responses`. Not used by `github_copilot` or `gemini` |
 | `auth_mode`       | Depends  | `proxy_key` or `forward` for most providers. `anthropic` and `gemini` also support `vertex`. For `gemini`: `api_key` or `vertex`. Not used by `github_copilot` |
 | `api_key`         | Depends  | For `proxy_key`/`api_key` mode. Supports `${ENV_VAR}` expansion |
 | `default_version` | No       | Sets `anthropic-version` header when client omits it. `anthropic` only |
@@ -159,7 +159,7 @@ providers:
   # Forward client's own key (e.g. Claude Max subscribers, Codex)
   - name: "claude-max"
     type: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "forward"
 
   # Or forward the client's Gemini Developer API key.
@@ -175,7 +175,7 @@ providers:
 | `openai` | `/openai/v1/chat/completions` | Standard Chat Completions API |
 | `openai_responses` | `/openai/v1/responses` | Responses API (stateful, tool-native) |
 
-Both default `base_url` to `https://api.openai.com`, making them compatible with any OpenAI-compatible upstream (Azure, local inference, etc.).
+Both default `base_url` to `https://api.openai.com/v1`, making them compatible with any OpenAI-compatible upstream (Azure, local inference, etc.).
 
 ### Format-Aware Routing
 
@@ -558,7 +558,7 @@ request_log_body_max_bytes: 4194304
 providers:
   - name: "anthropic"
     type: "anthropic"            # default type; can be omitted
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
@@ -578,7 +578,7 @@ master_key: "change-me"
 
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
@@ -596,7 +596,7 @@ master_key: "change-me"
 
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
@@ -623,7 +623,7 @@ master_key: "change-me"
 
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"
@@ -645,7 +645,7 @@ master_key: "change-me"
 
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "${ANTHROPIC_API_KEY}"
     default_version: "2023-06-01"

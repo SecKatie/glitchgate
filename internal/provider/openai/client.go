@@ -157,15 +157,7 @@ func (c *Client) endpointURL(suffix string) string {
 		return c.baseURL + "/v1" + suffix
 	}
 
-	basePath := strings.TrimSuffix(u.Path, "/")
-	switch {
-	case basePath == "":
-		u.Path = "/v1" + suffix
-	case strings.HasSuffix(basePath, "/v1"):
-		u.Path = basePath + suffix
-	default:
-		u.Path = basePath + "/v1" + suffix
-	}
+	u.Path = strings.TrimSuffix(u.Path, "/") + suffix
 
 	return u.String()
 }
@@ -260,7 +252,7 @@ func (c *Client) extractTokens(body []byte, resp *provider.Response) {
 // ListModels queries the OpenAI-compatible /v1/models endpoint and returns
 // all available models. The OpenAI API does not paginate this endpoint.
 func (c *Client) ListModels(ctx context.Context) ([]provider.DiscoveredModel, error) {
-	u := c.baseURL + "/v1/models"
+	u := c.endpointURL("/models")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -272,7 +264,7 @@ func (c *Client) ListModels(ctx context.Context) ([]provider.DiscoveredModel, er
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
-	resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+	resp, err := c.httpClient.Do(req) //nolint:gosec // G704 — URL from operator-controlled provider config
 	if err != nil {
 		return nil, fmt.Errorf("openai provider %q: listing models: %w", c.name, err)
 	}

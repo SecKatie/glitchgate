@@ -45,6 +45,7 @@ func (h *responsesTestHarness) closeLogger() {
 func newResponsesTestHarness(t *testing.T, upstreamURL string) *responsesTestHarness {
 	t.Helper()
 
+	upstreamURL = upstreamURL + "/v1"
 	st := cloneTestDB(t)
 	plaintext := templateKey.Plaintext
 	keyID := templateKey.ID
@@ -444,6 +445,9 @@ func TestResponsesProxy_DuplicateToolNames(t *testing.T) {
 
 func newResponsesFallbackHarness(t *testing.T, primaryURL, secondaryURL string) *responsesTestHarness {
 	t.Helper()
+
+	primaryURL = primaryURL + "/v1"
+	secondaryURL = secondaryURL + "/v1"
 
 	st := cloneTestDB(t)
 	plaintext := templateKey.Plaintext

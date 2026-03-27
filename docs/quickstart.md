@@ -21,7 +21,7 @@ master_key: "change-me-to-something-secure"
 
 providers:
   - name: "anthropic"
-    base_url: "https://api.anthropic.com"
+    base_url: "https://api.anthropic.com/v1"
     auth_mode: "proxy_key"
     api_key: "$ANTHROPIC_API_KEY"
     default_version: "2023-06-01"

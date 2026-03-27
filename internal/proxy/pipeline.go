@@ -124,7 +124,7 @@ func executeFallbackChain(
 		if breakers != nil {
 			cb := breakers.Get(mapping.Provider)
 			if !cb.Allow() {
-				slog.Info("circuit breaker skipping provider",
+				slog.Info("circuit breaker skipping provider", //nolint:gosec // G706 — provider name from operator config, not user input
 					"provider", mapping.Provider,
 					"state", cb.CurrentState().String())
 				continue

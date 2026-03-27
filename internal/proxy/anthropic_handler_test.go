@@ -48,6 +48,7 @@ func (h *testHarness) closeLogger() {
 func newTestHarness(t *testing.T, upstreamURL string) *testHarness {
 	t.Helper()
 
+	upstreamURL = upstreamURL + "/v1"
 	st := cloneTestDB(t)
 	plaintext := templateKey.Plaintext
 	keyID := templateKey.ID
@@ -455,9 +456,9 @@ model_list:
 	logger := proxy.NewAsyncLogger(st, 100)
 	// No defer — we close explicitly below to flush before reading logs.
 
-	primaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primary.URL, AuthMode: "api_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
+	primaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "primary", BaseURL: primary.URL + "/v1", AuthMode: "api_key", APIKey: "key1", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
-	secondaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondary.URL, AuthMode: "api_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
+	secondaryClient, err := anthropic.NewClient(anthropic.ClientConfig{Name: "secondary", BaseURL: secondary.URL + "/v1", AuthMode: "api_key", APIKey: "key2", DefaultVersion: "2023-06-01"})
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -655,6 +656,10 @@ func setupFallbackStore(t *testing.T) (*store.SQLiteStore, string) {
 // buildVirtualFallbackHandler builds a handler with a two-entry virtual model "virtual".
 func buildVirtualFallbackHandler(t *testing.T, primaryURL, secondaryURL string) (*proxy.AnthropicHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
+
+	primaryURL = primaryURL + "/v1"
+	secondaryURL = secondaryURL + "/v1"
+
 	st, _ := setupFallbackStore(t)
 
 	dir := t.TempDir()
@@ -747,6 +752,10 @@ func responsesSuccessResponse() map[string]interface{} {
 // where primary is Anthropic and secondary is a different format (OpenAI CC or Responses).
 func buildCrossFormatFallbackHandler(t *testing.T, primaryURL, secondaryURL, secondaryType string) (*proxy.AnthropicHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
+
+	primaryURL = primaryURL + "/v1"
+	secondaryURL = secondaryURL + "/v1"
+
 	st, _ := setupFallbackStore(t)
 
 	dir := t.TempDir()
@@ -912,6 +921,11 @@ func TestFallback_AnthropicPrimary_OpenAICC_BothFail(t *testing.T) {
 
 func buildAnthropicCrossFormatMiddleFallbackHandler(t *testing.T, primaryURL, secondaryURL, tertiaryURL, secondaryType string) (*proxy.AnthropicHandler, *store.SQLiteStore, *proxy.AsyncLogger) {
 	t.Helper()
+
+	primaryURL = primaryURL + "/v1"
+	secondaryURL = secondaryURL + "/v1"
+	tertiaryURL = tertiaryURL + "/v1"
+
 	st, _ := setupFallbackStore(t)
 
 	dir := t.TempDir()
@@ -1298,12 +1312,12 @@ model_list:
   - model_name: chatgpt-model
     provider: chatgpt
     upstream_model: gpt-4o
-`, upstream.URL)), 0o600))
+`, upstream.URL+"/v1")), 0o600))
 
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	chatgptClient, err := openai.NewClient("chatgpt", upstream.URL, "api_key", "key1", openai.APITypeResponses)
+	chatgptClient, err := openai.NewClient("chatgpt", upstream.URL+"/v1", "api_key", "key1", openai.APITypeResponses)
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{
@@ -1372,12 +1386,12 @@ model_list:
   - model_name: chatgpt-model
     provider: chatgpt
     upstream_model: gpt-4o
-`, upstream.URL)), 0o600))
+`, upstream.URL+"/v1")), 0o600))
 
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	chatgptClient, err := openai.NewClient("chatgpt", upstream.URL, "api_key", "key1", openai.APITypeResponses)
+	chatgptClient, err := openai.NewClient("chatgpt", upstream.URL+"/v1", "api_key", "key1", openai.APITypeResponses)
 	require.NoError(t, err)
 
 	providers := map[string]provider.Provider{

@@ -34,7 +34,7 @@ type ClientConfig struct {
 	Name            string
 	BaseURL         string // required for api_key/forward modes
 	AuthMode        string // "api_key", "forward", or "vertex"
-	APIKey          string // api_key mode
+	APIKey          string `json:"-"` // api_key mode
 	DefaultVersion  string
 	Project         string // vertex mode
 	Region          string // vertex mode; defaults to us-central1
@@ -155,7 +155,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 
 // sendDirect handles api_key and forward auth modes against the Anthropic API.
 func (c *Client) sendDirect(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	url := c.baseURL + "/v1/messages"
+	url := c.baseURL + "/messages"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(req.Body)))
 	if err != nil {
@@ -387,7 +387,7 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 	afterID := ""
 
 	for {
-		u := c.baseURL + "/v1/models?limit=1000"
+		u := c.baseURL + "/models?limit=1000"
 		if afterID != "" {
 			u += "&after_id=" + afterID
 		}
@@ -403,7 +403,7 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 		}
 		req.Header.Set("Anthropic-Version", version)
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) //nolint:gosec // G704 — URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("anthropic provider %q: listing models: %w", c.name, err)
 		}
@@ -462,7 +462,7 @@ func (c *Client) listModelsVertex(ctx context.Context) ([]provider.DiscoveredMod
 		}
 		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) //nolint:gosec // G704 — URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("anthropic provider %q: listing vertex models: %w", c.name, err)
 		}
