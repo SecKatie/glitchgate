@@ -94,6 +94,41 @@ func TestFindModelWildcard(t *testing.T) {
 			model:   "claude_max_extra/something",
 			wantErr: "model not found",
 		},
+		{
+			name:    "path traversal rejected",
+			model:   "claude_max/../../v1/tunedModels",
+			wantErr: "model not found",
+		},
+		{
+			name:    "dot-dot segment rejected",
+			model:   "claude_max/foo/../bar",
+			wantErr: "model not found",
+		},
+		{
+			name:    "single dot segment rejected",
+			model:   "claude_max/./foo",
+			wantErr: "model not found",
+		},
+		{
+			name:    "query injection rejected",
+			model:   "claude_max/model?key=value",
+			wantErr: "model not found",
+		},
+		{
+			name:    "fragment injection rejected",
+			model:   "claude_max/model#frag",
+			wantErr: "model not found",
+		},
+		{
+			name:    "backslash rejected",
+			model:   "claude_max/model\\path",
+			wantErr: "model not found",
+		},
+		{
+			name:    "trailing slash rejected",
+			model:   "claude_max/model/",
+			wantErr: "model not found",
+		},
 	}
 
 	for _, tt := range tests {

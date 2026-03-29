@@ -171,12 +171,34 @@ type DispatchTarget struct {
 
 // MatchesWildcard checks if modelName matches a wildcard prefix (e.g. "chatgpt"
 // matches "chatgpt/gpt-5.4") and returns the suffix ("gpt-5.4").
+//
+// The suffix is validated to prevent path traversal and URL manipulation when it
+// is later interpolated into upstream endpoint URLs (e.g. Gemini's model path).
 func MatchesWildcard(prefix, modelName string) (suffix string, ok bool) {
 	after, found := strings.CutPrefix(modelName, prefix+"/")
 	if found && after != "" {
+		if !isSafeModelSuffix(after) {
+			return "", false
+		}
 		return after, true
 	}
 	return "", false
+}
+
+// isSafeModelSuffix rejects suffixes that could cause path traversal or URL
+// manipulation when interpolated into an upstream endpoint URL.
+func isSafeModelSuffix(s string) bool {
+	// Block URL-special characters that could alter the request target.
+	if strings.ContainsAny(s, "?#\\") {
+		return false
+	}
+	// Block ".." path segments (traversal).
+	for _, seg := range strings.Split(s, "/") {
+		if seg == ".." || seg == "." || seg == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Load reads the configuration from file, environment, and defaults.
