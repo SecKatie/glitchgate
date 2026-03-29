@@ -90,7 +90,7 @@ func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Read
 
 	scanner := sse.NewScanner(upstream)
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := sanitizeSSELine(scanner.Text())
 		captured.WriteString(line)
 		captured.WriteByte('\n')
 
@@ -100,7 +100,7 @@ func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Read
 		}
 
 		// Write the line to the client.
-		if _, err := w.Write([]byte(line)); err != nil { //nolint:gosec // SSE relay of upstream provider data, not HTML content
+		if _, err := w.Write([]byte(line)); err != nil {
 			result.Body = captured.Bytes()
 			return &result, err
 		}
@@ -120,6 +120,21 @@ func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Read
 
 	result.Body = captured.Bytes()
 	return &result, scanner.Err()
+}
+
+// sanitizeSSELine strips carriage returns and null bytes from an SSE line as
+// defense-in-depth. bufio.Scanner already strips trailing \r, but embedded \r
+// or \x00 from a misbehaving upstream could confuse downstream consumers.
+func sanitizeSSELine(line string) string {
+	if !strings.ContainsAny(line, "\r\x00") {
+		return line
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == 0 {
+			return -1
+		}
+		return r
+	}, line)
 }
 
 // SkipDone wraps an extractor to skip the "[DONE]" sentinel.

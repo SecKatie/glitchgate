@@ -114,3 +114,24 @@ func TestExtractResponsesTokens_CacheFields(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeSSELine(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"clean line passes through", "data: hello", "data: hello"},
+		{"empty line passes through", "", ""},
+		{"strips embedded CR", "data: hel\rlo", "data: hello"},
+		{"strips null bytes", "data: hel\x00lo", "data: hello"},
+		{"strips both CR and null", "da\rta: \x00hi", "data: hi"},
+		{"no change for normal JSON", `data: {"type":"ping"}`, `data: {"type":"ping"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, sanitizeSSELine(tc.in))
+		})
+	}
+}
