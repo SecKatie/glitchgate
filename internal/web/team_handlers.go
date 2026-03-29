@@ -191,19 +191,10 @@ func (h *TeamHandlers) AddTeamMemberHandler(w http.ResponseWriter, r *http.Reque
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	teamID := chi.URLParam(r, "id")
 	userID := r.FormValue("user_id")
-	sc := auth.SessionFromContext(r.Context())
 
 	if userID == "" {
 		http.Error(w, "user_id is required", http.StatusBadRequest)
 		return
-	}
-
-	// TA scope check: can only add to their own team.
-	if sc != nil && !sc.IsMasterKey && sc.Role == "team_admin" {
-		if sc.TeamID == nil || *sc.TeamID != teamID {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
 	}
 
 	if err := h.store.AssignUserToTeam(r.Context(), userID, teamID); err != nil {
@@ -252,15 +243,6 @@ func (h *TeamHandlers) DeleteTeamHandler(w http.ResponseWriter, r *http.Request)
 func (h *TeamHandlers) RemoveTeamMemberHandler(w http.ResponseWriter, r *http.Request) {
 	teamID := chi.URLParam(r, "id")
 	userID := chi.URLParam(r, "userID")
-	sc := auth.SessionFromContext(r.Context())
-
-	// TA scope check: can only remove from their own team.
-	if sc != nil && !sc.IsMasterKey && sc.Role == "team_admin" {
-		if sc.TeamID == nil || *sc.TeamID != teamID {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-	}
 
 	// Verify membership belongs to this team before removing.
 	tm, err := h.store.GetTeamMembership(r.Context(), userID)

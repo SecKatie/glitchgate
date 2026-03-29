@@ -3,9 +3,12 @@
 package web
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/seckatie/glitchgate/internal/auth"
 	"github.com/seckatie/glitchgate/internal/store"
@@ -108,6 +111,90 @@ func RequireAdminOrTeamAdmin(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// TeamResolver extracts the target team ID from a request. Used by
+// RequireTeamScope to determine whether a team_admin is acting within scope.
+type TeamResolver func(r *http.Request) (teamID string, err error)
+
+// errTeamNotResolved is returned when a resolver cannot determine the team.
+var errTeamNotResolved = errors.New("team not resolved")
+
+// RequireTeamScope enforces that team_admin users can only access resources
+// belonging to their own team. Global admins and master_key sessions pass
+// through unrestricted. Stack after RequireAdminOrTeamAdmin.
+func RequireTeamScope(resolve TeamResolver) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sc := auth.SessionFromContext(r.Context())
+			if sc == nil || sc.IsMasterKey || sc.Role != "team_admin" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			targetTeamID, err := resolve(r)
+			if err != nil || sc.TeamID == nil || *sc.TeamID != targetTeamID {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// TeamIDFromParam returns a TeamResolver that reads the team ID directly from
+// a chi URL parameter (for routes where {param} IS the team ID).
+func TeamIDFromParam(param string) TeamResolver {
+	return func(r *http.Request) (string, error) {
+		id := chi.URLParam(r, param)
+		if id == "" {
+			return "", errTeamNotResolved
+		}
+		return id, nil
+	}
+}
+
+// UserTeamResolver returns a TeamResolver that reads {id} as a user ID and
+// looks up the user's team membership via the store.
+func UserTeamResolver(st store.SessionReaderStore) TeamResolver {
+	return func(r *http.Request) (string, error) {
+		userID := chi.URLParam(r, "id")
+		if userID == "" {
+			return "", errTeamNotResolved
+		}
+		tm, err := st.GetTeamMembership(r.Context(), userID)
+		if err != nil || tm == nil {
+			return "", errTeamNotResolved
+		}
+		return tm.TeamID, nil
+	}
+}
+
+// KeyTeamResolver returns a TeamResolver that reads {id} as a proxy key ID and
+// verifies the key belongs to the caller's team. It resolves to the caller's
+// team ID only if the key is found within that team's key set.
+func KeyTeamResolver(ks store.ProxyKeyStore) TeamResolver {
+	return func(r *http.Request) (string, error) {
+		keyID := chi.URLParam(r, "id")
+		if keyID == "" {
+			return "", errTeamNotResolved
+		}
+		sc := auth.SessionFromContext(r.Context())
+		if sc == nil || sc.TeamID == nil {
+			return "", errTeamNotResolved
+		}
+		keys, err := ks.ListProxyKeysByTeam(r.Context(), *sc.TeamID)
+		if err != nil {
+			return "", errTeamNotResolved
+		}
+		for _, k := range keys {
+			if k.ID == keyID {
+				return *sc.TeamID, nil
+			}
+		}
+		return "", errTeamNotResolved
+	}
 }
 
 // redirectOrUnauthorized redirects page requests to /ui/login and returns 401

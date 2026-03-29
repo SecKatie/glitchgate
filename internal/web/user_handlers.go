@@ -143,16 +143,6 @@ func (h *UserHandlers) ChangeRoleHandler(w http.ResponseWriter, r *http.Request)
 // POST /ui/api/users/{id}/deactivate
 func (h *UserHandlers) DeactivateUserHandler(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	sc := auth.SessionFromContext(r.Context())
-
-	// Team Admin scope check.
-	if sc != nil && !sc.IsMasterKey && sc.Role == "team_admin" {
-		tm, err := h.store.GetTeamMembership(r.Context(), id)
-		if err != nil || tm == nil || sc.TeamID == nil || tm.TeamID != *sc.TeamID {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-	}
 
 	// Guard: cannot deactivate the last global_admin.
 	target, err := h.store.GetOIDCUserByID(r.Context(), id)

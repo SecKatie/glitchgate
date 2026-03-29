@@ -181,14 +181,18 @@ func runServe(_ *cobra.Command, _ []string) error {
 		r.Get("/budgets", costHandlers.BudgetsPageHandler)
 
 		// Budget management (GA-only for global/user, GA/TA for team/key).
+		teamScope := web.RequireTeamScope(web.TeamIDFromParam("id"))
+		keyScope := web.RequireTeamScope(web.KeyTeamResolver(runtime.Store))
+		userScope := web.RequireTeamScope(web.UserTeamResolver(runtime.Store))
+
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/global", costHandlers.SetGlobalBudgetHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/global/clear", costHandlers.ClearGlobalBudgetHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/user/{id}", costHandlers.SetUserBudgetHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/budgets/user/{id}/clear", costHandlers.ClearUserBudgetHandler)
-		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/team/{id}", costHandlers.SetTeamBudgetHandler)
-		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/team/{id}/clear", costHandlers.ClearTeamBudgetHandler)
-		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/key/{id}", costHandlers.SetKeyBudgetHandler)
-		r.With(web.RequireAdminOrTeamAdmin).Post("/api/budgets/key/{id}/clear", costHandlers.ClearKeyBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin, teamScope).Post("/api/budgets/team/{id}", costHandlers.SetTeamBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin, teamScope).Post("/api/budgets/team/{id}/clear", costHandlers.ClearTeamBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin, keyScope).Post("/api/budgets/key/{id}", costHandlers.SetKeyBudgetHandler)
+		r.With(web.RequireAdminOrTeamAdmin, keyScope).Post("/api/budgets/key/{id}/clear", costHandlers.ClearKeyBudgetHandler)
 
 		// Models.
 		r.Get("/models", webHandlers.ModelsPage)
@@ -220,15 +224,15 @@ func runServe(_ *cobra.Command, _ []string) error {
 			r.Post("/api/users/{id}/role", userHandlers.ChangeRoleHandler)
 			r.Post("/api/users/{id}/reactivate", userHandlers.ReactivateUserHandler)
 		})
-		r.With(web.RequireAdminOrTeamAdmin).Post("/api/users/{id}/deactivate", userHandlers.DeactivateUserHandler)
+		r.With(web.RequireAdminOrTeamAdmin, userScope).Post("/api/users/{id}/deactivate", userHandlers.DeactivateUserHandler)
 
 		// Teams (TA/GA can view; only GA can create).
 		r.With(web.RequireAdminOrTeamAdmin).Get("/teams", teamHandlers.TeamsPage)
 		r.With(web.RequireAdminOrTeamAdmin).Get("/api/teams", teamHandlers.TeamsAPIHandler)
 		r.With(web.RequireGlobalAdmin).Post("/api/teams", teamHandlers.CreateTeamHandler)
 		r.With(web.RequireGlobalAdmin).Delete("/api/teams/{id}", teamHandlers.DeleteTeamHandler)
-		r.With(web.RequireAdminOrTeamAdmin).Post("/api/teams/{id}/members", teamHandlers.AddTeamMemberHandler)
-		r.With(web.RequireAdminOrTeamAdmin).Delete("/api/teams/{id}/members/{userID}", teamHandlers.RemoveTeamMemberHandler)
+		r.With(web.RequireAdminOrTeamAdmin, teamScope).Post("/api/teams/{id}/members", teamHandlers.AddTeamMemberHandler)
+		r.With(web.RequireAdminOrTeamAdmin, teamScope).Delete("/api/teams/{id}/members/{userID}", teamHandlers.RemoveTeamMemberHandler)
 	})
 
 	// Root redirect to UI.

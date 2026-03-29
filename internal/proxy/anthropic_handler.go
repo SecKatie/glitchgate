@@ -132,10 +132,15 @@ func (h *AnthropicHandler) handleNonStreaming(w http.ResponseWriter, resp *provi
 		s := string(resp.Body)
 		errDetails = &s
 	}
-	// Forward response headers.
+	// Forward only safe upstream response headers. Unfiltered forwarding would
+	// let a compromised upstream inject Set-Cookie, Location, or other dangerous
+	// headers. Use the same allowlist as the streaming path.
 	for k, vals := range resp.Headers {
-		for _, v := range vals {
-			w.Header().Add(k, v)
+		lower := strings.ToLower(k)
+		if strings.HasPrefix(lower, "anthropic-") || lower == "x-request-id" || lower == "content-type" {
+			for _, v := range vals {
+				w.Header().Add(k, v)
+			}
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
