@@ -169,9 +169,10 @@ func (c *Client) sendDirect(ctx context.Context, req *provider.Request) (*provid
 	if version == "" {
 		version = c.defaultVersion
 	}
-	if version != "" {
-		httpReq.Header.Set("Anthropic-Version", version)
+	if version == "" {
+		version = "2023-06-01"
 	}
+	httpReq.Header.Set("Anthropic-Version", version)
 
 	// Auth mode: either use the proxy's own API key or forward the client's.
 	switch c.authMode {
