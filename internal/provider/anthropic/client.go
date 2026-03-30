@@ -90,7 +90,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		}
 		c.tokenSource = ts
 	default:
-		if err := provider.ValidateBaseURL(cfg.BaseURL); err != nil {
+		if err := provider.ValidateBaseURL(baseURL); err != nil {
 			return nil, fmt.Errorf("anthropic provider %q: %w", cfg.Name, err)
 		}
 	}
