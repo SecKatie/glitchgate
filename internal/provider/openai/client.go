@@ -180,7 +180,10 @@ func shouldForwardHeader(hdr string) bool {
 		strings.EqualFold(hdr, "Te"),
 		strings.EqualFold(hdr, "Trailer"),
 		strings.EqualFold(hdr, "Upgrade"),
-		strings.EqualFold(hdr, "Host"):
+		strings.EqualFold(hdr, "Host"),
+		// Block Accept-Encoding — forwarding it causes upstream to return compressed
+		// responses that Glitchgate can't decompress, breaking response parsing and logging.
+		strings.EqualFold(hdr, "Accept-Encoding"):
 		return false
 	case strings.HasPrefix(lower, "x-proxy-"):
 		return false
