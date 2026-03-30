@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -107,6 +108,53 @@ func TestCSRFMiddleware_POSTWithValidToken(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "ok", rec.Body.String())
+}
+
+func TestIsRequestTLS(t *testing.T) {
+	tests := []struct {
+		name     string
+		tlsConn  bool
+		xfpValue string
+		want     bool
+	}{
+		{"direct TLS", true, "", true},
+		{"no TLS no header", false, "", false},
+		{"X-Forwarded-Proto https", false, "https", true},
+		{"X-Forwarded-Proto HTTPS", false, "HTTPS", true},
+		{"X-Forwarded-Proto http", false, "http", false},
+		{"direct TLS with header", true, "http", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.tlsConn {
+				req.TLS = &tls.ConnectionState{}
+			}
+			if tt.xfpValue != "" {
+				req.Header.Set("X-Forwarded-Proto", tt.xfpValue)
+			}
+			require.Equal(t, tt.want, isRequestTLS(req))
+		})
+	}
+}
+
+func TestCSRFCookieSecureViaProxy(t *testing.T) {
+	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/dashboard", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == csrfCookieName {
+			require.True(t, c.Secure, "CSRF cookie should be Secure when X-Forwarded-Proto is https")
+			return
+		}
+	}
+	t.Fatal("CSRF cookie not found")
 }
 
 func TestCSRFMiddleware_POSTWithMismatchedToken(t *testing.T) {

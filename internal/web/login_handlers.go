@@ -121,7 +121,7 @@ func (h *Handlers) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 			Value:    "",
 			Path:     "/ui",
 			HttpOnly: true,
-			Secure:   r.TLS != nil,
+			Secure:   isRequestTLS(r),
 			SameSite: http.SameSiteStrictMode,
 			MaxAge:   -1,
 		})

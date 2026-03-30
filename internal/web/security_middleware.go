@@ -84,6 +84,15 @@ func safeLogValue(value string) string {
 	return strconv.QuoteToASCII(strings.ToValidUTF8(value, ""))
 }
 
+// isRequestTLS reports whether the original client connection used TLS,
+// accounting for TLS-terminating reverse proxies that set X-Forwarded-Proto.
+func isRequestTLS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 const (
 	csrfCookieName = "glitchgate_csrf"
 	csrfHeaderName = "X-CSRF-Token"
@@ -130,7 +139,7 @@ func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/ui",
 		HttpOnly: false, // JS/HTMX must read the cookie value
 		SameSite: http.SameSiteStrictMode,
-		Secure:   r.TLS != nil,
+		Secure:   isRequestTLS(r),
 	})
 }
 

@@ -24,6 +24,16 @@ func TestSanitizeRedirect(t *testing.T) {
 		{"scheme in path", "/foo://bar", ""},
 		{"no leading slash", "evil.com", ""},
 		{"javascript scheme", "javascript:alert(1)", ""},
+		// Path traversal cases
+		{"traversal to admin", "/ui/../admin", ""},
+		{"traversal to secret", "/ui/../secret/file", ""},
+		{"double traversal still under ui", "/ui/../valid/../ui/index.html", ""},
+		{"traversal from root", "/../etc/passwd", ""},
+		{"dot-dot only", "/..", ""},
+		{"encoded traversal", "/ui/%2e%2e/admin", "/ui/%2e%2e/admin"}, // path.Clean does not decode; raw dots checked
+		{"traversal with query", "/ui/../admin?foo=bar", ""},
+		{"clean path with query preserved", "/ui/models?from=2026-01-01", "/ui/models?from=2026-01-01"},
+		{"trailing slash cleaned", "/ui/models/", "/ui/models"},
 	}
 
 	for _, tc := range tests {

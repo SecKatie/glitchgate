@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -159,18 +160,50 @@ func (h *AuthHandlers) OIDCCallbackHandler(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-// sanitizeRedirect returns the redirect target if it is a safe local path,
-// otherwise returns an empty string so callers fall back to the default.
+// sanitizeRedirect returns a cleaned redirect target if it is a safe local
+// path, otherwise returns an empty string so callers fall back to the default.
+// The returned path is always cleaned (no ".." segments).
 func sanitizeRedirect(dest string) string {
-	if isLocalPath(dest) {
-		return dest
+	if !isLocalPath(dest) {
+		return ""
 	}
-	return ""
+
+	// Separate the path from any query string before cleaning.
+	rawPath := dest
+	query := ""
+	if i := strings.IndexByte(dest, '?'); i >= 0 {
+		rawPath = dest[:i]
+		query = dest[i:]
+	}
+
+	// Reject any raw path containing ".." segments before cleaning, since
+	// path.Clean resolves them and would hide the traversal attempt.
+	if containsDotDot(rawPath) {
+		slog.Warn("sanitizeRedirect: rejected path with traversal", "dest", safeLogValue(dest)) //nolint:gosec // dest is sanitized via safeLogValue (QuoteToASCII)
+		return ""
+	}
+
+	clean := path.Clean(rawPath)
+
+	if !strings.HasPrefix(clean, "/") {
+		return ""
+	}
+
+	return clean + query
 }
 
-// isLocalPath returns true if dest is a relative path that stays on the same
-// origin: starts with exactly one slash, contains no backslashes, and has no
-// authority component (// or scheme:).
+// containsDotDot reports whether the path contains a ".." segment.
+func containsDotDot(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// isLocalPath returns true if dest looks like a local path: starts with
+// exactly one slash, contains no backslashes, and has no authority component.
 func isLocalPath(dest string) bool {
 	return strings.HasPrefix(dest, "/") &&
 		!strings.HasPrefix(dest, "//") &&
