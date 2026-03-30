@@ -93,7 +93,7 @@ func TestSendRequest_ForwardsAnthropicAllowlistHeaders(t *testing.T) {
 	require.Equal(t, "cli", gotHeaders.Get("X-App"))
 	require.Equal(t, "js", gotHeaders.Get("X-Stainless-Lang"))
 	require.Equal(t, "MacOS", gotHeaders.Get("X-Stainless-Os"))
-	require.Empty(t, gotHeaders.Get("X-Request-Id"))
+	require.Equal(t, "abc123", gotHeaders.Get("X-Request-Id"))
 	require.Empty(t, gotHeaders.Get("X-Proxy-Api-Key"))
 	require.Empty(t, gotHeaders.Get("Connection"))
 }

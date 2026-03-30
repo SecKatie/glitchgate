@@ -171,24 +171,21 @@ func (c *Client) endpointURL(suffix string) string {
 }
 
 func shouldForwardHeader(hdr string) bool {
+	lower := strings.ToLower(hdr)
 	switch {
-	case strings.EqualFold(hdr, "Accept"),
-		strings.EqualFold(hdr, "Accept-Language"),
-		strings.EqualFold(hdr, "Chatgpt-Account-Id"),
-		strings.EqualFold(hdr, "Originator"),
-		strings.EqualFold(hdr, "Session_id"),
-		strings.EqualFold(hdr, "User-Agent"),
-		strings.EqualFold(hdr, "OpenAI-Beta"),
-		strings.EqualFold(hdr, "OpenAI-Organization"),
-		strings.EqualFold(hdr, "OpenAI-Project"),
-		strings.EqualFold(hdr, "X-App"):
-		return true
-	case strings.HasPrefix(strings.ToLower(hdr), "x-codex-"):
-		return true
-	case strings.HasPrefix(strings.ToLower(hdr), "x-stainless-"):
-		return true
-	default:
+	// Block hop-by-hop and proxy-internal headers.
+	case strings.EqualFold(hdr, "Connection"),
+		strings.EqualFold(hdr, "Keep-Alive"),
+		strings.EqualFold(hdr, "Transfer-Encoding"),
+		strings.EqualFold(hdr, "Te"),
+		strings.EqualFold(hdr, "Trailer"),
+		strings.EqualFold(hdr, "Upgrade"),
+		strings.EqualFold(hdr, "Host"):
 		return false
+	case strings.HasPrefix(lower, "x-proxy-"):
+		return false
+	default:
+		return true
 	}
 }
 
