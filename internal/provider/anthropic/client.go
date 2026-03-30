@@ -24,6 +24,7 @@ import (
 )
 
 const (
+	defaultBaseURL       = "https://api.anthropic.com"
 	cloudPlatformScope   = "https://www.googleapis.com/auth/cloud-platform"
 	defaultVertexVersion = "vertex-2023-10-16"
 	defaultVertexRegion  = "us-central1"
@@ -32,7 +33,7 @@ const (
 // ClientConfig holds the parameters needed to construct an Anthropic [Client].
 type ClientConfig struct {
 	Name            string
-	BaseURL         string // required for api_key/forward modes
+	BaseURL         string // defaults to https://api.anthropic.com
 	AuthMode        string // "api_key", "forward", or "vertex"
 	APIKey          string // api_key mode
 	DefaultVersion  string
@@ -59,9 +60,13 @@ type Client struct {
 // it validates the base URL. For vertex mode it initialises an OAuth2 token
 // source.
 func NewClient(cfg ClientConfig) (*Client, error) {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
 	c := &Client{
 		name:           cfg.Name,
-		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
+		baseURL:        strings.TrimRight(baseURL, "/"),
 		authMode:       cfg.AuthMode,
 		apiKey:         cfg.APIKey,
 		defaultVersion: cfg.DefaultVersion,
