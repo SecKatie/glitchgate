@@ -50,7 +50,7 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	require.Equal(t, "chatgpt-pro", providerNames["chatgpt-pro"])
 	require.Equal(t, "chatgpt-pro", providerNames["openai:api.openai.com"])
 	require.Equal(t, "segment", providerNames["openai:api.synthetic.new"])
-	require.Equal(t, "gemini-api", providerNames["gemini"])
+	require.Equal(t, "gemini-api", providerNames["gemini:generativelanguage.googleapis.com"])
 	require.Equal(t, "copilot", providerNames["github_copilot:api.githubcopilot.com"])
 
 	subscriptions := registry.ProviderMonthlySubscriptions()
@@ -79,6 +79,38 @@ func TestNewProviderRegistryBuildsProvidersPricingAndAliases(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, 2.50, copilot.InputPerMillion)
 	require.Equal(t, 15.00, copilot.OutputPerMillion)
+}
+
+func TestNewProviderRegistryAnthropicEmptyBaseURL(t *testing.T) {
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{
+			{Name: "my-anthropic", Type: "anthropic", AuthMode: "api_key", APIKey: "sk-test"},
+		},
+	}
+
+	registry, err := NewProviderRegistry(cfg, time.Minute)
+	require.NoError(t, err)
+
+	calc := registry.Calculator()
+	entry, ok := calc.Lookup("my-anthropic", "claude-sonnet-4-6")
+	require.True(t, ok, "anthropic provider with empty base_url should get default pricing")
+	require.Equal(t, 3.00, entry.InputPerMillion)
+	require.Equal(t, 15.00, entry.OutputPerMillion)
+}
+
+func TestNewProviderRegistryAnthropicCustomBaseURLNoDefaults(t *testing.T) {
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{
+			{Name: "custom-anthropic", Type: "anthropic", BaseURL: "https://custom-llm.example.com", AuthMode: "api_key", APIKey: "sk-test"},
+		},
+	}
+
+	registry, err := NewProviderRegistry(cfg, time.Minute)
+	require.NoError(t, err)
+
+	calc := registry.Calculator()
+	_, ok := calc.Lookup("custom-anthropic", "claude-sonnet-4-6")
+	require.False(t, ok, "non-official anthropic URL should not get default pricing")
 }
 
 func TestNewProviderRegistryDropsAmbiguousLegacyAlias(t *testing.T) {

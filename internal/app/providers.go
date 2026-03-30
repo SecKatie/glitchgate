@@ -14,10 +14,6 @@ import (
 	openaiprov "github.com/seckatie/glitchgate/internal/provider/openai"
 )
 
-const (
-	defaultOpenAIBaseURL = "https://api.openai.com"
-)
-
 // ProviderRegistry compiles configured provider clients, pricing tables, and
 // legacy provider-name aliases into one runtime dependency.
 type ProviderRegistry struct {
@@ -41,7 +37,9 @@ func NewProviderRegistry(cfg *config.Config, requestTimeout time.Duration) (*Pro
 	legacyProviderNames := make(map[string]string, len(cfg.Providers))
 
 	for _, pc := range cfg.Providers {
-		client, err := buildProvider(pc, requestTimeout)
+		baseURL := effectiveBaseURL(pc)
+
+		client, err := buildProvider(pc, baseURL, requestTimeout)
 		if err != nil {
 			return nil, err
 		}
@@ -51,9 +49,10 @@ func NewProviderRegistry(cfg *config.Config, requestTimeout time.Duration) (*Pro
 		if pc.MonthlySubscriptionCost != nil {
 			providerMonthlySubscriptions[pc.Name] = *pc.MonthlySubscriptionCost
 		}
-		addLegacyProviderAlias(providerNames, legacyProviderNames, pc)
 
-		for model, entry := range defaultPricingForProvider(pc) {
+		addLegacyProviderAlias(providerNames, legacyProviderNames, pc, baseURL)
+
+		for model, entry := range defaultPricingForProvider(pc, baseURL) {
 			pricingMap[pc.Name+"/"+model] = entry
 		}
 	}
@@ -126,12 +125,12 @@ func (r *ProviderRegistry) ProviderMonthlySubscriptions() map[string]float64 {
 	return cloneFloatMap(r.providerMonthlySubscriptions)
 }
 
-func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (provider.Provider, error) {
+func buildProvider(pc config.ProviderConfig, baseURL string, requestTimeout time.Duration) (provider.Provider, error) {
 	switch pc.Type {
 	case "anthropic":
 		client, err := anthropic.NewClient(anthropic.ClientConfig{
 			Name:            pc.Name,
-			BaseURL:         pc.BaseURL,
+			BaseURL:         baseURL,
 			AuthMode:        pc.AuthMode,
 			APIKey:          pc.APIKey,
 			DefaultVersion:  pc.DefaultVersion,
@@ -153,14 +152,14 @@ func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (prov
 		client.SetTimeouts(requestTimeout)
 		return client, nil
 	case "openai":
-		client, err := openaiprov.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
+		client, err := openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeChatCompletions)
 		if err != nil {
 			return nil, fmt.Errorf("openai provider %q: %w", pc.Name, err)
 		}
 		client.SetTimeouts(requestTimeout)
 		return client, nil
 	case "openai_responses":
-		client, err := openaiprov.NewClient(pc.Name, effectiveBaseURL(pc), pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
+		client, err := openaiprov.NewClient(pc.Name, baseURL, pc.AuthMode, pc.APIKey, openaiprov.APITypeResponses)
 		if err != nil {
 			return nil, fmt.Errorf("openai_responses provider %q: %w", pc.Name, err)
 		}
@@ -185,9 +184,7 @@ func buildProvider(pc config.ProviderConfig, requestTimeout time.Duration) (prov
 	}
 }
 
-func defaultPricingForProvider(pc config.ProviderConfig) map[string]pricing.Entry {
-	baseURL := effectiveBaseURL(pc)
-
+func defaultPricingForProvider(pc config.ProviderConfig, baseURL string) map[string]pricing.Entry {
 	switch pc.Type {
 	case "github_copilot":
 		return pricing.CopilotDefaults
@@ -214,8 +211,8 @@ func defaultPricingForProvider(pc config.ProviderConfig) map[string]pricing.Entr
 	return nil
 }
 
-func addLegacyProviderAlias(providerNames, legacyProviderNames map[string]string, pc config.ProviderConfig) {
-	legacyName := pricing.ProviderKey(pc.Type, effectiveBaseURL(pc))
+func addLegacyProviderAlias(providerNames, legacyProviderNames map[string]string, pc config.ProviderConfig, baseURL string) {
+	legacyName := pricing.ProviderKey(pc.Type, baseURL)
 	if legacyName == "" || legacyName == pc.Name {
 		return
 	}
@@ -228,17 +225,20 @@ func addLegacyProviderAlias(providerNames, legacyProviderNames map[string]string
 }
 
 func effectiveBaseURL(pc config.ProviderConfig) string {
-	switch pc.Type {
-	case "github_copilot":
-		if pc.BaseURL == "" {
-			return copilot.DefaultAPIURL
-		}
-	case "openai", "openai_responses":
-		if pc.BaseURL == "" {
-			return defaultOpenAIBaseURL
-		}
+	if pc.BaseURL != "" {
+		return pc.BaseURL
 	}
-	return pc.BaseURL
+	switch pc.Type {
+	case "anthropic":
+		return anthropic.DefaultBaseURL
+	case "github_copilot":
+		return copilot.DefaultAPIURL
+	case "openai", "openai_responses":
+		return openaiprov.DefaultBaseURL
+	case "gemini":
+		return gemini.DefaultBaseURL
+	}
+	return ""
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

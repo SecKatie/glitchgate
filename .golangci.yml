@@ -6,6 +6,10 @@ linters:
     - gosec
     - errcheck
     - revive
+  settings:
+    gosec:
+      excludes:
+        - G117 # exported struct fields named APIKey in provider config structs
 
 formatters:
   enable:

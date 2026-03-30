@@ -25,7 +25,8 @@ import (
 )
 
 const (
-	defaultBaseURL       = "https://api.anthropic.com"
+	// DefaultBaseURL is the canonical Anthropic API base URL.
+	DefaultBaseURL       = "https://api.anthropic.com"
 	cloudPlatformScope   = "https://www.googleapis.com/auth/cloud-platform"
 	defaultVertexVersion = "vertex-2023-10-16"
 	defaultVertexRegion  = "us-central1"
@@ -63,7 +64,7 @@ type Client struct {
 func NewClient(cfg ClientConfig) (*Client, error) {
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = defaultBaseURL
+		baseURL = DefaultBaseURL
 	}
 	c := &Client{
 		name:           cfg.Name,
@@ -428,7 +429,7 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 		}
 		req.Header.Set("Anthropic-Version", version)
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) // #nosec G107 G704 -- URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("anthropic provider %q: listing models: %w", c.name, err)
 		}
@@ -487,7 +488,7 @@ func (c *Client) listModelsVertex(ctx context.Context) ([]provider.DiscoveredMod
 		}
 		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) // #nosec G107 G704 -- URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("anthropic provider %q: listing vertex models: %w", c.name, err)
 		}

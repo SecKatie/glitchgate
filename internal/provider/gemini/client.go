@@ -24,7 +24,10 @@ import (
 )
 
 const (
-	developerAPIBaseURL = "https://generativelanguage.googleapis.com"
+	// DefaultBaseURL is the canonical Gemini Developer API base URL.
+	// Exported for pricing key derivation; the client constructs endpoint
+	// URLs internally and does not accept a configurable base URL.
+	DefaultBaseURL      = "https://generativelanguage.googleapis.com"
 	cloudPlatformScope  = "https://www.googleapis.com/auth/cloud-platform"
 	defaultVertexRegion = "us-central1"
 )
@@ -214,7 +217,7 @@ func (c *Client) endpointURL(model string, streaming bool) string {
 		if streaming {
 			op = "streamGenerateContent"
 		}
-		u := developerAPIBaseURL + "/v1beta/models/" + model + ":" + op
+		u := DefaultBaseURL + "/v1beta/models/" + model + ":" + op
 		if streaming {
 			u += "?alt=sse"
 		}
@@ -272,7 +275,7 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 	pageToken := ""
 
 	for {
-		u := developerAPIBaseURL + "/v1beta/models?pageSize=1000&key=" + c.apiKey
+		u := DefaultBaseURL + "/v1beta/models?pageSize=1000&key=" + c.apiKey
 		if pageToken != "" {
 			u += "&pageToken=" + pageToken
 		}
@@ -282,7 +285,7 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 			return nil, fmt.Errorf("gemini provider %q: creating list request: %w", c.name, err)
 		}
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) // #nosec G107 G704 -- URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("gemini provider %q: listing models: %w", c.name, err)
 		}
@@ -345,7 +348,7 @@ func (c *Client) listModelsVertex(ctx context.Context) ([]provider.DiscoveredMod
 		}
 		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
-		resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+		resp, err := c.httpClient.Do(req) // #nosec G107 G704 -- URL from operator-controlled provider config
 		if err != nil {
 			return nil, fmt.Errorf("gemini provider %q: listing vertex models: %w", c.name, err)
 		}

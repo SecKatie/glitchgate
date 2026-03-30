@@ -17,6 +17,9 @@ import (
 	"github.com/seckatie/glitchgate/internal/provider"
 )
 
+// DefaultBaseURL is the canonical OpenAI API base URL.
+const DefaultBaseURL = "https://api.openai.com"
+
 // Client implements the provider.Provider interface for OpenAI-compatible APIs.
 type Client struct {
 	name           string
@@ -269,7 +272,7 @@ func (c *Client) ListModels(ctx context.Context) ([]provider.DiscoveredModel, er
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
-	resp, err := c.httpClient.Do(req) // #nosec G107 -- URL from operator-controlled provider config
+	resp, err := c.httpClient.Do(req) // #nosec G107 G704 -- URL from operator-controlled provider config
 	if err != nil {
 		return nil, fmt.Errorf("openai provider %q: listing models: %w", c.name, err)
 	}

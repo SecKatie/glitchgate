@@ -100,7 +100,7 @@ func RelaySSEStream(ctx context.Context, w http.ResponseWriter, upstream io.Read
 		}
 
 		// Write the line to the client.
-		if _, err := w.Write([]byte(line)); err != nil {
+		if _, err := w.Write([]byte(line)); err != nil { //nolint:gosec // G705: SSE stream write, not HTML context
 			result.Body = captured.Bytes()
 			return &result, err
 		}
