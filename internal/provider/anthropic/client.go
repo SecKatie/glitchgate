@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -123,6 +124,24 @@ func newTestClient(cfg ClientConfig, ts oauth2.TokenSource, httpClient *http.Cli
 	}
 }
 
+// endpointURL builds a full URL by appending suffix (e.g. "/messages") to the
+// base URL, inserting "/v1" only when the base path doesn't already end with it.
+func (c *Client) endpointURL(suffix string) string {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return c.baseURL + "/v1" + suffix
+	}
+
+	basePath := strings.TrimSuffix(u.Path, "/")
+	if basePath == "" {
+		u.Path = "/v1" + suffix
+	} else {
+		u.Path = basePath + suffix
+	}
+
+	return u.String()
+}
+
 // SetTimeouts overrides the default upstream request deadline.
 func (c *Client) SetTimeouts(requestTimeout time.Duration) {
 	c.requestTimeout = requestTimeout
@@ -160,7 +179,7 @@ func (c *Client) SendRequest(ctx context.Context, req *provider.Request) (*provi
 
 // sendDirect handles api_key and forward auth modes against the Anthropic API.
 func (c *Client) sendDirect(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	url := c.baseURL + "/v1/messages"
+	url := c.endpointURL("/messages")
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(req.Body)))
 	if err != nil {
@@ -393,7 +412,7 @@ func (c *Client) listModelsDirect(ctx context.Context) ([]provider.DiscoveredMod
 	afterID := ""
 
 	for {
-		u := c.baseURL + "/v1/models?limit=1000"
+		u := c.endpointURL("/models") + "?limit=1000"
 		if afterID != "" {
 			u += "&after_id=" + afterID
 		}

@@ -211,7 +211,7 @@ func TestClient(t *testing.T) {
 				}))
 				defer srv.Close()
 
-				c, err := NewClient("oai", srv.URL+"/backend-api/codex", "api_key", "sk-custom", APITypeResponses)
+				c, err := NewClient("oai", srv.URL+"/backend-api/codex/v1", "api_key", "sk-custom", APITypeResponses)
 				require.NoError(t, err)
 				req := &provider.Request{
 					Body:    []byte(`{"model":"gpt-4"}`),

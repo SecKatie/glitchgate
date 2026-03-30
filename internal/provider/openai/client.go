@@ -158,13 +158,10 @@ func (c *Client) endpointURL(suffix string) string {
 	}
 
 	basePath := strings.TrimSuffix(u.Path, "/")
-	switch {
-	case basePath == "":
+	if basePath == "" {
 		u.Path = "/v1" + suffix
-	case strings.HasSuffix(basePath, "/v1"):
+	} else {
 		u.Path = basePath + suffix
-	default:
-		u.Path = basePath + "/v1" + suffix
 	}
 
 	return u.String()
@@ -260,7 +257,7 @@ func (c *Client) extractTokens(body []byte, resp *provider.Response) {
 // ListModels queries the OpenAI-compatible /v1/models endpoint and returns
 // all available models. The OpenAI API does not paginate this endpoint.
 func (c *Client) ListModels(ctx context.Context) ([]provider.DiscoveredModel, error) {
-	u := c.baseURL + "/v1/models"
+	u := c.endpointURL("/models")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
